@@ -185,3 +185,10 @@ public struct OnboardingView: View {
         ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
     }
 }
+
+#if DEBUG
+#Preview("Onboarding") {
+    OnboardingView()
+        .environment(ModelDownloader())
+}
+#endif

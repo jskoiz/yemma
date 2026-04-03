@@ -49,9 +49,7 @@ final class LLMService: @unchecked Sendable {
         llama_backend_init()
     }()
 
-    init() {
-        _ = Self.backendInitialized
-    }
+    init() {}
 
     deinit {
         stopGeneration()
@@ -59,7 +57,7 @@ final class LLMService: @unchecked Sendable {
     }
 
     func loadModel(from path: String) throws {
-        _ = Self.backendInitialized
+        Self.ensureBackendInitialized()
 
         stopGeneration()
 
@@ -131,6 +129,8 @@ final class LLMService: @unchecked Sendable {
 
     func generate(prompt: String, history: [(role: String, content: String)]) -> AsyncStream<String> {
         stopGeneration()
+
+        Self.ensureBackendInitialized()
 
 #if targetEnvironment(simulator)
         return makeSimulatorStream(prompt: prompt, history: history)
@@ -249,6 +249,10 @@ final class LLMService: @unchecked Sendable {
 }
 
 private extension LLMService {
+    static func ensureBackendInitialized() {
+        _ = backendInitialized
+    }
+
     final class CompletionGroupBox: @unchecked Sendable {
         let group = DispatchGroup()
 
