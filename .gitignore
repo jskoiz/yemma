@@ -9,7 +9,8 @@ Package.resolved
 *.xcuserstate
 xcuserdata/
 *.xcworkspace/xcuserdata/
-*.xcodeproj/project.xcworkspace/
+*.xcodeproj/project.xcworkspace/xcuserdata/
+!Yemma4.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
 *.playground/
 *.swiftmodule
 *.swiftdoc

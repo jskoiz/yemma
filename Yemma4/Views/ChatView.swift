@@ -1,5 +1,6 @@
 import Observation
 import SwiftUI
+import ExyteChat
 
 #if canImport(UIKit)
 import UIKit
@@ -19,14 +20,15 @@ public struct ChatView: View {
     @State private var showConversations = false
     @FocusState private var isComposerFocused: Bool
 
-    private let modelPageURL = URL(string: "https://huggingface.co/bartowski/google_gemma-4-E4B-it-GGUF")!
     private let quickPrompts: [(title: String, subtitle: String, prompt: String)] = [
         ("Design", "a workout routine", "Design a simple workout routine I can do at home."),
         ("Begin", "meditating", "Begin a meditation habit with a simple 7-day plan."),
         ("Explain", "a complex idea", "Explain a complex idea in a simple way.")
     ]
 
-    public init() {}
+    public init(initialMessages: [ChatMessage] = []) {
+        _messages = State(initialValue: initialMessages)
+    }
 
     public var body: some View {
         NavigationStack {
@@ -49,6 +51,14 @@ public struct ChatView: View {
                 }
             }
             .toolbar(.hidden, for: .navigationBar)
+            .toolbar {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") {
+                        isComposerFocused = false
+                    }
+                }
+            }
             .sheet(isPresented: $showSettings) {
                 SettingsView(onClearConversation: clearConversation)
                     .presentationDetents([.large])
@@ -111,20 +121,6 @@ public struct ChatView: View {
                     .overlay(Capsule().stroke(Color.white.opacity(0.82), lineWidth: 1))
             )
 
-            Link(destination: modelPageURL) {
-                HStack(spacing: 8) {
-                    Text("Gemma 4 E4B")
-                        .font(.system(size: 18, weight: .semibold, design: .rounded))
-                        .foregroundStyle(AppTheme.textPrimary)
-                        .lineLimit(1)
-
-                    Image(systemName: "arrow.up.right")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(AppTheme.textSecondary)
-                }
-            }
-            .buttonStyle(.plain)
-
             Spacer(minLength: 0)
 
             CircleIconButton(systemName: "square.and.pencil", action: clearConversation)
@@ -150,6 +146,11 @@ public struct ChatView: View {
                 .padding(.horizontal, 16)
                 .padding(.bottom, 18)
                 .frame(maxWidth: .infinity, minHeight: 0)
+            }
+            .scrollDismissesKeyboard(.interactively)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                isComposerFocused = false
             }
             .defaultScrollAnchor(.bottom)
             .onChange(of: messages.count) { _, _ in
@@ -546,6 +547,49 @@ public struct ChatView: View {
         llmService.stopGeneration()
     }
 }
+
+#if DEBUG
+private extension ChatMessage {
+    static func previewMessage(user: ExyteChat.User, text: String) -> ChatMessage {
+        ChatMessage(
+            id: UUID().uuidString,
+            user: user,
+            status: .sent,
+            createdAt: .now,
+            text: text
+        )
+    }
+}
+
+private extension LLMService {
+    static func previewLoaded() -> LLMService {
+        let service = LLMService()
+        service.isModelLoaded = true
+        return service
+    }
+}
+
+#Preview("Chat") {
+    ChatView(
+        initialMessages: [
+            .previewMessage(
+                user: .user,
+                text: "Plan me a focused three-day workout split for strength and cardio."
+            ),
+            .previewMessage(
+                user: .yemma,
+                text: "Here is a simple split: Day 1 push and intervals, Day 2 lower body and incline walking, Day 3 pull and steady-state cardio. Keep each session around 45 minutes."
+            ),
+            .previewMessage(
+                user: .user,
+                text: "Keep it beginner friendly and make the gym version optional."
+            )
+        ]
+    )
+    .environment(LLMService.previewLoaded())
+    .environment(ModelDownloader())
+}
+#endif
 
 private struct ConversationsView: View {
     @Environment(\.dismiss) private var dismiss

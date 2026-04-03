@@ -17,7 +17,6 @@ public final class ModelDownloader {
 
     public init(fileManager: FileManager = .default) {
         self.fileManager = fileManager
-        validateDownloadedModel()
     }
 
     public func validateDownloadedModel() {
