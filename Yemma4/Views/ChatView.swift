@@ -137,15 +137,11 @@ public struct ChatView: View {
     }
 
     private var avatarCircle: some View {
-        Circle()
-            .fill(
-                LinearGradient(
-                    colors: [Color(red: 0.26, green: 0.71, blue: 0.90), Color(red: 0.48, green: 0.35, blue: 0.98)],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            )
+        Image("BrandMark")
+            .resizable()
+            .scaledToFit()
             .frame(width: 28, height: 28)
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
     private var avatarSpacer: some View {

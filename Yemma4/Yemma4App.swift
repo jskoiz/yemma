@@ -4,7 +4,8 @@ public enum Yemma4AppConfiguration {
     public static let bundleIdentifier = "com.avmillabs.yemma4"
 }
 
-public struct Yemma4App: View {
+@main
+public struct Yemma4App: App {
     @State private var modelDownloader = ModelDownloader()
     @State private var llmService = LLMService()
 
@@ -12,9 +13,11 @@ public struct Yemma4App: View {
 
     public init() {}
 
-    public var body: some View {
-        ContentView()
-            .environment(modelDownloader)
-            .environment(llmService)
+    public var body: some Scene {
+        WindowGroup {
+            ContentView()
+                .environment(modelDownloader)
+                .environment(llmService)
+        }
     }
 }

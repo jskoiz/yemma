@@ -38,21 +38,12 @@ public struct OnboardingView: View {
 
     private var header: some View {
         VStack(spacing: 14) {
-            ZStack {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [Color(red: 0.29, green: 0.53, blue: 0.98), Color(red: 0.16, green: 0.82, blue: 0.73)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 78, height: 78)
-
-                Image(systemName: "sparkles")
-                    .font(.system(size: 30, weight: .semibold))
-                    .foregroundStyle(.white)
-            }
+            Image("BrandMark")
+                .resizable()
+                .interpolation(.high)
+                .scaledToFit()
+                .frame(width: 104, height: 104)
+                .shadow(color: Color(red: 0.22, green: 0.47, blue: 0.96).opacity(0.28), radius: 18, x: 0, y: 8)
 
             Text("Yemma 4")
                 .font(.system(size: 36, weight: .bold, design: .rounded))
@@ -92,7 +83,7 @@ public struct OnboardingView: View {
 
             if modelDownloader.isDownloading {
                 ProgressView(value: modelDownloader.downloadProgress)
-                    .tint(.cyan)
+                    .tint(Color(red: 0.24, green: 0.52, blue: 0.96))
 
                 HStack {
                     Text("Downloading...")
@@ -141,7 +132,7 @@ public struct OnboardingView: View {
                     LinearGradient(
                         colors: modelDownloader.isDownloading
                             ? [Color.white.opacity(0.18), Color.white.opacity(0.12)]
-                            : [Color(red: 0.14, green: 0.72, blue: 0.88), Color(red: 0.20, green: 0.46, blue: 0.98)],
+                            : [Color(red: 0.33, green: 0.70, blue: 1.00), Color(red: 0.20, green: 0.46, blue: 0.98)],
                         startPoint: .leading,
                         endPoint: .trailing
                     )
