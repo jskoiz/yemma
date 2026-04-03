@@ -34,6 +34,28 @@
   <style>
     *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
+    /* Dashed grid background — fades from bottom-right */
+    .grid-bg {
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+      pointer-events: none;
+      background-image:
+        linear-gradient(to right, #e7e5e4 1px, transparent 1px),
+        linear-gradient(to bottom, #e7e5e4 1px, transparent 1px);
+      background-size: 20px 20px;
+      -webkit-mask-image:
+        repeating-linear-gradient(to right, black 0px, black 3px, transparent 3px, transparent 8px),
+        repeating-linear-gradient(to bottom, black 0px, black 3px, transparent 3px, transparent 8px),
+        radial-gradient(ellipse 80% 80% at 100% 100%, #000 50%, transparent 90%);
+      -webkit-mask-composite: source-in;
+      mask-image:
+        repeating-linear-gradient(to right, black 0px, black 3px, transparent 3px, transparent 8px),
+        repeating-linear-gradient(to bottom, black 0px, black 3px, transparent 3px, transparent 8px),
+        radial-gradient(ellipse 80% 80% at 100% 100%, #000 50%, transparent 90%);
+      mask-composite: intersect;
+    }
+
     :root {
       --white: #FFFFFF;
       --bg: #FAFAFA;
@@ -60,6 +82,9 @@
     }
 
     ::selection { background: var(--accent); color: white; }
+
+    /* Elevate all content above the grid background */
+    nav, section, footer, .strip { position: relative; z-index: 1; }
 
     .container { max-width: 1000px; margin: 0 auto; padding: 0 24px; }
 
@@ -191,19 +216,19 @@
     .btn {
       display: inline-flex; align-items: center; gap: 8px;
       font-size: 14px; font-weight: 500; text-decoration: none;
-      transition: all 0.2s ease;
+      transition: all 0.35s cubic-bezier(0.22, 1, 0.36, 1);
     }
     .btn-dark {
       background: var(--ink); color: var(--white);
       padding: 12px 24px; border-radius: 8px;
     }
-    .btn-dark:hover { background: #222; transform: translateY(-1px); box-shadow: 0 4px 16px rgba(0,0,0,0.12); }
+    .btn-dark:hover { background: #222; transform: translateY(-1px); box-shadow: 0 8px 24px rgba(0,0,0,0.14); }
     .btn-dark svg { width: 16px; height: 16px; }
 
     .btn-ghost { color: var(--ink-2); }
     .btn-ghost:hover { color: var(--ink); }
     .btn-ghost svg { width: 16px; height: 16px; }
-    .btn-ghost .arrow { transition: transform 0.2s; }
+    .btn-ghost .arrow { transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1); }
     .btn-ghost:hover .arrow { transform: translateX(3px); }
 
     /* ── Hero visual — iPhone 15 Pro mockup ── */
@@ -529,14 +554,16 @@
     }
 
     .bento-card {
+      background: var(--bg);
       border: 1px solid var(--rule);
       border-radius: 12px;
       padding: 28px;
-      transition: box-shadow 0.25s ease;
+      transition: box-shadow 0.35s cubic-bezier(0.22, 1, 0.36, 1), transform 0.35s cubic-bezier(0.22, 1, 0.36, 1);
     }
 
     .bento-card:hover {
-      box-shadow: 0 4px 20px rgba(0,0,0,0.04);
+      box-shadow: 0 8px 30px rgba(0,0,0,0.06);
+      transform: translateY(-2px);
     }
 
     .bento-card h3 {
@@ -746,6 +773,7 @@
   </style>
 </head>
 <body>
+  <div class="grid-bg"></div>
 
   <nav id="nav">
     <div class="container">
