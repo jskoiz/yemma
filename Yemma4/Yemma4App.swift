@@ -1,7 +1,7 @@
 import SwiftUI
 
 public enum Yemma4AppConfiguration {
-    public static let bundleIdentifier = "com.jskoiz.yemma4"
+    public static let bundleIdentifier = "com.avmillabs.yemma4"
 }
 
 public struct Yemma4App: View {
