@@ -228,6 +228,8 @@ private final class ModelDownloadCoordinator: NSObject, URLSessionDownloadDelega
             finish()
             return
         }
+
+        // Download tasks deliver the temporary file URL via didFinishDownloadingTo.
     }
 
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
