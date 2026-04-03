@@ -1,12 +1,13 @@
 import ExyteChat
+import Observation
 import SwiftUI
 
 public struct ChatView: View {
-    @State private var messages: [ChatMessage] = []
-    @State private var isGenerating = false
-    @State private var generationTask: Task<Void, Never>?
+    @Environment(LLMService.self) private var llmService
 
-    private let mockResponse = "Hello! I'm Yemma 4, running entirely on your device."
+    @State private var messages: [ChatMessage] = []
+    @State private var generationTask: Task<Void, Never>?
+    @State private var generationError: String?
 
     public init() {}
 
@@ -28,6 +29,20 @@ public struct ChatView: View {
             didSendMessage: handleDraft
         )
         .background(backgroundColor.ignoresSafeArea())
+        .onDisappear(perform: stopGeneration)
+        .alert(
+            "Generation Failed",
+            isPresented: Binding(
+                get: { generationError != nil },
+                set: { if !$0 { generationError = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) {
+                generationError = nil
+            }
+        } message: {
+            Text(generationError ?? "The model could not generate a response.")
+        }
     }
 
     private var backgroundColor: Color {
@@ -55,7 +70,7 @@ public struct ChatView: View {
             }
 
             VStack(alignment: message.user.isCurrentUser ? .trailing : .leading, spacing: 6) {
-                Text(message.text.isEmpty && !message.user.isCurrentUser && isGenerating ? " " : message.text)
+                Text(displayText(for: message))
                     .font(.system(size: 15, weight: .regular))
                     .foregroundStyle(.white)
                     .multilineTextAlignment(message.user.isCurrentUser ? .trailing : .leading)
@@ -101,12 +116,20 @@ public struct ChatView: View {
             : Color.white.opacity(0.08)
     }
 
+    private func displayText(for message: ChatMessage) -> String {
+        if !message.user.isCurrentUser, message.text.isEmpty, llmService.isGenerating {
+            return " "
+        }
+
+        return message.text
+    }
+
     private func composerView(
         textBinding: Binding<String>,
         sendAction: @escaping (ExyteChat.InputViewAction) -> Void
     ) -> some View {
         VStack(spacing: 10) {
-            if isGenerating {
+            if llmService.isGenerating {
                 typingIndicator
             }
 
@@ -123,7 +146,7 @@ public struct ChatView: View {
                             .strokeBorder(Color.white.opacity(0.07), lineWidth: 1)
                     )
 
-                if isGenerating {
+                if llmService.isGenerating {
                     Button {
                         stopGeneration()
                     } label: {
@@ -138,16 +161,18 @@ public struct ChatView: View {
                     .buttonStyle(.plain)
                 } else {
                     Button {
+                        guard llmService.isModelLoaded else { return }
                         sendAction(.send)
                     } label: {
-                        Image(systemName: "arrow.up")
+                        Image(systemName: llmService.isModelLoaded ? "arrow.up" : "hourglass")
                             .font(.system(size: 15, weight: .bold))
                             .foregroundStyle(.white)
                             .frame(width: 42, height: 42)
-                            .background(Color(red: 0.18, green: 0.42, blue: 0.96))
+                            .background(llmService.isModelLoaded ? Color(red: 0.18, green: 0.42, blue: 0.96) : Color.white.opacity(0.14))
                             .clipShape(Circle())
                     }
                     .buttonStyle(.plain)
+                    .disabled(!llmService.isModelLoaded)
                 }
             }
         }
@@ -176,9 +201,14 @@ public struct ChatView: View {
     private func handleDraft(_ draft: ExyteChat.DraftMessage) {
         let trimmedText = draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedText.isEmpty else { return }
+        guard llmService.isModelLoaded else {
+            generationError = "The model is not loaded yet."
+            return
+        }
 
         stopGeneration()
 
+        let history = conversationHistory(from: messages)
         let userMessage = ChatMessage(
             id: UUID().uuidString,
             user: .user,
@@ -199,35 +229,46 @@ public struct ChatView: View {
             )
         )
 
-        isGenerating = true
+        generationError = nil
         generationTask = Task {
-            await streamMockReply(into: assistantID)
+            await streamReply(prompt: trimmedText, history: history, assistantID: assistantID)
         }
     }
 
-    private func streamMockReply(into messageID: String) async {
-        var currentText = ""
+    private func conversationHistory(from messages: [ChatMessage]) -> [(role: String, content: String)] {
+        messages
+            .filter { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .map {
+                (
+                    role: $0.user.isCurrentUser ? "user" : "model",
+                    content: $0.text
+                )
+            }
+    }
+
+    private func streamReply(
+        prompt: String,
+        history: [(role: String, content: String)],
+        assistantID: String
+    ) async {
+        var assistantText = ""
+
         defer {
             Task { @MainActor in
-                self.isGenerating = false
                 self.generationTask = nil
             }
         }
 
-        for character in mockResponse {
-            if Task.isCancelled {
-                return
-            }
-
-            currentText.append(character)
+        for await token in llmService.generate(prompt: prompt, history: history) {
+            assistantText.append(token)
             await MainActor.run {
-                updateMessageText(id: messageID, text: currentText)
+                updateMessageText(id: assistantID, text: assistantText)
             }
+        }
 
-            do {
-                try await Task.sleep(nanoseconds: 30_000_000)
-            } catch {
-                return
+        if let lastError = llmService.lastError, assistantText.isEmpty {
+            await MainActor.run {
+                self.generationError = lastError
             }
         }
     }
@@ -241,6 +282,6 @@ public struct ChatView: View {
     private func stopGeneration() {
         generationTask?.cancel()
         generationTask = nil
-        isGenerating = false
+        llmService.stopGeneration()
     }
 }

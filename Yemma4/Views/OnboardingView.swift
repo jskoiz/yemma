@@ -2,14 +2,12 @@ import Observation
 import SwiftUI
 
 public struct OnboardingView: View {
-    @Bindable private var modelDownloader: ModelDownloader
+    @Environment(ModelDownloader.self) private var modelDownloader
     @State private var isStartingDownload = false
 
     private let estimatedModelBytes: Int64 = 2_000_000_000
 
-    public init(modelDownloader: ModelDownloader) {
-        self.modelDownloader = modelDownloader
-    }
+    public init() {}
 
     public var body: some View {
         ScrollView {
