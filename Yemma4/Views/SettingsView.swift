@@ -1,6 +1,7 @@
 import SwiftUI
 
 public struct SettingsView: View {
+    @Environment(\.dismiss) private var dismiss
     @Environment(ModelDownloader.self) private var modelDownloader
     @Environment(LLMService.self) private var llmService
 
@@ -14,88 +15,21 @@ public struct SettingsView: View {
     }
 
     public var body: some View {
-        List {
-            Section(content: {
-                LabeledContent("Name") {
-                    Text("Gemma 4 E4B Q4_K_M")
-                }
-                LabeledContent("Stored") {
-                    Text(modelSizeText)
-                }
+        ZStack {
+            AppBackground()
 
-                Button(role: .destructive) {
-                    showDeleteModelConfirmation = true
-                } label: {
-                    Label("Delete Model", systemImage: "trash")
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 24) {
+                    header
+                    appSection
+                    aboutSection
+                    moreSection
                 }
-            }, header: {
-                Text("Model")
-            }, footer: {
-                Text("Removing the model frees storage and returns you to the download screen.")
-            })
-
-            Section(content: {
-                Button(role: .destructive) {
-                    showClearConversationConfirmation = true
-                } label: {
-                    Label("Clear Conversation", systemImage: "trash.circle")
-                }
-            }, header: {
-                Text("Chat")
-            }, footer: {
-                Text("This clears the current chat thread on this device.")
-            })
-
-            Section(content: {
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack {
-                        Text("Temperature")
-                        Spacer()
-                        Text(temperatureText)
-                            .foregroundStyle(.secondary)
-                            .monospacedDigit()
-                    }
-
-                    Slider(
-                        value: Binding(
-                            get: { llmService.temperature },
-                            set: { llmService.temperature = $0 }
-                        ),
-                        in: 0.1...2.0,
-                        step: 0.1
-                    )
-
-                    Text("Lower values are more focused. Higher values are more creative.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.vertical, 4)
-            }, header: {
-                Text("Advanced")
-            })
-
-            Section(content: {
-                LabeledContent("Version") {
-                    Text(appVersionText)
-                }
-
-                Link(destination: URL(string: "https://huggingface.co/bartowski/google_gemma-4-E4B-it-GGUF")!) {
-                    Label("Powered by Gemma 4 (Apache 2.0)", systemImage: "link")
-                }
-
-                Link(destination: URL(string: "https://github.com/ggml-org/llama.cpp")!) {
-                    Label("Built with llama.cpp (MIT)", systemImage: "link")
-                }
-
-                Link(destination: URL(string: "https://github.com/jskoiz/yemma-4")!) {
-                    Label("Project Repository", systemImage: "link")
-                }
-            }, header: {
-                Text("About")
-            })
+                .padding(.horizontal, 16)
+                .padding(.top, 20)
+                .padding(.bottom, 28)
+            }
         }
-        .navigationTitle("Settings")
-        .navigationBarTitleDisplayMode(.inline)
         .confirmationDialog(
             "Delete the downloaded model?",
             isPresented: $showDeleteModelConfirmation,
@@ -103,6 +37,7 @@ public struct SettingsView: View {
         ) {
             Button("Delete Model", role: .destructive) {
                 modelDownloader.deleteModel()
+                dismiss()
             }
             Button("Cancel", role: .cancel) {}
         } message: {
@@ -115,11 +50,173 @@ public struct SettingsView: View {
         ) {
             Button("Clear Conversation", role: .destructive) {
                 onClearConversation()
+                dismiss()
             }
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("This removes the current local chat history.")
         }
+    }
+
+    private var header: some View {
+        HStack {
+            Spacer()
+            Text("Settings")
+                .font(.system(size: 24, weight: .semibold, design: .rounded))
+                .foregroundStyle(AppTheme.textPrimary)
+            Spacer()
+            CircleIconButton(systemName: "xmark", action: { dismiss() })
+        }
+        .padding(.horizontal, 4)
+    }
+
+    private var appSection: some View {
+        settingsSection("App") {
+            VStack(spacing: 0) {
+                infoRow(icon: "shippingbox", title: "Manage models", detail: modelSizeText)
+                separator
+                temperatureRow
+                separator
+                destructiveRow(icon: "trash", title: "Delete conversation history") {
+                    showClearConversationConfirmation = true
+                }
+            }
+        }
+    }
+
+    private var aboutSection: some View {
+        settingsSection("About") {
+            VStack(spacing: 0) {
+                linkRow(icon: "doc.text", title: "Term & Conditions", url: URL(string: "https://github.com/jskoiz/yemma-4/blob/main/LICENSE")!)
+                separator
+                linkRow(icon: "lock", title: "Privacy Policy", url: URL(string: "https://github.com/jskoiz/yemma-4")!)
+                separator
+                linkRow(icon: "books.vertical", title: "Licenses", url: URL(string: "https://github.com/ggml-org/llama.cpp")!)
+                separator
+                infoRow(icon: "info.circle", title: "Version", detail: appVersionText)
+            }
+        }
+    }
+
+    private var moreSection: some View {
+        settingsSection("More") {
+            VStack(spacing: 0) {
+                linkRow(icon: "square.and.arrow.up", title: "Share the app", url: URL(string: "https://github.com/jskoiz/yemma-4")!)
+                separator
+                linkRow(icon: "link", title: "Project repository", url: URL(string: "https://github.com/jskoiz/yemma-4")!)
+                separator
+                destructiveRow(icon: "externaldrive.badge.minus", title: "Delete downloaded model") {
+                    showDeleteModelConfirmation = true
+                }
+            }
+        }
+    }
+
+    private func settingsSection<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title)
+                .font(.system(size: 19, weight: .semibold, design: .rounded))
+                .foregroundStyle(AppTheme.textSecondary)
+                .padding(.horizontal, 12)
+
+            VStack(spacing: 0) {
+                content()
+            }
+            .padding(.vertical, 4)
+            .glassCard(cornerRadius: 26)
+        }
+    }
+
+    private func infoRow(icon: String, title: String, detail: String) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: icon)
+                .frame(width: 22)
+                .foregroundStyle(AppTheme.textPrimary)
+
+            Text(title)
+                .font(.system(size: 18, weight: .medium, design: .rounded))
+                .foregroundStyle(AppTheme.textPrimary)
+
+            Spacer()
+
+            Text(detail)
+                .font(.system(size: 16, weight: .medium, design: .rounded))
+                .foregroundStyle(AppTheme.textSecondary)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 16)
+    }
+
+    private var temperatureRow: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Label("Creativity", systemImage: "slider.horizontal.3")
+                    .font(.system(size: 18, weight: .medium, design: .rounded))
+                    .foregroundStyle(AppTheme.textPrimary)
+
+                Spacer()
+
+                Text(temperatureText)
+                    .font(.system(size: 16, weight: .semibold, design: .rounded))
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+
+            Slider(
+                value: Binding(
+                    get: { llmService.temperature },
+                    set: { llmService.temperature = $0 }
+                ),
+                in: 0.1...2.0,
+                step: 0.1
+            )
+            .tint(.black)
+
+            Text("Lower values stay focused. Higher values improvise more.")
+                .font(.system(size: 14, weight: .medium, design: .rounded))
+                .foregroundStyle(AppTheme.textSecondary)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 16)
+    }
+
+    private func destructiveRow(icon: String, title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 14) {
+                Image(systemName: icon)
+                    .frame(width: 22)
+                Text(title)
+                    .font(.system(size: 18, weight: .medium, design: .rounded))
+                Spacer()
+            }
+            .foregroundStyle(Color.red.opacity(0.9))
+            .padding(.horizontal, 18)
+            .padding(.vertical, 16)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func linkRow(icon: String, title: String, url: URL) -> some View {
+        Link(destination: url) {
+            HStack(spacing: 14) {
+                Image(systemName: icon)
+                    .frame(width: 22)
+                    .foregroundStyle(AppTheme.textPrimary)
+                Text(title)
+                    .font(.system(size: 18, weight: .medium, design: .rounded))
+                    .foregroundStyle(AppTheme.textPrimary)
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 16)
+        }
+    }
+
+    private var separator: some View {
+        Divider()
+            .padding(.leading, 52)
     }
 
     private var modelSizeText: String {

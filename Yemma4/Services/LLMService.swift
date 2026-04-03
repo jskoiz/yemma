@@ -316,6 +316,8 @@ private extension LLMService {
         }
 
         do {
+            Self.resetContextMemory(job.context)
+
             let sampler = try Self.makeSampler(temperature: job.temperature)
             defer { llama_sampler_free(sampler) }
 
@@ -420,6 +422,11 @@ private extension LLMService {
 
         pieces.append("<start_of_turn>user\n\(prompt)<end_of_turn>\n<start_of_turn>model\n")
         return pieces.joined()
+    }
+
+    static func resetContextMemory(_ context: OpaquePointer) {
+        let memory = llama_get_memory(context)
+        llama_memory_clear(memory, true)
     }
 
     static func normalizedRole(_ role: String) -> String {
