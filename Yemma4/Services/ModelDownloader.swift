@@ -19,34 +19,30 @@ public final class ModelDownloader {
         self.fileManager = fileManager
     }
 
-    public func validateDownloadedModel() {
-        let url = modelFileURL
+    public func validateDownloadedModel() async {
+        let fileManager = self.fileManager
+        let modelFileURL = self.modelFileURL
+        let resumeDataURL = self.resumeDataURL
 
-        guard fileManager.fileExists(atPath: url.path) else {
-            clearInvalidLocalState()
-            return
-        }
+        let result = await Task.detached(priority: .utility) {
+            ModelDownloaderIO.validateLocalModel(
+                fileManager: fileManager,
+                modelFileURL: modelFileURL,
+                resumeDataURL: resumeDataURL
+            )
+        }.value
 
-        guard
-            let attributes = try? fileManager.attributesOfItem(atPath: url.path),
-            let size = attributes[.size] as? NSNumber,
-            size.int64Value > 0
-        else {
-            clearInvalidLocalState()
-            return
-        }
-
-        isDownloaded = true
-        modelPath = url.path
+        isDownloaded = result.isDownloaded
+        modelPath = result.modelPath
         if !isDownloading {
-            downloadProgress = max(downloadProgress, 1)
+            downloadProgress = result.isDownloaded ? max(downloadProgress, 1) : 0
         }
     }
 
     public func downloadModel() async {
         guard !isDownloading else { return }
 
-        validateDownloadedModel()
+        await validateDownloadedModel()
         error = nil
 
         if isDownloaded, let modelPath {
@@ -60,8 +56,13 @@ public final class ModelDownloader {
         defer { isDownloading = false }
 
         do {
+            let fileManager = self.fileManager
             let destinationURL = modelFileURL
-            let resumeData = loadResumeDataIfAvailable()
+            let resumeDataURL = self.resumeDataURL
+            let resumeData = await Task.detached(priority: .utility) {
+                ModelDownloaderIO.loadResumeDataIfAvailable(fileManager: fileManager, resumeDataURL: resumeDataURL)
+            }.value
+
             let downloadResult = try await ModelDownloadCoordinator(
                 downloadURL: modelDownloadURL,
                 resumeData: resumeData,
@@ -72,8 +73,14 @@ public final class ModelDownloader {
                 }
             ).download()
 
-            try persistDownloadedFile(from: downloadResult.stagedFileURL, to: destinationURL)
-            clearResumeData()
+            try await Task.detached(priority: .utility) {
+                try ModelDownloaderIO.persistDownloadedFile(
+                    fileManager: fileManager,
+                    from: downloadResult.stagedFileURL,
+                    to: destinationURL
+                )
+                ModelDownloaderIO.clearResumeData(fileManager: fileManager, resumeDataURL: resumeDataURL)
+            }.value
 
             downloadProgress = 1
             isDownloaded = true
@@ -81,10 +88,13 @@ public final class ModelDownloader {
             error = nil
         } catch {
             if let resumeData = (error as NSError).userInfo[NSURLSessionDownloadTaskResumeData] as? Data {
-                saveResumeData(resumeData)
+                let resumeDataURL = self.resumeDataURL
+                await Task.detached(priority: .utility) {
+                    try? resumeData.write(to: resumeDataURL, options: [.atomic])
+                }.value
             }
             self.error = Self.describe(error)
-            validateDownloadedModel()
+            await validateDownloadedModel()
         }
     }
 
@@ -108,7 +118,9 @@ public final class ModelDownloader {
             error = nil
         }
 
-        validateDownloadedModel()
+        Task {
+            await validateDownloadedModel()
+        }
     }
 
     private var documentsDirectory: URL {
@@ -125,51 +137,6 @@ public final class ModelDownloader {
 
     private var resumeDataURL: URL {
         cachesDirectory.appendingPathComponent(resumeDataFileName)
-    }
-
-    private func loadResumeDataIfAvailable() -> Data? {
-        guard fileManager.fileExists(atPath: resumeDataURL.path) else {
-            return nil
-        }
-
-        return try? Data(contentsOf: resumeDataURL)
-    }
-
-    private func saveResumeData(_ data: Data) {
-        do {
-            try data.write(to: resumeDataURL, options: [.atomic])
-        } catch {
-            self.error = Self.describe(error)
-        }
-    }
-
-    private func clearResumeData() {
-        guard fileManager.fileExists(atPath: resumeDataURL.path) else { return }
-        try? fileManager.removeItem(at: resumeDataURL)
-    }
-
-    private func clearInvalidLocalState() {
-        isDownloaded = false
-        modelPath = nil
-        if !isDownloading {
-            downloadProgress = 0
-        }
-
-        if fileManager.fileExists(atPath: modelFileURL.path) {
-            try? fileManager.removeItem(at: modelFileURL)
-        }
-
-        if fileManager.fileExists(atPath: resumeDataURL.path) {
-            try? fileManager.removeItem(at: resumeDataURL)
-        }
-    }
-
-    private func persistDownloadedFile(from tempURL: URL, to destinationURL: URL) throws {
-        if fileManager.fileExists(atPath: destinationURL.path) {
-            try fileManager.removeItem(at: destinationURL)
-        }
-
-        try fileManager.moveItem(at: tempURL, to: destinationURL)
     }
 
     private static func describe(_ error: Error) -> String {
@@ -196,6 +163,66 @@ public final class ModelDownloader {
     }
 }
 
+private struct ValidationResult: Sendable {
+    let isDownloaded: Bool
+    let modelPath: String?
+}
+
+private enum ModelDownloaderIO {
+    static func loadResumeDataIfAvailable(fileManager: FileManager, resumeDataURL: URL) -> Data? {
+        guard fileManager.fileExists(atPath: resumeDataURL.path) else {
+            return nil
+        }
+
+        return try? Data(contentsOf: resumeDataURL)
+    }
+
+    static func clearResumeData(fileManager: FileManager, resumeDataURL: URL) {
+        guard fileManager.fileExists(atPath: resumeDataURL.path) else { return }
+        try? fileManager.removeItem(at: resumeDataURL)
+    }
+
+    static func validateLocalModel(
+        fileManager: FileManager,
+        modelFileURL: URL,
+        resumeDataURL: URL
+    ) -> ValidationResult {
+        guard fileManager.fileExists(atPath: modelFileURL.path) else {
+            clearInvalidLocalState(fileManager: fileManager, modelFileURL: modelFileURL, resumeDataURL: resumeDataURL)
+            return ValidationResult(isDownloaded: false, modelPath: nil)
+        }
+
+        guard
+            let attributes = try? fileManager.attributesOfItem(atPath: modelFileURL.path),
+            let size = attributes[.size] as? NSNumber,
+            size.int64Value > 0
+        else {
+            clearInvalidLocalState(fileManager: fileManager, modelFileURL: modelFileURL, resumeDataURL: resumeDataURL)
+            return ValidationResult(isDownloaded: false, modelPath: nil)
+        }
+
+        return ValidationResult(isDownloaded: true, modelPath: modelFileURL.path)
+    }
+
+    static func clearInvalidLocalState(fileManager: FileManager, modelFileURL: URL, resumeDataURL: URL) {
+        if fileManager.fileExists(atPath: modelFileURL.path) {
+            try? fileManager.removeItem(at: modelFileURL)
+        }
+
+        if fileManager.fileExists(atPath: resumeDataURL.path) {
+            try? fileManager.removeItem(at: resumeDataURL)
+        }
+    }
+
+    static func persistDownloadedFile(fileManager: FileManager, from tempURL: URL, to destinationURL: URL) throws {
+        if fileManager.fileExists(atPath: destinationURL.path) {
+            try fileManager.removeItem(at: destinationURL)
+        }
+
+        try fileManager.moveItem(at: tempURL, to: destinationURL)
+    }
+}
+
 private final class ModelDownloadCoordinator: NSObject, URLSessionDownloadDelegate, URLSessionTaskDelegate, @unchecked Sendable {
     struct Result {
         let stagedFileURL: URL
@@ -208,6 +235,8 @@ private final class ModelDownloadCoordinator: NSObject, URLSessionDownloadDelega
 
     private var session: URLSession?
     private var continuation: CheckedContinuation<Result, Error>?
+    private var lastReportedProgress: Double = 0
+    private var lastProgressUpdate = Date.distantPast
 
     init(downloadURL: URL, resumeData: Data?, progressHandler: @escaping @Sendable (Double) -> Void = { _ in }) {
         self.downloadURL = downloadURL
@@ -241,7 +270,19 @@ private final class ModelDownloadCoordinator: NSObject, URLSessionDownloadDelega
 
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64, totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
         guard totalBytesExpectedToWrite > 0 else { return }
+
         let progress = min(1, max(0, Double(totalBytesWritten) / Double(totalBytesExpectedToWrite)))
+        let now = Date()
+        let progressDelta = progress - lastReportedProgress
+        let shouldReport = progress >= 1
+            || progressDelta >= 0.005
+            || now.timeIntervalSince(lastProgressUpdate) >= 0.15
+
+        guard shouldReport else { return }
+
+        lastReportedProgress = progress
+        lastProgressUpdate = now
+
         Task { @MainActor in
             self.progressHandler(progress)
         }
