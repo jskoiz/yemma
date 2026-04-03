@@ -121,6 +121,7 @@ public struct ContentView: View {
     @State private var isLoadingModel = false
     @State private var modelLoadError: String?
     @State private var loadedModelPath: String?
+    @State private var hasValidatedLocalModel = false
 
     public init() {}
 
@@ -138,6 +139,9 @@ public struct ContentView: View {
             }
         }
         .task {
+            guard !hasValidatedLocalModel else { return }
+            hasValidatedLocalModel = true
+            await Task.yield()
             modelDownloader.validateDownloadedModel()
         }
         .animation(.easeInOut(duration: 0.25), value: modelDownloader.isDownloaded)

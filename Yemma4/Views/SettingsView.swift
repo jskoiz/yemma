@@ -93,6 +93,8 @@ public struct SettingsView: View {
                 separator
                 linkRow(icon: "books.vertical", title: "Licenses", url: URL(string: "https://github.com/ggml-org/llama.cpp")!)
                 separator
+                infoRow(icon: "building.2", title: "Made by", detail: "AVMIL Labs in Honolulu, Hawaii")
+                separator
                 infoRow(icon: "info.circle", title: "Version", detail: appVersionText)
             }
         }
