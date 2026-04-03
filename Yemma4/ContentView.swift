@@ -1,6 +1,119 @@
 import Observation
 import SwiftUI
 
+enum AppTheme {
+    static let backgroundTop = Color(red: 0.98, green: 0.97, blue: 0.96)
+    static let backgroundBottom = Color(red: 0.94, green: 0.94, blue: 0.96)
+    static let card = Color.white.opacity(0.72)
+    static let cardBorder = Color.white.opacity(0.7)
+    static let textPrimary = Color(red: 0.11, green: 0.11, blue: 0.13)
+    static let textSecondary = Color(red: 0.47, green: 0.48, blue: 0.52)
+    static let inputFill = Color.white.opacity(0.78)
+    static let chipFill = Color.white.opacity(0.78)
+    static let accent = Color.black
+    static let warmGlow = Color(red: 0.97, green: 0.85, blue: 0.76).opacity(0.58)
+    static let coolGlow = Color(red: 0.88, green: 0.90, blue: 0.98).opacity(0.65)
+}
+
+struct AppBackground: View {
+    var body: some View {
+        ZStack {
+            LinearGradient(
+                colors: [AppTheme.backgroundTop, AppTheme.backgroundBottom],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+
+            Circle()
+                .fill(AppTheme.coolGlow)
+                .frame(width: 360, height: 360)
+                .blur(radius: 70)
+                .offset(x: -120, y: -240)
+
+            Circle()
+                .fill(AppTheme.warmGlow)
+                .frame(width: 300, height: 300)
+                .blur(radius: 70)
+                .offset(x: 150, y: -150)
+
+            LinearGradient(
+                colors: [
+                    Color.white.opacity(0.1),
+                    Color.white.opacity(0.45),
+                    Color.clear
+                ],
+                startPoint: .bottom,
+                endPoint: .top
+            )
+        }
+        .ignoresSafeArea()
+    }
+}
+
+struct GlassCardModifier: ViewModifier {
+    var cornerRadius: CGFloat = 28
+
+    func body(content: Content) -> some View {
+        content
+            .background(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(AppTheme.card)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                            .stroke(AppTheme.cardBorder, lineWidth: 1)
+                    )
+            )
+            .shadow(color: Color.black.opacity(0.05), radius: 30, x: 0, y: 18)
+    }
+}
+
+extension View {
+    func glassCard(cornerRadius: CGFloat = 28) -> some View {
+        modifier(GlassCardModifier(cornerRadius: cornerRadius))
+    }
+}
+
+struct CircleIconButton: View {
+    let systemName: String
+    var filled: Bool = true
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(AppTheme.textPrimary)
+                .frame(width: 34, height: 34)
+                .background(
+                    Circle()
+                        .fill(filled ? Color.white.opacity(0.86) : Color.clear)
+                )
+                .overlay(
+                    Circle()
+                        .stroke(Color.white.opacity(0.72), lineWidth: filled ? 1 : 0)
+                )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+struct PillButtonStyle: ButtonStyle {
+    var fill: Color = AppTheme.chipFill
+    var pressedFill: Color = Color.white.opacity(0.92)
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(configuration.isPressed ? pressedFill : fill)
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(Color.white.opacity(0.74), lineWidth: 1)
+            )
+    }
+}
+
 public struct ContentView: View {
     @Environment(ModelDownloader.self) private var modelDownloader
     @Environment(LLMService.self) private var llmService
@@ -55,15 +168,14 @@ public struct ContentView: View {
     private var loadingOverlay: some View {
         VStack(spacing: 12) {
             ProgressView()
-                .tint(.white)
+                .tint(.black)
             Text("Loading model...")
-                .font(.headline)
-                .foregroundStyle(.white)
+                .font(.system(size: 18, weight: .semibold, design: .rounded))
+                .foregroundStyle(AppTheme.textPrimary)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)
-        .background(.black.opacity(0.65))
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .glassCard(cornerRadius: 22)
     }
 
     @MainActor
