@@ -9,7 +9,7 @@ struct ChatView: View {
     private let mockResponse = "Hello! I'm Yemma 4, running entirely on your device."
 
     var body: some View {
-        ExyteChat.ChatView(
+        ExyteChat.ChatView<AnyView, AnyView, DefaultMessageMenuAction>(
             messages: messages,
             chatType: .conversation,
             replyMode: .quote,

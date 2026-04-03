@@ -39,7 +39,7 @@ final class LLMService: @unchecked Sendable {
 
     @ObservationIgnored private var model: OpaquePointer?
     @ObservationIgnored private var context: OpaquePointer?
-    @ObservationIgnored private var vocab: UnsafePointer<llama_vocab>?
+    @ObservationIgnored private var vocab: OpaquePointer?
     @ObservationIgnored private var generationTask: Task<Void, Never>?
     @ObservationIgnored private var generationGroup: DispatchGroup?
     @ObservationIgnored private let stateLock = NSLock()
@@ -126,63 +126,26 @@ final class LLMService: @unchecked Sendable {
 
         let formattedPrompt = Self.formatPrompt(prompt: prompt, history: history)
 
-        let completionGroup = DispatchGroup()
+        let completionGroup = CompletionGroupBox()
         completionGroup.enter()
 
         let stream = AsyncStream<String> { continuation in
-            let task = Task { [weak self] in
-                defer {
-                    completionGroup.leave()
-                }
-
-                guard let self else {
-                    continuation.finish()
-                    return
-                }
-
-                do {
-                    let sampler = try Self.makeSampler()
-                    defer { llama_sampler_free(sampler) }
-
-                    let promptTokens = try Self.tokenize(formattedPrompt, vocab: currentVocab)
-                    try Self.decode(tokens: promptTokens, context: currentContext)
-
-                    var nextPosition = Int32(promptTokens.count)
-
-                    while !Task.isCancelled {
-                        let nextToken = llama_sampler_sample(sampler, currentContext, -1)
-
-                        if llama_vocab_is_eog(currentVocab, nextToken) {
-                            break
-                        }
-
-                        llama_sampler_accept(sampler, nextToken)
-
-                        let piece = try Self.tokenText(for: nextToken, vocab: currentVocab)
-                        if !piece.isEmpty {
-                            continuation.yield(piece)
-                        }
-
-                        try Self.decodeSingleToken(
-                            token: nextToken,
-                            position: nextPosition,
-                            context: currentContext
-                        )
-                        nextPosition += 1
-                    }
-                } catch {
-                    if !Task.isCancelled {
-                        self.setLastError(error.localizedDescription)
-                    }
-                }
-
-                self.finishGeneration()
-                continuation.finish()
+            let continuationBox = StreamContinuationBox(continuation)
+            let job = GenerationJob(
+                service: self,
+                formattedPrompt: formattedPrompt,
+                context: currentContext,
+                vocab: currentVocab,
+                continuation: continuationBox,
+                completionGroup: completionGroup
+            )
+            let task = Task {
+                await Self.runGeneration(job)
             }
 
             self.withLock {
                 generationTask = task
-                generationGroup = completionGroup
+                generationGroup = completionGroup.group
                 isGenerating = true
                 lastError = nil
             }
@@ -210,6 +173,109 @@ final class LLMService: @unchecked Sendable {
 }
 
 private extension LLMService {
+    final class CompletionGroupBox: @unchecked Sendable {
+        let group = DispatchGroup()
+
+        func enter() {
+            group.enter()
+        }
+
+        func leave() {
+            group.leave()
+        }
+    }
+
+    final class GenerationJob: @unchecked Sendable {
+        weak var service: LLMService?
+        let formattedPrompt: String
+        let context: OpaquePointer
+        let vocab: OpaquePointer
+        let continuation: StreamContinuationBox<String>
+        let completionGroup: CompletionGroupBox
+
+        init(
+            service: LLMService,
+            formattedPrompt: String,
+            context: OpaquePointer,
+            vocab: OpaquePointer,
+            continuation: StreamContinuationBox<String>,
+            completionGroup: CompletionGroupBox
+        ) {
+            self.service = service
+            self.formattedPrompt = formattedPrompt
+            self.context = context
+            self.vocab = vocab
+            self.continuation = continuation
+            self.completionGroup = completionGroup
+        }
+    }
+
+    final class StreamContinuationBox<Element: Sendable>: @unchecked Sendable {
+        private let continuation: AsyncStream<Element>.Continuation
+
+        init(_ continuation: AsyncStream<Element>.Continuation) {
+            self.continuation = continuation
+        }
+
+        func yield(_ value: Element) {
+            continuation.yield(value)
+        }
+
+        func finish() {
+            continuation.finish()
+        }
+    }
+
+    static func runGeneration(_ job: GenerationJob) async {
+        defer {
+            job.completionGroup.leave()
+        }
+
+        guard let service = job.service else {
+            job.continuation.finish()
+            return
+        }
+
+        do {
+            let sampler = try Self.makeSampler()
+            defer { llama_sampler_free(sampler) }
+
+            let promptTokens = try Self.tokenize(job.formattedPrompt, vocab: job.vocab)
+            try Self.decode(tokens: promptTokens, context: job.context)
+
+            var nextPosition = Int32(promptTokens.count)
+
+            while !Task.isCancelled {
+                let nextToken = llama_sampler_sample(sampler, job.context, -1)
+
+                if llama_vocab_is_eog(job.vocab, nextToken) {
+                    break
+                }
+
+                llama_sampler_accept(sampler, nextToken)
+
+                let piece = try Self.tokenText(for: nextToken, vocab: job.vocab)
+                if !piece.isEmpty {
+                    job.continuation.yield(piece)
+                }
+
+                try Self.decodeSingleToken(
+                    token: nextToken,
+                    position: nextPosition,
+                    context: job.context
+                )
+                nextPosition += 1
+            }
+        } catch {
+            if !Task.isCancelled {
+                service.setLastError(error.localizedDescription)
+            }
+        }
+
+        service.finishGeneration()
+        job.continuation.finish()
+    }
+
     func finishGeneration() {
         withLock {
             generationTask = nil
@@ -280,7 +346,7 @@ private extension LLMService {
         }
     }
 
-    static func makeSampler() throws -> OpaquePointer {
+    static func makeSampler() throws -> UnsafeMutablePointer<llama_sampler> {
         let params = llama_sampler_chain_default_params()
 
         guard let sampler = llama_sampler_chain_init(params) else {
@@ -322,7 +388,7 @@ private extension LLMService {
 
     static func tokenize(
         _ text: String,
-        vocab: UnsafePointer<llama_vocab>
+        vocab: OpaquePointer
     ) throws -> [llama_token] {
         var capacity = max(256, text.utf8.count + 32)
 
@@ -406,7 +472,7 @@ private extension LLMService {
 
     static func tokenText(
         for token: llama_token,
-        vocab: UnsafePointer<llama_vocab>
+        vocab: OpaquePointer
     ) throws -> String {
         var capacity = 64
 

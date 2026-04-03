@@ -6,7 +6,7 @@ let package = Package(
     name: "Yemma4",
     defaultLocalization: "en",
     platforms: [
-        .iOS(.v16)
+        .iOS(.v17)
     ],
     products: [
         .library(
@@ -16,13 +16,22 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/exyte/Chat.git", from: "2.7.8"),
+        .package(url: "https://github.com/exyte/MediaPicker.git", exact: "3.2.4"),
         .package(url: "https://github.com/mattt/llama.swift.git", from: "2.8640.0"),
         .package(url: "https://github.com/huggingface/swift-huggingface.git", from: "0.9.0")
     ],
     targets: [
         .target(
             name: "Yemma4",
-            path: "Yemma4"
+            dependencies: [
+                .product(name: "ExyteChat", package: "Chat"),
+                .product(name: "LlamaSwift", package: "llama.swift"),
+                .product(name: "HuggingFace", package: "swift-huggingface"),
+            ],
+            path: "Yemma4",
+            exclude: [
+                "Yemma4.entitlements",
+            ]
         )
     ]
 )
