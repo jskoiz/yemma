@@ -19,6 +19,7 @@ public struct ChatView: View {
     @State private var showConversations = false
     @FocusState private var isComposerFocused: Bool
 
+    private let modelPageURL = URL(string: "https://huggingface.co/bartowski/google_gemma-4-E4B-it-GGUF")!
     private let quickPrompts: [(title: String, subtitle: String, prompt: String)] = [
         ("Design", "a workout routine", "Design a simple workout routine I can do at home."),
         ("Begin", "meditating", "Begin a meditation habit with a simple 7-day plan."),
@@ -110,16 +111,19 @@ public struct ChatView: View {
                     .overlay(Capsule().stroke(Color.white.opacity(0.82), lineWidth: 1))
             )
 
-            HStack(spacing: 8) {
-                Text("Yemma 4")
-                    .font(.system(size: 18, weight: .semibold, design: .rounded))
-                    .foregroundStyle(AppTheme.textPrimary)
-                    .lineLimit(1)
+            Link(destination: modelPageURL) {
+                HStack(spacing: 8) {
+                    Text("Gemma 4 E4B")
+                        .font(.system(size: 18, weight: .semibold, design: .rounded))
+                        .foregroundStyle(AppTheme.textPrimary)
+                        .lineLimit(1)
 
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(AppTheme.textSecondary)
+                    Image(systemName: "arrow.up.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(AppTheme.textSecondary)
+                }
             }
+            .buttonStyle(.plain)
 
             Spacer(minLength: 0)
 
@@ -163,11 +167,11 @@ public struct ChatView: View {
 
             VStack(spacing: 18) {
                 Text("Meet Yemma 4")
-                    .font(.system(size: 48, weight: .semibold, design: .rounded))
+                    .font(.system(size: 24, weight: .semibold, design: .rounded))
                     .foregroundStyle(AppTheme.textPrimary)
 
                 Text("Chat with Google's latest Gemma 4 model entirely on your device. No provider connection, no cloud relay, and no account required.")
-                    .font(.system(size: 22, weight: .medium, design: .rounded))
+                    .font(.system(size: 16, weight: .medium, design: .rounded))
                     .foregroundStyle(AppTheme.textSecondary)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 560)
@@ -307,10 +311,10 @@ public struct ChatView: View {
                     } label: {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(prompt.title)
-                                .font(.system(size: 18, weight: .semibold, design: .rounded))
+                                .font(.system(size: 15, weight: .semibold, design: .rounded))
                                 .foregroundStyle(AppTheme.textPrimary)
                             Text(prompt.subtitle)
-                                .font(.system(size: 15, weight: .medium, design: .rounded))
+                                .font(.system(size: 13, weight: .medium, design: .rounded))
                                 .foregroundStyle(AppTheme.textSecondary)
                         }
                         .frame(width: 154, alignment: .leading)
@@ -577,10 +581,10 @@ private struct ConversationsView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     HStack(alignment: .top) {
                         VStack(alignment: .leading, spacing: 6) {
-                            Text("Access More Actions")
+                            Text("Restart With Intention")
                                 .font(.system(size: 18, weight: .semibold, design: .rounded))
                                 .foregroundStyle(AppTheme.textPrimary)
-                            Text("A smoother history view can come next. For now this screen gives you a clean place to restart the current chat.")
+                            Text("Use Fresh chat to clear context before switching topics. The current conversation stays previewed below so you can jump back in and keep your place.")
                                 .font(.system(size: 15, weight: .medium, design: .rounded))
                                 .foregroundStyle(AppTheme.textSecondary)
                         }
