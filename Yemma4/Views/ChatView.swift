@@ -2,46 +2,88 @@ import ExyteChat
 import Observation
 import SwiftUI
 
+#if canImport(UIKit)
+import UIKit
+#endif
+
 public struct ChatView: View {
     @Environment(LLMService.self) private var llmService
 
     @State private var messages: [ChatMessage] = []
     @State private var generationTask: Task<Void, Never>?
     @State private var generationError: String?
+    @State private var memoryAlertMessage: String?
+    @State private var toastMessage: String?
+    @State private var toastTask: Task<Void, Never>?
 
     public init() {}
 
     public var body: some View {
-        ExyteChat.ChatView<AnyView, AnyView, DefaultMessageMenuAction>(
-            messages: messages,
-            chatType: .conversation,
-            replyMode: .quote,
-            reactionDelegate: nil,
-            messageBuilder: { message, _, _, _, _, _, _ in
-                AnyView(messageRow(message))
-            },
-            inputViewBuilder: { textBinding, _, _, _, inputViewActionClosure, _ in
-                AnyView(composerView(textBinding: textBinding, sendAction: inputViewActionClosure))
-            },
-            messageMenuAction: nil,
-            localization: localization,
-            didUpdateAttachmentStatus: nil,
-            didSendMessage: handleDraft
-        )
-        .background(backgroundColor.ignoresSafeArea())
-        .onDisappear(perform: stopGeneration)
-        .alert(
-            "Generation Failed",
-            isPresented: Binding(
-                get: { generationError != nil },
-                set: { if !$0 { generationError = nil } }
-            )
-        ) {
-            Button("OK", role: .cancel) {
-                generationError = nil
+        NavigationStack {
+            ZStack(alignment: .bottom) {
+                ExyteChat.ChatView<AnyView, AnyView, DefaultMessageMenuAction>(
+                    messages: messages,
+                    chatType: .conversation,
+                    replyMode: .quote,
+                    reactionDelegate: nil,
+                    messageBuilder: { message, _, _, _, _, _, _ in
+                        AnyView(messageRow(message))
+                    },
+                    inputViewBuilder: { textBinding, _, _, _, inputViewActionClosure, _ in
+                        AnyView(composerView(textBinding: textBinding, sendAction: inputViewActionClosure))
+                    },
+                    messageMenuAction: nil,
+                    localization: localization,
+                    didUpdateAttachmentStatus: nil,
+                    didSendMessage: handleDraft
+                )
+                .background(backgroundColor.ignoresSafeArea())
+
+                if let toastMessage {
+                    toastView(message: toastMessage)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                        .padding(.bottom, 12)
+                }
             }
-        } message: {
-            Text(generationError ?? "The model could not generate a response.")
+            .navigationTitle("Yemma 4")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    NavigationLink {
+                        SettingsView(onClearConversation: clearConversation)
+                    } label: {
+                        Image(systemName: "gearshape")
+                    }
+                }
+            }
+            .onDisappear(perform: stopGeneration)
+            .animation(.easeInOut(duration: 0.2), value: toastMessage)
+            .alert(
+                "Generation Failed",
+                isPresented: Binding(
+                    get: { generationError != nil },
+                    set: { if !$0 { generationError = nil } }
+                )
+            ) {
+                Button("OK", role: .cancel) {
+                    generationError = nil
+                }
+            } message: {
+                Text(generationError ?? "The model could not generate a response.")
+            }
+            .alert(
+                "Low Memory",
+                isPresented: Binding(
+                    get: { memoryAlertMessage != nil },
+                    set: { if !$0 { memoryAlertMessage = nil } }
+                )
+            ) {
+                Button("OK", role: .cancel) {
+                    memoryAlertMessage = nil
+                }
+            } message: {
+                Text(memoryAlertMessage ?? "Your device ran low on memory. Try a shorter conversation.")
+            }
         }
     }
 
@@ -161,8 +203,7 @@ public struct ChatView: View {
                     .buttonStyle(.plain)
                 } else {
                     Button {
-                        guard llmService.isModelLoaded else { return }
-                        sendAction(.send)
+                        triggerSend(sendAction: sendAction)
                     } label: {
                         Image(systemName: llmService.isModelLoaded ? "arrow.up" : "hourglass")
                             .font(.system(size: 15, weight: .bold))
@@ -198,6 +239,19 @@ public struct ChatView: View {
         .padding(.horizontal, 14)
     }
 
+    private func toastView(message: String) -> some View {
+        Text(message)
+            .font(.system(size: 14, weight: .semibold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(.black.opacity(0.86))
+            .clipShape(Capsule())
+            .shadow(color: .black.opacity(0.25), radius: 14, x: 0, y: 6)
+            .padding(.horizontal, 24)
+            .accessibilityAddTraits(.isStaticText)
+    }
+
     private func handleDraft(_ draft: ExyteChat.DraftMessage) {
         let trimmedText = draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedText.isEmpty else { return }
@@ -205,7 +259,12 @@ public struct ChatView: View {
             generationError = "The model is not loaded yet."
             return
         }
+        guard !llmService.isGenerating else {
+            showToast("Please wait for Yemma to finish")
+            return
+        }
 
+        triggerSendHaptic()
         stopGeneration()
 
         let history = conversationHistory(from: messages)
@@ -230,6 +289,7 @@ public struct ChatView: View {
         )
 
         generationError = nil
+        memoryAlertMessage = nil
         generationTask = Task {
             await streamReply(prompt: trimmedText, history: history, assistantID: assistantID)
         }
@@ -266,9 +326,15 @@ public struct ChatView: View {
             }
         }
 
-        if let lastError = llmService.lastError, assistantText.isEmpty {
+        if let lastError = llmService.lastError {
             await MainActor.run {
-                self.generationError = lastError
+                if isLowMemoryError(lastError) {
+                    self.memoryAlertMessage = "Your device ran low on memory. Try a shorter conversation."
+                } else if assistantText.isEmpty {
+                    self.generationError = lastError
+                } else {
+                    self.generationError = lastError
+                }
             }
         }
     }
@@ -277,6 +343,50 @@ public struct ChatView: View {
     private func updateMessageText(id: String, text: String) {
         guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
         messages[index].text = text
+    }
+
+    @MainActor
+    private func clearConversation() {
+        stopGeneration()
+        messages.removeAll()
+        generationError = nil
+        memoryAlertMessage = nil
+        toastMessage = nil
+    }
+
+    @MainActor
+    private func showToast(_ message: String) {
+        toastTask?.cancel()
+        toastMessage = message
+
+        toastTask = Task {
+            do {
+                try await Task.sleep(for: .seconds(1.7))
+            } catch {
+                return
+            }
+
+            await MainActor.run {
+                toastMessage = nil
+                toastTask = nil
+            }
+        }
+    }
+
+    private func triggerSend(sendAction: @escaping (ExyteChat.InputViewAction) -> Void) {
+        triggerSendHaptic()
+        sendAction(.send)
+    }
+
+    private func triggerSendHaptic() {
+#if canImport(UIKit)
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+#endif
+    }
+
+    private func isLowMemoryError(_ message: String) -> Bool {
+        let lowercased = message.lowercased()
+        return lowercased.contains("memory") || lowercased.contains("oom") || lowercased.contains("out of memory")
     }
 
     private func stopGeneration() {

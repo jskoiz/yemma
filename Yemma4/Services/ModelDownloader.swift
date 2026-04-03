@@ -17,13 +17,37 @@ public final class ModelDownloader {
 
     public init(fileManager: FileManager = .default) {
         self.fileManager = fileManager
-        refreshLocalState()
+        validateDownloadedModel()
+    }
+
+    public func validateDownloadedModel() {
+        let url = modelFileURL
+
+        guard fileManager.fileExists(atPath: url.path) else {
+            clearInvalidLocalState()
+            return
+        }
+
+        guard
+            let attributes = try? fileManager.attributesOfItem(atPath: url.path),
+            let size = attributes[.size] as? NSNumber,
+            size.int64Value > 0
+        else {
+            clearInvalidLocalState()
+            return
+        }
+
+        isDownloaded = true
+        modelPath = url.path
+        if !isDownloading {
+            downloadProgress = max(downloadProgress, 1)
+        }
     }
 
     public func downloadModel() async {
         guard !isDownloading else { return }
 
-        refreshLocalState()
+        validateDownloadedModel()
         error = nil
 
         if isDownloaded, let modelPath {
@@ -61,7 +85,7 @@ public final class ModelDownloader {
                 saveResumeData(resumeData)
             }
             self.error = Self.describe(error)
-            refreshLocalState()
+            validateDownloadedModel()
         }
     }
 
@@ -85,22 +109,7 @@ public final class ModelDownloader {
             error = nil
         }
 
-        refreshLocalState()
-    }
-
-    private func refreshLocalState() {
-        let url = modelFileURL
-        if fileManager.fileExists(atPath: url.path) {
-            isDownloaded = true
-            modelPath = url.path
-            downloadProgress = max(downloadProgress, 1)
-        } else {
-            isDownloaded = false
-            modelPath = nil
-            if !isDownloading {
-                downloadProgress = 0
-            }
-        }
+        validateDownloadedModel()
     }
 
     private var documentsDirectory: URL {
@@ -138,6 +147,22 @@ public final class ModelDownloader {
     private func clearResumeData() {
         guard fileManager.fileExists(atPath: resumeDataURL.path) else { return }
         try? fileManager.removeItem(at: resumeDataURL)
+    }
+
+    private func clearInvalidLocalState() {
+        isDownloaded = false
+        modelPath = nil
+        if !isDownloading {
+            downloadProgress = 0
+        }
+
+        if fileManager.fileExists(atPath: modelFileURL.path) {
+            try? fileManager.removeItem(at: modelFileURL)
+        }
+
+        if fileManager.fileExists(atPath: resumeDataURL.path) {
+            try? fileManager.removeItem(at: resumeDataURL)
+        }
     }
 
     private func persistDownloadedFile(from tempURL: URL, to destinationURL: URL) throws {

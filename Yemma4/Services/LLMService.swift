@@ -35,6 +35,7 @@ enum LLMServiceError: LocalizedError {
 final class LLMService: @unchecked Sendable {
     var isModelLoaded = false
     var isGenerating = false
+    var temperature = 1.0
     var lastError: String?
 
     @ObservationIgnored private var model: OpaquePointer?
@@ -125,6 +126,7 @@ final class LLMService: @unchecked Sendable {
         }
 
         let formattedPrompt = Self.formatPrompt(prompt: prompt, history: history)
+        let currentTemperature = withLock { temperature }
 
         let completionGroup = CompletionGroupBox()
         completionGroup.enter()
@@ -136,6 +138,7 @@ final class LLMService: @unchecked Sendable {
                 formattedPrompt: formattedPrompt,
                 context: currentContext,
                 vocab: currentVocab,
+                temperature: currentTemperature,
                 continuation: continuationBox,
                 completionGroup: completionGroup
             )
@@ -190,6 +193,7 @@ private extension LLMService {
         let formattedPrompt: String
         let context: OpaquePointer
         let vocab: OpaquePointer
+        let temperature: Double
         let continuation: StreamContinuationBox<String>
         let completionGroup: CompletionGroupBox
 
@@ -198,6 +202,7 @@ private extension LLMService {
             formattedPrompt: String,
             context: OpaquePointer,
             vocab: OpaquePointer,
+            temperature: Double,
             continuation: StreamContinuationBox<String>,
             completionGroup: CompletionGroupBox
         ) {
@@ -205,6 +210,7 @@ private extension LLMService {
             self.formattedPrompt = formattedPrompt
             self.context = context
             self.vocab = vocab
+            self.temperature = temperature
             self.continuation = continuation
             self.completionGroup = completionGroup
         }
@@ -237,7 +243,7 @@ private extension LLMService {
         }
 
         do {
-            let sampler = try Self.makeSampler()
+            let sampler = try Self.makeSampler(temperature: job.temperature)
             defer { llama_sampler_free(sampler) }
 
             let promptTokens = try Self.tokenize(job.formattedPrompt, vocab: job.vocab)
@@ -346,7 +352,7 @@ private extension LLMService {
         }
     }
 
-    static func makeSampler() throws -> UnsafeMutablePointer<llama_sampler> {
+    static func makeSampler(temperature: Double) throws -> UnsafeMutablePointer<llama_sampler> {
         let params = llama_sampler_chain_default_params()
 
         guard let sampler = llama_sampler_chain_init(params) else {
@@ -371,7 +377,7 @@ private extension LLMService {
         }
         llama_sampler_chain_add(sampler, minP)
 
-        guard let temp = llama_sampler_init_temp(1.0) else {
+        guard let temp = llama_sampler_init_temp(Float(temperature)) else {
             llama_sampler_free(sampler)
             throw LLMServiceError.samplerCreationFailed
         }
