@@ -657,10 +657,18 @@
     }
 
     .app-store-badge {
-      display: inline-block; transition: transform 0.2s, opacity 0.2s;
+      display: inline-block; transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.2s;
       text-decoration: none;
     }
     .app-store-badge:hover { transform: translateY(-1px); opacity: 0.85; }
+
+    @keyframes wiggle {
+      0%, 100% { transform: rotate(0deg); }
+      20% { transform: rotate(-1.5deg); }
+      40% { transform: rotate(1.5deg); }
+      60% { transform: rotate(-0.8deg); }
+      80% { transform: rotate(0.8deg); }
+    }
     .app-store-badge img, .app-store-badge svg { height: 48px; width: auto; display: block; }
 
     .cta-req {
@@ -1167,6 +1175,19 @@
         if (t) { e.preventDefault(); t.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
       });
     });
+
+    /* App Store badge wiggle — quick shake then wait 5-10s */
+    (function() {
+      const badges = document.querySelectorAll('.app-store-badge');
+      function wiggle() {
+        badges.forEach(b => {
+          b.style.animation = 'wiggle 0.5s ease';
+          b.addEventListener('animationend', () => { b.style.animation = ''; }, { once: true });
+        });
+        setTimeout(wiggle, 5000 + Math.random() * 5000);
+      }
+      setTimeout(wiggle, 3000 + Math.random() * 3000);
+    })();
   </script>
 </body>
 </html>
