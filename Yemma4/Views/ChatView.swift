@@ -1,14 +1,16 @@
 import ExyteChat
 import SwiftUI
 
-struct ChatView: View {
+public struct ChatView: View {
     @State private var messages: [ChatMessage] = []
     @State private var isGenerating = false
     @State private var generationTask: Task<Void, Never>?
 
     private let mockResponse = "Hello! I'm Yemma 4, running entirely on your device."
 
-    var body: some View {
+    public init() {}
+
+    public var body: some View {
         ExyteChat.ChatView<AnyView, AnyView, DefaultMessageMenuAction>(
             messages: messages,
             chatType: .conversation,

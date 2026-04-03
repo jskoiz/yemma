@@ -1,19 +1,20 @@
 import SwiftUI
 
 public struct ContentView: View {
-    @State private var isShowingChat = false
+    @State private var modelDownloader = ModelDownloader()
 
     public init() {}
 
     public var body: some View {
-        Group {
-            if isShowingChat {
+        ZStack {
+            if modelDownloader.isDownloaded {
                 ChatView()
+                    .transition(.opacity.combined(with: .move(edge: .trailing)))
             } else {
-                OnboardingView {
-                    isShowingChat = true
-                }
+                OnboardingView(modelDownloader: modelDownloader)
+                    .transition(.opacity.combined(with: .move(edge: .leading)))
             }
         }
+        .animation(.easeInOut(duration: 0.25), value: modelDownloader.isDownloaded)
     }
 }
