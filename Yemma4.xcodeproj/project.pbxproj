@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A1000001 /* RichMessageText.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000002 /* RichMessageText.swift */; };
+		A1000003 /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = A1000005 /* MarkdownUI */; };
 		2174B7FC2EE2C3471527756A /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E23D9EC68D2134067159DFB /* OnboardingView.swift */; };
 		38135214F3C193EF4A21DDEE /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 53CB1EB0E92750BF686F214C /* LaunchScreen.storyboard */; };
 		64FB319E19C91C284A890874 /* LlamaSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 5A2070CA61B2F9D46485B217 /* LlamaSwift */; };
@@ -17,7 +19,6 @@
 		B10000005 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B10000006 /* Assets.xcassets */; };
 		B3034772627DBF9FD8624142 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92A43CA0C38A9D38EFA94487 /* SettingsView.swift */; };
 		C18F96B6430B9FFB84F7095B /* ChatMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F1B5296369F631217B7F995 /* ChatMessage.swift */; };
-		DE02CFF274D65704AA747FAE /* HuggingFace in Frameworks */ = {isa = PBXBuildFile; productRef = 335533B55B7A9CBDE2622A31 /* HuggingFace */; };
 		DF571A73493F2913161C6971 /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE484C3E95FF6F044B7B7BC4 /* ChatView.swift */; };
 		F6A19338069476EC14B97082 /* ModelDownloader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11FB93FF040AF083B453837C /* ModelDownloader.swift */; };
 /* End PBXBuildFile section */
@@ -30,6 +31,7 @@
 		70EEE36ABE229B869B690BFB /* LLMService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LLMService.swift; sourceTree = "<group>"; };
 		92A43CA0C38A9D38EFA94487 /* SettingsView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		9F1B5296369F631217B7F995 /* ChatMessage.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ChatMessage.swift; sourceTree = "<group>"; };
+		A1000002 /* RichMessageText.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RichMessageText.swift; sourceTree = "<group>"; };
 		B10000002 /* Yemma4App.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Yemma4App.swift; sourceTree = "<group>"; };
 		B10000004 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		B10000006 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -42,9 +44,9 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A1000003 /* MarkdownUI in Frameworks */,
 				8ED5E2862DF091C3920ED85D /* ExyteChat in Frameworks */,
 				64FB319E19C91C284A890874 /* LlamaSwift in Frameworks */,
-				DE02CFF274D65704AA747FAE /* HuggingFace in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -55,6 +57,7 @@
 			isa = PBXGroup;
 			children = (
 				FE484C3E95FF6F044B7B7BC4 /* ChatView.swift */,
+				A1000002 /* RichMessageText.swift */,
 				4E23D9EC68D2134067159DFB /* OnboardingView.swift */,
 				92A43CA0C38A9D38EFA94487 /* SettingsView.swift */,
 			);
@@ -128,7 +131,7 @@
 			packageProductDependencies = (
 				9D280E543558115939ECD091 /* ExyteChat */,
 				5A2070CA61B2F9D46485B217 /* LlamaSwift */,
-				335533B55B7A9CBDE2622A31 /* HuggingFace */,
+				A1000005 /* MarkdownUI */,
 			);
 			productName = Yemma4;
 			productReference = B10000007 /* Yemma4.app */;
@@ -161,8 +164,8 @@
 			packageReferences = (
 				759333B69AA7F2876F0CFA95 /* XCRemoteSwiftPackageReference "Chat" */,
 				86F4F44F8A0D4F2B9F9CE4C1 /* XCRemoteSwiftPackageReference "MediaPicker" */,
+				A1000004 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */,
 				C126F031616C87B44C4B98E0 /* XCRemoteSwiftPackageReference "llama.swift" */,
-				C59B26DA3B5AE61F28CF4608 /* XCRemoteSwiftPackageReference "swift-huggingface" */,
 			);
 			productRefGroup = B10000009 /* Products */;
 			projectDirPath = "";
@@ -196,6 +199,7 @@
 				8804C30D1CAED09270D51D6D /* LLMService.swift in Sources */,
 				F6A19338069476EC14B97082 /* ModelDownloader.swift in Sources */,
 				DF571A73493F2913161C6971 /* ChatView.swift in Sources */,
+				A1000001 /* RichMessageText.swift in Sources */,
 				2174B7FC2EE2C3471527756A /* OnboardingView.swift in Sources */,
 				B3034772627DBF9FD8624142 /* SettingsView.swift in Sources */,
 			);
@@ -419,6 +423,14 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		A1000004 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/gonzalezreal/swift-markdown-ui.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.4.1;
+			};
+		};
 		759333B69AA7F2876F0CFA95 /* XCRemoteSwiftPackageReference "Chat" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/exyte/Chat.git";
@@ -443,22 +455,9 @@
 				minimumVersion = 2.8640.0;
 			};
 		};
-		C59B26DA3B5AE61F28CF4608 /* XCRemoteSwiftPackageReference "swift-huggingface" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/huggingface/swift-huggingface.git";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 0.9.0;
-			};
-		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		335533B55B7A9CBDE2622A31 /* HuggingFace */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = C59B26DA3B5AE61F28CF4608 /* XCRemoteSwiftPackageReference "swift-huggingface" */;
-			productName = HuggingFace;
-		};
 		5A2070CA61B2F9D46485B217 /* LlamaSwift */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = C126F031616C87B44C4B98E0 /* XCRemoteSwiftPackageReference "llama.swift" */;
@@ -468,6 +467,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 759333B69AA7F2876F0CFA95 /* XCRemoteSwiftPackageReference "Chat" */;
 			productName = ExyteChat;
+		};
+		A1000005 /* MarkdownUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A1000004 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */;
+			productName = MarkdownUI;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

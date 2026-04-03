@@ -207,18 +207,7 @@ public struct ChatView: View {
                         .padding(.horizontal, 2)
                 }
 
-                Text(displayText(for: message))
-                    .font(.system(size: 16, weight: .medium, design: .rounded))
-                    .foregroundStyle(AppTheme.textPrimary)
-                    .multilineTextAlignment(message.user.isCurrentUser ? .trailing : .leading)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 13)
-                    .background(messageBubbleBackground(for: message))
-                    .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 22, style: .continuous)
-                            .stroke(Color.white.opacity(0.78), lineWidth: 1)
-                    )
+                messageBubble(message)
             }
             .frame(maxWidth: 420, alignment: message.user.isCurrentUser ? .trailing : .leading)
 
@@ -240,6 +229,31 @@ public struct ChatView: View {
         }
 
         return AnyShapeStyle(Color.white.opacity(0.62))
+    }
+
+    @ViewBuilder
+    private func messageBubble(_ message: ChatMessage) -> some View {
+        let text = displayText(for: message)
+
+        Group {
+            if message.user.isCurrentUser {
+                Text(text)
+                    .font(.system(size: 16, weight: .medium, design: .rounded))
+                    .foregroundStyle(AppTheme.textPrimary)
+                    .multilineTextAlignment(.trailing)
+                    .textSelection(.enabled)
+            } else {
+                RichMessageText(text: text)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 13)
+        .background(messageBubbleBackground(for: message))
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(Color.white.opacity(0.78), lineWidth: 1)
+        )
     }
 
     private var composerSection: some View {
