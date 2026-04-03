@@ -1,20 +1,26 @@
 import Foundation
+import ExyteChat
 
-public struct ChatMessage: Identifiable, Hashable {
-    public let id: UUID
-    public var text: String
-    public var isCurrentUser: Bool
-    public var createdAt: Date
+public typealias ChatMessage = ExyteChat.Message
 
-    public init(
-        id: UUID = UUID(),
-        text: String,
-        isCurrentUser: Bool,
-        createdAt: Date = .now
-    ) {
-        self.id = id
-        self.text = text
-        self.isCurrentUser = isCurrentUser
-        self.createdAt = createdAt
+public extension ExyteChat.Message {
+    var isCurrentUser: Bool {
+        user.isCurrentUser
     }
+}
+
+public extension ExyteChat.User {
+    static let user = ExyteChat.User(
+        id: "user",
+        name: "You",
+        avatarURL: nil,
+        isCurrentUser: true
+    )
+
+    static let yemma = ExyteChat.User(
+        id: "yemma",
+        name: "Yemma",
+        avatarURL: nil,
+        isCurrentUser: false
+    )
 }
