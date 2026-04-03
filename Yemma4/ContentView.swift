@@ -24,6 +24,9 @@ public struct ContentView: View {
                     .transition(.opacity.combined(with: .move(edge: .leading)))
             }
         }
+        .task {
+            modelDownloader.validateDownloadedModel()
+        }
         .animation(.easeInOut(duration: 0.25), value: modelDownloader.isDownloaded)
         .overlay {
             if isLoadingModel {
