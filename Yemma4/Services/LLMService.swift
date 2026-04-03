@@ -65,6 +65,24 @@ final class LLMService: @unchecked Sendable {
 
         let resolvedPath = (path as NSString).expandingTildeInPath
 
+#if targetEnvironment(simulator)
+        guard FileManager.default.fileExists(atPath: resolvedPath) else {
+            let error = LLMServiceError.modelLoadFailed(path: resolvedPath)
+            setLastError(error.localizedDescription)
+            throw error
+        }
+
+        withLock {
+            freeResources(model: model, context: context)
+            model = nil
+            context = nil
+            vocab = nil
+            isModelLoaded = true
+            lastError = nil
+        }
+        return
+#endif
+
         var modelParams = llama_model_default_params()
         modelParams.n_gpu_layers = 99
 
@@ -113,6 +131,10 @@ final class LLMService: @unchecked Sendable {
 
     func generate(prompt: String, history: [(role: String, content: String)]) -> AsyncStream<String> {
         stopGeneration()
+
+#if targetEnvironment(simulator)
+        return makeSimulatorStream(prompt: prompt, history: history)
+#endif
 
         let currentContext = withLock { context }
         let currentVocab = withLock { vocab }
@@ -172,6 +194,57 @@ final class LLMService: @unchecked Sendable {
 
         taskAndGroup.task?.cancel()
         taskAndGroup.group?.wait()
+    }
+
+    func makeSimulatorStream(prompt: String, history: [(role: String, content: String)]) -> AsyncStream<String> {
+        let transcriptCount = history.count + 1
+        let response = """
+        Simulator mode reply: the local UI loop is working, and the model file is present.
+
+        Prompt received: \(prompt)
+
+        Conversation turns in memory: \(transcriptCount)
+
+        Real Gemma inference still needs a physical iPhone. Use the simulator for UI, download state, settings, and chat-shell iteration.
+        """
+
+        return AsyncStream { continuation in
+            let chunks = response.map(String.init)
+            let task = Task { [weak self] in
+                guard let self else {
+                    continuation.finish()
+                    return
+                }
+
+                for chunk in chunks {
+                    if Task.isCancelled {
+                        break
+                    }
+
+                    continuation.yield(chunk)
+
+                    do {
+                        try await Task.sleep(for: .milliseconds(14))
+                    } catch {
+                        break
+                    }
+                }
+
+                self.finishGeneration()
+                continuation.finish()
+            }
+
+            self.withLock {
+                generationTask = task
+                generationGroup = nil
+                isGenerating = true
+                lastError = nil
+            }
+
+            continuation.onTermination = { @Sendable _ in
+                task.cancel()
+            }
+        }
     }
 }
 
@@ -250,8 +323,14 @@ private extension LLMService {
             try Self.decode(tokens: promptTokens, context: job.context)
 
             var nextPosition = Int32(promptTokens.count)
+            var emittedTokenCount = 0
+            let maxGeneratedTokens = 512
 
             while !Task.isCancelled {
+                guard emittedTokenCount < maxGeneratedTokens else {
+                    break
+                }
+
                 let nextToken = llama_sampler_sample(sampler, job.context, -1)
 
                 if llama_vocab_is_eog(job.vocab, nextToken) {
@@ -271,6 +350,7 @@ private extension LLMService {
                     context: job.context
                 )
                 nextPosition += 1
+                emittedTokenCount += 1
             }
         } catch {
             if !Task.isCancelled {

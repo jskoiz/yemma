@@ -1,0 +1,467 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 60;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		2174B7FC2EE2C3471527756A /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E23D9EC68D2134067159DFB /* OnboardingView.swift */; };
+		38135214F3C193EF4A21DDEE /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 53CB1EB0E92750BF686F214C /* LaunchScreen.storyboard */; };
+		64FB319E19C91C284A890874 /* LlamaSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 5A2070CA61B2F9D46485B217 /* LlamaSwift */; };
+		8804C30D1CAED09270D51D6D /* LLMService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70EEE36ABE229B869B690BFB /* LLMService.swift */; };
+		8ED5E2862DF091C3920ED85D /* ExyteChat in Frameworks */ = {isa = PBXBuildFile; productRef = 9D280E543558115939ECD091 /* ExyteChat */; };
+		B10000001 /* Yemma4App.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000002 /* Yemma4App.swift */; };
+		B10000003 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000004 /* ContentView.swift */; };
+		B10000005 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B10000006 /* Assets.xcassets */; };
+		B3034772627DBF9FD8624142 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92A43CA0C38A9D38EFA94487 /* SettingsView.swift */; };
+		C18F96B6430B9FFB84F7095B /* ChatMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F1B5296369F631217B7F995 /* ChatMessage.swift */; };
+		DE02CFF274D65704AA747FAE /* HuggingFace in Frameworks */ = {isa = PBXBuildFile; productRef = 335533B55B7A9CBDE2622A31 /* HuggingFace */; };
+		DF571A73493F2913161C6971 /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE484C3E95FF6F044B7B7BC4 /* ChatView.swift */; };
+		F6A19338069476EC14B97082 /* ModelDownloader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11FB93FF040AF083B453837C /* ModelDownloader.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		11FB93FF040AF083B453837C /* ModelDownloader.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ModelDownloader.swift; sourceTree = "<group>"; };
+		39C187E5F33C4B9C302E7029 /* Yemma4.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = Yemma4.entitlements; sourceTree = "<group>"; };
+		4E23D9EC68D2134067159DFB /* OnboardingView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
+		53CB1EB0E92750BF686F214C /* LaunchScreen.storyboard */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
+		70EEE36ABE229B869B690BFB /* LLMService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LLMService.swift; sourceTree = "<group>"; };
+		92A43CA0C38A9D38EFA94487 /* SettingsView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		9F1B5296369F631217B7F995 /* ChatMessage.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ChatMessage.swift; sourceTree = "<group>"; };
+		B10000002 /* Yemma4App.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Yemma4App.swift; sourceTree = "<group>"; };
+		B10000004 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		B10000006 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		B10000007 /* Yemma4.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Yemma4.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		FE484C3E95FF6F044B7B7BC4 /* ChatView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		B10000008 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8ED5E2862DF091C3920ED85D /* ExyteChat in Frameworks */,
+				64FB319E19C91C284A890874 /* LlamaSwift in Frameworks */,
+				DE02CFF274D65704AA747FAE /* HuggingFace in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		54934DF62416A306B1C5304E /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				FE484C3E95FF6F044B7B7BC4 /* ChatView.swift */,
+				4E23D9EC68D2134067159DFB /* OnboardingView.swift */,
+				92A43CA0C38A9D38EFA94487 /* SettingsView.swift */,
+			);
+			name = Views;
+			path = Views;
+			sourceTree = "<group>";
+		};
+		5B7C0764582A88CC0118AAB9 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				9F1B5296369F631217B7F995 /* ChatMessage.swift */,
+			);
+			name = Models;
+			path = Models;
+			sourceTree = "<group>";
+		};
+		B10000009 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				B10000007 /* Yemma4.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		B1000000A /* Yemma4 */ = {
+			isa = PBXGroup;
+			children = (
+				B10000002 /* Yemma4App.swift */,
+				B10000004 /* ContentView.swift */,
+				B10000006 /* Assets.xcassets */,
+				5B7C0764582A88CC0118AAB9 /* Models */,
+				CE67C04D23A2513EC55AA96D /* Services */,
+				54934DF62416A306B1C5304E /* Views */,
+				53CB1EB0E92750BF686F214C /* LaunchScreen.storyboard */,
+				39C187E5F33C4B9C302E7029 /* Yemma4.entitlements */,
+			);
+			path = Yemma4;
+			sourceTree = "<group>";
+		};
+		B1000000B = {
+			isa = PBXGroup;
+			children = (
+				B1000000A /* Yemma4 */,
+				B10000009 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		CE67C04D23A2513EC55AA96D /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				70EEE36ABE229B869B690BFB /* LLMService.swift */,
+				11FB93FF040AF083B453837C /* ModelDownloader.swift */,
+			);
+			name = Services;
+			path = Services;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		B1000000C /* Yemma4 */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B1000000D /* Build configuration list for PBXNativeTarget "Yemma4" */;
+			buildPhases = (
+				B1000000E /* Sources */,
+				B10000008 /* Frameworks */,
+				B1000000F /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Yemma4;
+			packageProductDependencies = (
+				9D280E543558115939ECD091 /* ExyteChat */,
+				5A2070CA61B2F9D46485B217 /* LlamaSwift */,
+				335533B55B7A9CBDE2622A31 /* HuggingFace */,
+			);
+			productName = Yemma4;
+			productReference = B10000007 /* Yemma4.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		B10000010 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1620;
+				LastUpgradeCheck = 1620;
+				TargetAttributes = {
+					B1000000C = {
+						CreatedOnToolsVersion = 16.2;
+					};
+				};
+			};
+			buildConfigurationList = B10000011 /* Build configuration list for PBXProject "Yemma4" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = B1000000B;
+			packageReferences = (
+				759333B69AA7F2876F0CFA95 /* XCRemoteSwiftPackageReference "Chat" */,
+				C126F031616C87B44C4B98E0 /* XCRemoteSwiftPackageReference "llama.swift" */,
+				C59B26DA3B5AE61F28CF4608 /* XCRemoteSwiftPackageReference "swift-huggingface" */,
+			);
+			productRefGroup = B10000009 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				B1000000C /* Yemma4 */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		B1000000F /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B10000005 /* Assets.xcassets in Resources */,
+				38135214F3C193EF4A21DDEE /* LaunchScreen.storyboard in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		B1000000E /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B10000001 /* Yemma4App.swift in Sources */,
+				B10000003 /* ContentView.swift in Sources */,
+				C18F96B6430B9FFB84F7095B /* ChatMessage.swift in Sources */,
+				8804C30D1CAED09270D51D6D /* LLMService.swift in Sources */,
+				F6A19338069476EC14B97082 /* ModelDownloader.swift in Sources */,
+				DF571A73493F2913161C6971 /* ChatView.swift in Sources */,
+				2174B7FC2EE2C3471527756A /* OnboardingView.swift in Sources */,
+				B3034772627DBF9FD8624142 /* SettingsView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		B10000012 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				DEVELOPMENT_TEAM = H8PYU9TN9X;
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNINITIALIZED = YES;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		B10000013 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				DEVELOPMENT_TEAM = H8PYU9TN9X;
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNINITIALIZED = YES;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_FAST_MATH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+			};
+			name = Release;
+		};
+		B10000014 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				DEVELOPMENT_TEAM = H8PYU9TN9X;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Yemma4/Yemma4.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 2;
+				DEVELOPMENT_ASSET_PATHS = "";
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
+				INFOPLIST_KEY_NSCameraUsageDescription = "Yemma uses the camera so you can capture photos to include in conversations.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Yemma saves generated and selected images to your photo library when you ask it to.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Yemma uses your photo library so you can attach existing images to conversations.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = NO;
+				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.avmillabs.yemma4;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		B10000015 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				DEVELOPMENT_TEAM = H8PYU9TN9X;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Yemma4/Yemma4.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 2;
+				DEVELOPMENT_ASSET_PATHS = "";
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
+				INFOPLIST_KEY_NSCameraUsageDescription = "Yemma uses the camera so you can capture photos to include in conversations.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Yemma saves generated and selected images to your photo library when you ask it to.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Yemma uses your photo library so you can attach existing images to conversations.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = NO;
+				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.avmillabs.yemma4;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		B1000000D /* Build configuration list for PBXNativeTarget "Yemma4" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B10000014 /* Debug */,
+				B10000015 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		B10000011 /* Build configuration list for PBXProject "Yemma4" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B10000012 /* Debug */,
+				B10000013 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		759333B69AA7F2876F0CFA95 /* XCRemoteSwiftPackageReference "Chat" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/exyte/Chat.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.7.8;
+			};
+		};
+		C126F031616C87B44C4B98E0 /* XCRemoteSwiftPackageReference "llama.swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/mattt/llama.swift.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.8640.0;
+			};
+		};
+		C59B26DA3B5AE61F28CF4608 /* XCRemoteSwiftPackageReference "swift-huggingface" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/huggingface/swift-huggingface.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.9.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		335533B55B7A9CBDE2622A31 /* HuggingFace */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C59B26DA3B5AE61F28CF4608 /* XCRemoteSwiftPackageReference "swift-huggingface" */;
+			productName = HuggingFace;
+		};
+		5A2070CA61B2F9D46485B217 /* LlamaSwift */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C126F031616C87B44C4B98E0 /* XCRemoteSwiftPackageReference "llama.swift" */;
+			productName = LlamaSwift;
+		};
+		9D280E543558115939ECD091 /* ExyteChat */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 759333B69AA7F2876F0CFA95 /* XCRemoteSwiftPackageReference "Chat" */;
+			productName = ExyteChat;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = B10000010 /* Project object */;
+}

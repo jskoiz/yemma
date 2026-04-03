@@ -13,18 +13,25 @@
                     <view key="view" contentMode="scaleToFill" id="RootView">
                         <rect key="frame" x="0.0" y="0.0" width="393" height="852"/>
                         <subviews>
+                            <imageView clipsSubviews="YES" userInteractionEnabled="NO" contentMode="scaleAspectFit" horizontalHuggingPriority="251" verticalHuggingPriority="251" image="BrandMark" translatesAutoresizingMaskIntoConstraints="NO" id="BrandImage">
+                                <rect key="frame" x="132.5" y="317" width="128" height="128"/>
+                            </imageView>
                             <label opaque="NO" userInteractionEnabled="NO" contentMode="left" horizontalHuggingPriority="251" verticalHuggingPriority="251" text="Yemma 4" textAlignment="center" lineBreakMode="tailTruncation" baselineAdjustment="alignBaselines" adjustsFontSizeToFit="NO" translatesAutoresizingMaskIntoConstraints="NO" id="TitleLabel">
-                                <rect key="frame" x="115.5" y="402" width="162" height="48"/>
+                                <rect key="frame" x="115.5" y="469" width="162" height="48"/>
                                 <fontDescription key="fontDescription" type="system" weight="semibold" pointSize="40"/>
-                                <color key="textColor" red="0.9803921569" green="0.8509803922" blue="0.5019607843" alpha="1" colorSpace="custom" customColorSpace="displayP3"/>
+                                <color key="textColor" red="0.2039215686" green="0.4549019608" blue="0.9490196078" alpha="1" colorSpace="custom" customColorSpace="displayP3"/>
                                 <nil key="highlightedColor"/>
                             </label>
                         </subviews>
                         <viewLayoutGuide key="safeArea" id="SafeArea"/>
-                        <color key="backgroundColor" red="0.0431372549" green="0.0509803922" blue="0.0705882353" alpha="1" colorSpace="custom" customColorSpace="displayP3"/>
+                        <color key="backgroundColor" white="1" alpha="1" colorSpace="custom" customColorSpace="genericGamma22GrayColorSpace"/>
                         <constraints>
+                            <constraint firstItem="BrandImage" firstAttribute="centerX" secondItem="RootView" secondAttribute="centerX" id="BrandCenterX"/>
+                            <constraint firstItem="TitleLabel" firstAttribute="top" secondItem="BrandImage" secondAttribute="bottom" constant="24" id="BrandToTitle"/>
                             <constraint firstItem="TitleLabel" firstAttribute="centerX" secondItem="RootView" secondAttribute="centerX" id="CenterX"/>
-                            <constraint firstItem="TitleLabel" firstAttribute="centerY" secondItem="RootView" secondAttribute="centerY" id="CenterY"/>
+                            <constraint firstItem="BrandImage" firstAttribute="centerY" secondItem="RootView" secondAttribute="centerY" constant="-54" id="ImageCenterY"/>
+                            <constraint firstAttribute="height" constant="128" id="ImageHeight"/>
+                            <constraint firstAttribute="width" constant="128" id="ImageWidth"/>
                         </constraints>
                     </view>
                 </viewController>
@@ -32,4 +39,7 @@
             </objects>
         </scene>
     </scenes>
+    <resources>
+        <image name="BrandMark" width="768" height="768"/>
+    </resources>
 </document>

@@ -73,7 +73,7 @@ public final class ModelDownloader {
                 }
             ).download()
 
-            try persistDownloadedFile(from: downloadResult.tempFileURL, to: destinationURL)
+            try persistDownloadedFile(from: downloadResult.stagedFileURL, to: destinationURL)
             clearResumeData()
 
             downloadProgress = 1
@@ -199,12 +199,13 @@ public final class ModelDownloader {
 
 private final class ModelDownloadCoordinator: NSObject, URLSessionDownloadDelegate, URLSessionTaskDelegate, @unchecked Sendable {
     struct Result {
-        let tempFileURL: URL
+        let stagedFileURL: URL
     }
 
     private let downloadURL: URL
     private let resumeData: Data?
     private let progressHandler: @Sendable (Double) -> Void
+    private let fileManager = FileManager.default
 
     private var session: URLSession?
     private var continuation: CheckedContinuation<Result, Error>?
@@ -258,8 +259,20 @@ private final class ModelDownloadCoordinator: NSObject, URLSessionDownloadDelega
     }
 
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
-        continuation?.resume(returning: Result(tempFileURL: location))
-        finish()
+        do {
+            let stagedURL = try makeStagedDownloadURL()
+
+            if fileManager.fileExists(atPath: stagedURL.path) {
+                try fileManager.removeItem(at: stagedURL)
+            }
+
+            try fileManager.moveItem(at: location, to: stagedURL)
+            continuation?.resume(returning: Result(stagedFileURL: stagedURL))
+            finish()
+        } catch {
+            continuation?.resume(throwing: error)
+            finish()
+        }
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didBecomeInvalidWithError error: Error?) {
@@ -273,5 +286,16 @@ private final class ModelDownloadCoordinator: NSObject, URLSessionDownloadDelega
         session?.finishTasksAndInvalidate()
         session = nil
         continuation = nil
+    }
+
+    private func makeStagedDownloadURL() throws -> URL {
+        let cachesDirectory = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first!
+        let stagingDirectory = cachesDirectory.appendingPathComponent("ModelDownloads", isDirectory: true)
+
+        if !fileManager.fileExists(atPath: stagingDirectory.path) {
+            try fileManager.createDirectory(at: stagingDirectory, withIntermediateDirectories: true)
+        }
+
+        return stagingDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension("gguf")
     }
 }

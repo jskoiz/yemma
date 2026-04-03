@@ -3,6 +3,8 @@ DerivedData/
 .build/
 .swiftpm/
 Package.resolved
+.deriveddata/
+.local-models/
 *.xcuserstate
 xcuserdata/
 *.xcworkspace/xcuserdata/
