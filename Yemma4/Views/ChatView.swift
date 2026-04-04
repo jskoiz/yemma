@@ -1044,7 +1044,7 @@ public struct ChatView: View {
             return
         }
 
-        await handlePrompt(prompt)
+        await handlePrompt(prompt, attachments: [])
     }
 
     @MainActor
