@@ -120,13 +120,26 @@ final class AppDiagnostics: @unchecked Sendable {
     }
 
     private func persist(_ events: [DiagnosticEvent]) {
-        guard let data = try? encoder.encode(events) else { return }
-        UserDefaults.standard.set(data, forKey: storageKey)
+        let encoder = self.encoder
+        let key = self.storageKey
+        Task.detached(priority: .utility) {
+            await DiagnosticsWriter.shared.write(events: events, encoder: encoder, storageKey: key)
+        }
     }
 
     private func withLock<T>(_ body: () -> T) -> T {
         lock.lock()
         defer { lock.unlock() }
         return body()
+    }
+}
+
+/// Serial writer actor that keeps UserDefaults I/O off the caller's thread.
+private actor DiagnosticsWriter {
+    static let shared = DiagnosticsWriter()
+
+    func write(events: [DiagnosticEvent], encoder: JSONEncoder, storageKey: String) {
+        guard let data = try? encoder.encode(events) else { return }
+        UserDefaults.standard.set(data, forKey: storageKey)
     }
 }

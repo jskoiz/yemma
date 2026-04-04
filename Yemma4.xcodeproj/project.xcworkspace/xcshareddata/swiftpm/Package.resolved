@@ -65,15 +65,6 @@
       }
     },
     {
-      "identity" : "mediapicker",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/exyte/MediaPicker.git",
-      "state" : {
-        "revision" : "fd71c0b560aa79eee1b87f73ce93fac5576a01df",
-        "version" : "3.2.4"
-      }
-    },
-    {
       "identity" : "networkimage",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/gonzalezreal/NetworkImage",
