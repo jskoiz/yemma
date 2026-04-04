@@ -118,6 +118,7 @@ public struct ContentView: View {
     @Environment(ModelDownloader.self) private var modelDownloader
     @Environment(LLMService.self) private var llmService
 
+    private let supportsLocalModelRuntime = Yemma4AppConfiguration.supportsLocalModelRuntime
     @State private var modelLoadError: String?
     @State private var loadedModelPath: String?
     @State private var hasValidatedLocalModel = false
@@ -127,7 +128,7 @@ public struct ContentView: View {
 
     public var body: some View {
         ZStack {
-            if modelDownloader.isDownloaded && !isShowingOnboardingPreview {
+            if shouldShowChat {
                 ChatView(
                     onShowOnboarding: {
                         isShowingOnboardingPreview = true
@@ -136,7 +137,7 @@ public struct ContentView: View {
                     .transition(.opacity.combined(with: .move(edge: .trailing)))
             } else {
                 OnboardingView(
-                    onContinue: modelDownloader.isDownloaded ? {
+                    onContinue: canContinueFromOnboarding ? {
                         isShowingOnboardingPreview = false
                     } : nil
                 )
@@ -172,15 +173,30 @@ public struct ContentView: View {
         }
     }
 
+    private var shouldShowChat: Bool {
+        !isShowingOnboardingPreview && (modelDownloader.isDownloaded || !supportsLocalModelRuntime)
+    }
+
+    private var canContinueFromOnboarding: Bool {
+        modelDownloader.isDownloaded || !supportsLocalModelRuntime
+    }
+
     private func loadModelIfNeeded(force: Bool = false) async {
+        guard Yemma4AppConfiguration.supportsLocalModelRuntime else {
+            await MainActor.run {
+                loadedModelPath = nil
+                modelLoadError = nil
+            }
+            return
+        }
+
         guard let modelPath = modelDownloader.modelPath else { return }
-        guard force || loadedModelPath != modelPath || !llmService.isModelLoaded else { return }
-        let service = llmService
+        guard force || loadedModelPath != modelPath || (!llmService.isModelLoaded && !llmService.isModelLoading) else { return }
 
         do {
-            try await Task.detached(priority: .userInitiated) {
-                try service.loadModel(from: modelPath)
-            }.value
+            // Let the download-state transition render before heavy model setup begins.
+            await Task.yield()
+            try await llmService.loadModel(from: modelPath)
 
             await MainActor.run {
                 loadedModelPath = modelPath

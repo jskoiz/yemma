@@ -9,6 +9,7 @@ import UIKit
 public struct ChatView: View {
     @Environment(LLMService.self) private var llmService
 
+    private let supportsLocalModelRuntime = Yemma4AppConfiguration.supportsLocalModelRuntime
     @State private var messages: [ChatMessage] = []
     @State private var draft = ""
     @State private var generationTask: Task<Void, Never>?
@@ -65,20 +66,16 @@ public struct ChatView: View {
                 }
             }
             .toolbar(.hidden, for: .navigationBar)
-            .toolbar {
-                ToolbarItemGroup(placement: .keyboard) {
-                    Spacer()
-                    Button("Done") {
-                        isComposerFocused = false
-                    }
-                }
-            }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 composerSection
             }
             .sheet(isPresented: $showSettings) {
                 SettingsView(
-                    onClearConversation: clearConversation,
+                    onClearConversation: {
+                        Task { @MainActor in
+                            await clearConversation()
+                        }
+                    },
                     onShowOnboarding: {
                         showSettings = false
                         onShowOnboarding()
@@ -92,15 +89,21 @@ public struct ChatView: View {
                 ConversationsView(
                     messages: messages,
                     onStartFresh: {
-                        clearConversation()
-                        showConversations = false
+                        Task { @MainActor in
+                            await clearConversation()
+                            showConversations = false
+                        }
                     }
                 )
                 .presentationDetents([.large])
                 .presentationDragIndicator(.hidden)
                 .presentationBackground(.clear)
             }
-            .onDisappear(perform: stopGeneration)
+            .onDisappear {
+                Task { @MainActor in
+                    await stopGeneration()
+                }
+            }
             .animation(.easeInOut(duration: 0.2), value: toastMessage)
             .alert(
                 "Generation Failed",
@@ -146,7 +149,11 @@ public struct ChatView: View {
 
             Spacer(minLength: 0)
 
-            CircleIconButton(systemName: "square.and.pencil", action: clearConversation)
+            CircleIconButton(systemName: "square.and.pencil") {
+                Task { @MainActor in
+                    await clearConversation()
+                }
+            }
         }
         .padding(.horizontal, 16)
         .padding(.top, 6)
@@ -205,9 +212,9 @@ public struct ChatView: View {
             Spacer(minLength: 24)
 
             if !llmService.isModelLoaded {
-                Text("Loading your on-device model...")
+                Text(modelStatusText)
                     .font(.system(size: 15, weight: .semibold, design: .rounded))
-                    .foregroundStyle(AppTheme.textSecondary)
+                    .foregroundStyle(modelStatusTextColor)
                     .padding(.horizontal, 18)
                     .padding(.vertical, 10)
                     .glassCard(cornerRadius: 18)
@@ -297,10 +304,16 @@ public struct ChatView: View {
                     .font(.system(size: 18, weight: .medium, design: .rounded))
                     .foregroundStyle(AppTheme.textPrimary)
                     .focused($isComposerFocused)
+                    .submitLabel(.send)
+                    .onSubmit {
+                        submitDraft()
+                    }
 
                 Button {
                     if llmService.isGenerating {
-                        stopGeneration()
+                        Task { @MainActor in
+                            await stopGeneration()
+                        }
                     } else {
                         submitDraft()
                     }
@@ -313,8 +326,8 @@ public struct ChatView: View {
                         .clipShape(Circle())
                 }
                 .buttonStyle(.plain)
-                .disabled(!llmService.isGenerating && (!llmService.isModelLoaded || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
-                .opacity((!llmService.isGenerating && (!llmService.isModelLoaded || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)) ? 0.45 : 1)
+                .disabled(!llmService.isGenerating && !canSubmitDraft)
+                .opacity((!llmService.isGenerating && !canSubmitDraft) ? 0.45 : 1)
             }
             .padding(8)
             .background(
@@ -325,6 +338,10 @@ public struct ChatView: View {
                             .stroke(Color.white.opacity(0.82), lineWidth: 1)
                     )
             )
+            .contentShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .onTapGesture {
+                isComposerFocused = true
+            }
         }
         .padding(.horizontal, 16)
         .padding(.top, 10)
@@ -397,6 +414,28 @@ public struct ChatView: View {
         return lastAssistantMessage.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    private var canSubmitDraft: Bool {
+        let hasDraft = !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        guard hasDraft else { return false }
+        return llmService.isModelLoaded || !supportsLocalModelRuntime
+    }
+
+    private var modelStatusText: String {
+        if !supportsLocalModelRuntime {
+            return "Simulator mode: mock replies are enabled so you can test the chat UI without downloading the model."
+        }
+
+        return "Loading your on-device model..."
+    }
+
+    private var modelStatusTextColor: Color {
+        if !supportsLocalModelRuntime {
+            return AppTheme.textPrimary
+        }
+
+        return AppTheme.textSecondary
+    }
+
     private func toastView(message: String) -> some View {
         Text(message)
             .font(.system(size: 14, weight: .semibold, design: .rounded))
@@ -420,7 +459,7 @@ public struct ChatView: View {
     private func submitDraft() {
         let trimmedText = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedText.isEmpty else { return }
-        guard llmService.isModelLoaded else {
+        guard llmService.isModelLoaded || !supportsLocalModelRuntime else {
             AppDiagnostics.shared.record("Send blocked because model is not loaded", category: "ui")
             generationError = "The model is not loaded yet."
             return
@@ -440,12 +479,15 @@ public struct ChatView: View {
             ]
         )
         draft = ""
-        handlePrompt(trimmedText)
+        Task { @MainActor in
+            await handlePrompt(trimmedText)
+        }
     }
 
-    private func handlePrompt(_ trimmedText: String) {
+    @MainActor
+    private func handlePrompt(_ trimmedText: String) async {
         triggerSendHaptic()
-        stopGeneration()
+        await stopGeneration()
 
         let history = conversationHistory(from: messages)
         let userMessage = ChatMessage(
@@ -509,7 +551,7 @@ public struct ChatView: View {
             }
 
             if shouldStop {
-                stopGeneration()
+                await llmService.stopGeneration()
                 break
             }
         }
@@ -611,9 +653,9 @@ public struct ChatView: View {
     }
 
     @MainActor
-    private func clearConversation() {
+    private func clearConversation() async {
         AppDiagnostics.shared.record("Conversation cleared", category: "ui", metadata: ["previousMessages": messages.count])
-        stopGeneration()
+        await stopGeneration()
         messages.removeAll()
         draft = ""
         generationError = nil
@@ -651,10 +693,11 @@ public struct ChatView: View {
         return lowercased.contains("memory") || lowercased.contains("oom") || lowercased.contains("out of memory")
     }
 
-    private func stopGeneration() {
+    @MainActor
+    private func stopGeneration() async {
         generationTask?.cancel()
         generationTask = nil
-        llmService.stopGeneration()
+        await llmService.stopGeneration()
     }
 }
 
