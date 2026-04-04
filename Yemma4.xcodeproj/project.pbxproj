@@ -177,7 +177,6 @@
 			mainGroup = B1000000B;
 			packageReferences = (
 				759333B69AA7F2876F0CFA95 /* XCRemoteSwiftPackageReference "Chat" */,
-				86F4F44F8A0D4F2B9F9CE4C1 /* XCRemoteSwiftPackageReference "MediaPicker" */,
 				A1000004 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */,
 				C126F031616C87B44C4B98E0 /* XCRemoteSwiftPackageReference "llama.swift" */,
 			);
@@ -457,14 +456,6 @@
 			requirement = {
 				kind = upToNextMajorVersion;
 				minimumVersion = 2.7.8;
-			};
-		};
-		86F4F44F8A0D4F2B9F9CE4C1 /* XCRemoteSwiftPackageReference "MediaPicker" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/exyte/MediaPicker.git";
-			requirement = {
-				kind = exactVersion;
-				version = 3.2.4;
 			};
 		};
 		C126F031616C87B44C4B98E0 /* XCRemoteSwiftPackageReference "llama.swift" */ = {

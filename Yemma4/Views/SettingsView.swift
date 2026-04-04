@@ -227,8 +227,11 @@ public struct SettingsView: View {
             titleVisibility: .visible
         ) {
             Button("Delete Model", role: .destructive) {
-                modelDownloader.deleteModel()
-                dismiss()
+                Task {
+                    await llmService.unloadModel()
+                    modelDownloader.deleteModel()
+                    dismiss()
+                }
             }
             Button("Cancel", role: .cancel) {}
         } message: {

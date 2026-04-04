@@ -208,7 +208,7 @@ public struct ChatView: View {
     private var conversationContent: some View {
         ScrollViewReader { proxy in
             ScrollView(showsIndicators: false) {
-                VStack(spacing: messages.isEmpty ? 26 : 14) {
+                LazyVStack(spacing: messages.isEmpty ? 26 : 14) {
                     if messages.isEmpty {
                         emptyState
                     } else {
