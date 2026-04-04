@@ -6,13 +6,12 @@ public struct OnboardingView: View {
     @Environment(LLMService.self) private var llmService
     @State private var isStartingDownload = false
 
-    private let estimatedModelBytes: Int64 = 6_400_000_000
     private let supportsLocalModelRuntime = Yemma4AppConfiguration.supportsLocalModelRuntime
     private let onContinue: (() -> Void)?
     private let onRetryModelLoad: (() -> Void)?
     private let setupFacts = [
         "100% on-device",
-        "~6.4 GB once",
+        "Wi-Fi recommended",
         "Works offline"
     ]
 
@@ -144,13 +143,14 @@ public struct OnboardingView: View {
             }
 
             if modelDownloader.isDownloading {
-                ProgressView(value: modelDownloader.downloadProgress)
-                    .tint(AppTheme.accent)
+                AnimatedProgressBar(progress: modelDownloader.downloadProgress)
 
                 HStack {
                     Text("Downloading model")
                     Spacer()
-                    Text(remainingString)
+                    if let eta = modelDownloader.estimatedSecondsRemaining {
+                        Text(Self.formatETA(eta))
+                    }
                 }
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(AppTheme.textSecondary)
@@ -272,15 +272,6 @@ public struct OnboardingView: View {
         return "\(Int(modelDownloader.downloadProgress * 100))%"
     }
 
-    private var remainingString: String {
-        let remainingFraction = max(0, 1 - modelDownloader.downloadProgress)
-        let remainingBytes = Int64(Double(estimatedModelBytes) * remainingFraction)
-        if modelDownloader.isDownloaded {
-            return "Stored locally"
-        }
-        return "\(Self.formattedByteCount(remainingBytes)) remaining"
-    }
-
     private var downloadActionTitle: String {
         if !supportsLocalModelRuntime {
             return "Unavailable in Simulator"
@@ -392,8 +383,67 @@ public struct OnboardingView: View {
         await modelDownloader.downloadModel()
     }
 
-    private static func formattedByteCount(_ bytes: Int64) -> String {
-        ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+    private static func formatETA(_ seconds: Double) -> String {
+        let s = Int(seconds)
+        if s < 60 {
+            return "Less than a minute"
+        } else if s < 3600 {
+            let minutes = s / 60
+            return "\(minutes) min remaining"
+        } else {
+            let hours = s / 3600
+            let minutes = (s % 3600) / 60
+            if minutes == 0 {
+                return "\(hours)h remaining"
+            }
+            return "\(hours)h \(minutes)m remaining"
+        }
+    }
+}
+
+private struct AnimatedProgressBar: View {
+    let progress: Double
+
+    @State private var shimmerOffset: CGFloat = -1
+
+    var body: some View {
+        GeometryReader { geometry in
+            let barWidth = geometry.size.width
+            let fillWidth = barWidth * min(max(progress, 0), 1)
+
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(AppTheme.controlFill)
+
+                Capsule()
+                    .fill(AppTheme.accent)
+                    .frame(width: fillWidth)
+                    .overlay(
+                        LinearGradient(
+                            colors: [
+                                .white.opacity(0),
+                                .white.opacity(0.25),
+                                .white.opacity(0)
+                            ],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                        .offset(x: shimmerOffset * fillWidth)
+                        .clipShape(Capsule())
+                    )
+                    .animation(.easeInOut(duration: 0.3), value: progress)
+            }
+        }
+        .frame(height: 6)
+        .clipShape(Capsule())
+        .onAppear {
+            withAnimation(
+                .easeInOut(duration: 1.5)
+                .repeatForever(autoreverses: true)
+            ) {
+                shimmerOffset = 1
+            }
+        }
     }
 }
 

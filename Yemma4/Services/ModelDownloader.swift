@@ -34,6 +34,10 @@ public final class ModelDownloader {
     public var error: String?
     public var modelPath: String?
     public var mmprojPath: String?
+    public var estimatedSecondsRemaining: Double?
+
+    private var downloadStartDate: Date?
+    private var downloadStartProgress: Double = 0
 
     public var localResources: LocalModelResources? {
         guard
@@ -268,12 +272,48 @@ public final class ModelDownloader {
         return min(1, max(0, Double(downloadedBytes) / Double(Self.totalExpectedBytes)))
     }
 
+    private func updateETA() {
+        guard let startDate = downloadStartDate, downloadProgress > downloadStartProgress else {
+            estimatedSecondsRemaining = nil
+            return
+        }
+
+        let elapsed = Date().timeIntervalSince(startDate)
+        guard elapsed > 2 else {
+            estimatedSecondsRemaining = nil
+            return
+        }
+
+        let progressSinceStart = downloadProgress - downloadStartProgress
+        guard progressSinceStart > 0, downloadProgress < 1 else {
+            estimatedSecondsRemaining = nil
+            return
+        }
+
+        let rate = progressSinceStart / elapsed
+        let remaining = (1 - downloadProgress) / rate
+        estimatedSecondsRemaining = remaining
+    }
+
+    private func resetETA() {
+        downloadStartDate = nil
+        downloadStartProgress = 0
+        estimatedSecondsRemaining = nil
+    }
+
+    private func startETA() {
+        downloadStartDate = Date()
+        downloadStartProgress = downloadProgress
+        estimatedSecondsRemaining = nil
+    }
+
     private func startDownload(for asset: LocalModelAsset) async {
         activeAssetKind = asset.kind
         isDownloading = true
         canResumeDownload = false
         error = nil
         downloadProgress = aggregatedProgress(activeAsset: asset, activeProgress: 0)
+        startETA()
 
         let resumeData = ModelDownloaderIO.loadResumeDataIfAvailable(
             fileManager: fileManager,
@@ -287,6 +327,7 @@ public final class ModelDownloader {
             progressHandler: { [weak self] progress in
                 Task { @MainActor [weak self] in
                     self?.downloadProgress = self?.aggregatedProgress(activeAsset: asset, activeProgress: progress) ?? progress
+                    self?.updateETA()
                 }
             },
             completionHandler: { [weak self] result in
@@ -299,6 +340,7 @@ public final class ModelDownloader {
         switch startResult {
         case let .started(progress), let .reconnected(progress):
             downloadProgress = aggregatedProgress(activeAsset: asset, activeProgress: progress)
+            startETA()
             isDownloading = true
             canResumeDownload = false
             AppDiagnostics.shared.record(
@@ -332,6 +374,7 @@ public final class ModelDownloader {
             progressHandler: { [weak self] progress in
                 Task { @MainActor [weak self] in
                     self?.downloadProgress = self?.aggregatedProgress(activeAsset: asset, activeProgress: progress) ?? progress
+                    self?.updateETA()
                 }
             },
             completionHandler: { [weak self] result in
@@ -347,6 +390,7 @@ public final class ModelDownloader {
             canResumeDownload = false
             error = nil
             downloadProgress = aggregatedProgress(activeAsset: asset, activeProgress: progress)
+            startETA()
             return true
         case .completed:
             await handleSuccessfulAssetDownload(asset)
@@ -381,6 +425,7 @@ public final class ModelDownloader {
         isDownloading = false
         canResumeDownload = false
         downloadProgress = 1
+        resetETA()
     }
 
     private func handleBackgroundDownloadCompletion(
@@ -397,6 +442,7 @@ public final class ModelDownloader {
 
             isDownloading = false
             activeAssetKind = nil
+            resetETA()
             refreshLocalState()
             self.error = Self.describe(error)
 
