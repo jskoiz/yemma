@@ -18,6 +18,7 @@
 		B10000001 /* Yemma4App.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000002 /* Yemma4App.swift */; };
 		B10000003 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000004 /* ContentView.swift */; };
 		B10000005 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B10000006 /* Assets.xcassets */; };
+		B10000016 /* Appearance.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000017 /* Appearance.swift */; };
 		B3034772627DBF9FD8624142 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92A43CA0C38A9D38EFA94487 /* SettingsView.swift */; };
 		C18F96B6430B9FFB84F7095B /* ChatMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F1B5296369F631217B7F995 /* ChatMessage.swift */; };
 		DF571A73493F2913161C6971 /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE484C3E95FF6F044B7B7BC4 /* ChatView.swift */; };
@@ -38,6 +39,7 @@
 		B10000004 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		B10000006 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		B10000007 /* Yemma4.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Yemma4.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B10000017 /* Appearance.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = Appearance.swift; sourceTree = "<group>"; };
 		FE484C3E95FF6F044B7B7BC4 /* ChatView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -85,6 +87,7 @@
 		B1000000A /* Yemma4 */ = {
 			isa = PBXGroup;
 			children = (
+				B10000017 /* Appearance.swift */,
 				B10000002 /* Yemma4App.swift */,
 				B10000004 /* ContentView.swift */,
 				B10000006 /* Assets.xcassets */,
@@ -196,6 +199,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B10000016 /* Appearance.swift in Sources */,
 				B10000001 /* Yemma4App.swift in Sources */,
 				B10000003 /* ContentView.swift in Sources */,
 				C18F96B6430B9FFB84F7095B /* ChatMessage.swift in Sources */,
