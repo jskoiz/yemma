@@ -991,9 +991,9 @@ private extension LLMService {
     }
 
     static func tryApplyGemma4Template(
-        conversation: [(role: String, content: String)],
+        conversation: [PromptMessageInput],
         model: OpaquePointer
-    ) -> String? {
+    ) -> FormattedPrompt? {
         guard let templatePointer = llama_model_chat_template(model, nil) else {
             return nil
         }
@@ -1008,14 +1008,13 @@ private extension LLMService {
 
         for message in conversation {
             let role = gemmaRole(message.role)
-            let content = role == "model"
-                ? stripThinkingBlocks(from: message.content)
-                : message.content.trimmingCharacters(in: .whitespacesAndNewlines)
+            let content = serializedContent(for: message)
             pieces.append("<start_of_turn>\(role)\n\(content)<end_of_turn>\n")
         }
 
         pieces.append("<start_of_turn>model\n")
         let prompt = pieces.joined()
+        let images = conversation.flatMap(\.images)
 
         AppDiagnostics.shared.record(
             "Applied Gemma 4 chat template manually",
@@ -1026,7 +1025,7 @@ private extension LLMService {
             ]
         )
 
-        return prompt
+        return FormattedPrompt(text: prompt, images: images)
     }
 
     static func gemmaRole(_ role: String) -> String {
