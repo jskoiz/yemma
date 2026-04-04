@@ -81,9 +81,25 @@ final class LLMService: @unchecked Sendable {
     var isModelLoaded = false
     var isModelLoading = false
     var isGenerating = false
-    var temperature = 1.0
+    var temperature: Double {
+        didSet { UserDefaults.standard.set(temperature, forKey: "llm_temperature") }
+    }
+    var contextSize: UInt32 {
+        didSet { UserDefaults.standard.set(Int(contextSize), forKey: "llm_contextSize") }
+    }
+    var flashAttention: Bool {
+        didSet { UserDefaults.standard.set(flashAttention, forKey: "llm_flashAttention") }
+    }
+    var maxResponseTokens: Int {
+        didSet { UserDefaults.standard.set(maxResponseTokens, forKey: "llm_maxResponseTokens") }
+    }
     var lastError: String?
     var modelLoadStage: ModelLoadStage = .idle
+
+    static let defaultTemperature: Double = 0.7
+    static let defaultContextSize: UInt32 = 8192
+    static let defaultFlashAttention: Bool = true
+    static let defaultMaxResponseTokens: Int = 1024
 
     @ObservationIgnored private var model: OpaquePointer?
     @ObservationIgnored private var context: OpaquePointer?
@@ -98,7 +114,20 @@ final class LLMService: @unchecked Sendable {
         llama_backend_init()
     }()
 
-    init() {}
+    init() {
+        let defaults = UserDefaults.standard
+        temperature = defaults.object(forKey: "llm_temperature") as? Double ?? Self.defaultTemperature
+        contextSize = UInt32(defaults.object(forKey: "llm_contextSize") as? Int ?? Int(Self.defaultContextSize))
+        flashAttention = defaults.object(forKey: "llm_flashAttention") as? Bool ?? Self.defaultFlashAttention
+        maxResponseTokens = defaults.object(forKey: "llm_maxResponseTokens") as? Int ?? Self.defaultMaxResponseTokens
+    }
+
+    func resetAdvancedSettings() {
+        temperature = Self.defaultTemperature
+        contextSize = Self.defaultContextSize
+        flashAttention = Self.defaultFlashAttention
+        maxResponseTokens = Self.defaultMaxResponseTokens
+    }
 
     deinit {
         stopGenerationSynchronously()
@@ -172,9 +201,13 @@ final class LLMService: @unchecked Sendable {
                 )
 
                 let resourceLoadStart = Date()
+                let ctxSize = await MainActor.run { self?.contextSize ?? Self.defaultContextSize }
+                let flashAttn = await MainActor.run { self?.flashAttention ?? Self.defaultFlashAttention }
                 let loadedResources = try Self.loadResources(
                     modelPath: resolvedPath,
-                    mmprojPath: resolvedMMProjPath
+                    mmprojPath: resolvedMMProjPath,
+                    contextSize: ctxSize,
+                    flashAttention: flashAttn
                 )
                 let resourceLoadMs = Int(Date().timeIntervalSince(resourceLoadStart) * 1000)
 
@@ -312,6 +345,7 @@ final class LLMService: @unchecked Sendable {
                 vocab: currentVocab,
                 multimodalRuntime: currentResources.multimodalRuntime,
                 samplerConfig: generationConfig,
+                maxGeneratedTokens: self.maxResponseTokens,
                 continuation: continuationBox,
                 completionGroup: completionGroup
             )
@@ -414,7 +448,6 @@ final class LLMService: @unchecked Sendable {
 }
 
 private extension LLMService {
-    static let maxGeneratedTokens = 1024
     static let mediaPromptMarker = "<__media__>"
 
     struct ModelLoadThreadCounts: Sendable {
@@ -470,7 +503,12 @@ private extension LLMService {
         )
     }
 
-    static func loadResources(modelPath: String, mmprojPath: String) throws -> LoadedResources {
+    static func loadResources(
+        modelPath: String,
+        mmprojPath: String,
+        contextSize: UInt32 = defaultContextSize,
+        flashAttention: Bool = defaultFlashAttention
+    ) throws -> LoadedResources {
         var modelParams = llama_model_default_params()
 #if targetEnvironment(simulator)
         modelParams.n_gpu_layers = 0
@@ -479,10 +517,10 @@ private extension LLMService {
 #endif
 
         var contextParams = llama_context_default_params()
-        contextParams.n_ctx = 8192
+        contextParams.n_ctx = contextSize
         contextParams.n_batch = 512
         contextParams.n_ubatch = 512
-        contextParams.flash_attn = true
+        contextParams.flash_attn = flashAttention
 
         let threadCounts = recommendedThreadCounts()
         contextParams.n_threads = threadCounts.decode
@@ -544,6 +582,7 @@ private extension LLMService {
         let vocab: OpaquePointer
         let multimodalRuntime: YemmaMultimodalRuntime?
         let samplerConfig: SamplerConfig
+        let maxGeneratedTokens: Int
         let continuation: StreamContinuationBox<String>
         let completionGroup: CompletionGroupBox
 
@@ -554,6 +593,7 @@ private extension LLMService {
             vocab: OpaquePointer,
             multimodalRuntime: YemmaMultimodalRuntime?,
             samplerConfig: SamplerConfig,
+            maxGeneratedTokens: Int,
             continuation: StreamContinuationBox<String>,
             completionGroup: CompletionGroupBox
         ) {
@@ -563,6 +603,7 @@ private extension LLMService {
             self.vocab = vocab
             self.multimodalRuntime = multimodalRuntime
             self.samplerConfig = samplerConfig
+            self.maxGeneratedTokens = maxGeneratedTokens
             self.continuation = continuation
             self.completionGroup = completionGroup
         }
@@ -629,7 +670,7 @@ private extension LLMService {
             defer { llama_sampler_free(sampler) }
 
             let contextLimit = max(1, Int(llama_n_ctx(job.context)))
-            let promptPositionLimit = max(1, contextLimit - maxGeneratedTokens)
+            let promptPositionLimit = max(1, contextLimit - job.maxGeneratedTokens)
             let promptTokenCount: Int
             let promptPositionCount: Int
             var nextPosition: Int32
@@ -688,7 +729,7 @@ private extension LLMService {
             var emittedTokenCount = 0
 
             while !Task.isCancelled {
-                guard emittedTokenCount < maxGeneratedTokens else {
+                guard emittedTokenCount < job.maxGeneratedTokens else {
                     break
                 }
                 guard nextPosition < Int32(contextLimit) else {
