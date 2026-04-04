@@ -173,14 +173,12 @@ public enum DebugInferenceScenario: String, CaseIterable, Identifiable {
 
 public struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
-    @Environment(AppDiagnostics.self) private var diagnostics
     @Environment(ModelDownloader.self) private var modelDownloader
     @Environment(LLMService.self) private var llmService
     @AppStorage(AppearancePreference.storageKey) private var appearancePreferenceRaw = AppearancePreference.system.rawValue
 
     @State private var showDeleteModelConfirmation = false
     @State private var showClearConversationConfirmation = false
-    @State private var diagnosticsCopied = false
 
     private let onClearConversation: () -> Void
     private let onShowOnboarding: () -> Void
@@ -205,12 +203,6 @@ public struct SettingsView: View {
                     VStack(spacing: 24) {
                         header
                         appSection
-                        diagnosticsSection
-#if DEBUG
-                        if onRunDebugScenario != nil {
-                            debugSection
-                        }
-#endif
                         aboutSection
                         moreSection
                     }
@@ -249,11 +241,6 @@ public struct SettingsView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("This removes the current local chat history.")
-        }
-        .alert("Diagnostics copied", isPresented: $diagnosticsCopied) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text("The recent diagnostics log is on the pasteboard.")
         }
     }
 
@@ -322,46 +309,6 @@ public struct SettingsView: View {
         }
     }
 
-    private var diagnosticsSection: some View {
-        settingsSection("Diagnostics") {
-            VStack(spacing: 0) {
-                infoRow(icon: "waveform.path.ecg", title: "Recent events", detail: "\(diagnostics.recentEvents.count)")
-                separator
-                Button {
-                    diagnostics.copyToPasteboard()
-                    diagnosticsCopied = true
-                } label: {
-                    HStack(spacing: 14) {
-                        Image(systemName: "doc.on.doc")
-                            .frame(width: 22)
-                            .foregroundStyle(AppTheme.textPrimary)
-                        Text("Copy diagnostics log")
-                            .font(.system(size: 18, weight: .medium, design: .rounded))
-                            .foregroundStyle(AppTheme.textPrimary)
-                        Spacer()
-                    }
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 16)
-                }
-                .buttonStyle(.plain)
-                separator
-                destructiveRow(icon: "trash", title: "Clear diagnostics log") {
-                    diagnostics.clear()
-                }
-
-                if diagnostics.recentEvents.isEmpty {
-                    separator
-                    infoRow(icon: "info.circle", title: "Latest", detail: "No events yet")
-                } else {
-                    ForEach(Array(diagnostics.recentEvents.suffix(8).reversed())) { event in
-                        separator
-                        diagnosticEventRow(event)
-                    }
-                }
-            }
-        }
-    }
-
     private var moreSection: some View {
         settingsSection("More") {
             VStack(spacing: 0) {
@@ -376,36 +323,6 @@ public struct SettingsView: View {
         }
     }
 
-#if DEBUG
-    private var debugSection: some View {
-        settingsSection("Debug") {
-            VStack(spacing: 0) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Use these from a Debug build to probe formatting quality. Run the live prompts on a physical iPhone, since the simulator only returns mocked replies.")
-                        .font(.system(size: 14, weight: .medium, design: .rounded))
-                        .foregroundStyle(AppTheme.textSecondary)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 18)
-                .padding(.vertical, 16)
-
-                if let onRunDebugScenario {
-                    ForEach(DebugInferenceScenario.allCases) { scenario in
-                        separator
-                        actionDetailRow(
-                            icon: scenario.icon,
-                            title: scenario.title,
-                            detail: scenario.detail
-                        ) {
-                            dismiss()
-                            onRunDebugScenario(scenario)
-                        }
-                    }
-                }
-            }
-        }
-    }
-#endif
 
     private func settingsSection<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -444,7 +361,7 @@ public struct SettingsView: View {
 
     private var advancedRow: some View {
         NavigationLink {
-            AdvancedSettingsView()
+            AdvancedSettingsView(onRunDebugScenario: onRunDebugScenario)
         } label: {
             HStack(spacing: 14) {
                 Image(systemName: "gearshape.2")
@@ -454,40 +371,6 @@ public struct SettingsView: View {
                     .font(.system(size: 18, weight: .medium, design: .rounded))
                     .foregroundStyle(AppTheme.textPrimary)
                 Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(AppTheme.textSecondary)
-            }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 16)
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func actionDetailRow(
-        icon: String,
-        title: String,
-        detail: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            HStack(spacing: 14) {
-                Image(systemName: icon)
-                    .frame(width: 22)
-                    .foregroundStyle(AppTheme.textPrimary)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(title)
-                        .font(.system(size: 18, weight: .medium, design: .rounded))
-                        .foregroundStyle(AppTheme.textPrimary)
-                    Text(detail)
-                        .font(.system(size: 14, weight: .medium, design: .rounded))
-                        .foregroundStyle(AppTheme.textSecondary)
-                        .multilineTextAlignment(.leading)
-                }
-
-                Spacer()
-
                 Image(systemName: "chevron.right")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(AppTheme.textSecondary)
@@ -561,40 +444,6 @@ public struct SettingsView: View {
             .padding(.horizontal, 18)
             .padding(.vertical, 16)
         }
-    }
-
-    private func diagnosticEventRow(_ event: DiagnosticEvent) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(event.category.uppercased())
-                    .font(.system(size: 12, weight: .bold, design: .rounded))
-                    .foregroundStyle(AppTheme.textSecondary)
-
-                Spacer()
-
-                Text(event.timestamp.formatted(date: .omitted, time: .standard))
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                    .foregroundStyle(AppTheme.textSecondary)
-            }
-
-            Text(event.message)
-                .font(.system(size: 15, weight: .semibold, design: .rounded))
-                .foregroundStyle(AppTheme.textPrimary)
-
-            if !event.metadata.isEmpty {
-                Text(
-                    event.metadata
-                        .sorted { $0.key < $1.key }
-                        .map { "\($0.key): \($0.value)" }
-                        .joined(separator: " • ")
-                )
-                .font(.system(size: 13, weight: .medium, design: .rounded))
-                .foregroundStyle(AppTheme.textSecondary)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 18)
-        .padding(.vertical, 14)
     }
 
     private var separator: some View {

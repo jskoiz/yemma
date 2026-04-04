@@ -2,9 +2,18 @@ import SwiftUI
 
 struct AdvancedSettingsView: View {
     @Environment(LLMService.self) private var llmService
+    @Environment(AppDiagnostics.self) private var diagnostics
     @Environment(\.dismiss) private var dismiss
 
     @State private var needsReload = false
+    @State private var diagnosticsCopied = false
+    @State private var showEventLog = false
+
+    let onRunDebugScenario: ((DebugInferenceScenario) -> Void)?
+
+    init(onRunDebugScenario: ((DebugInferenceScenario) -> Void)? = nil) {
+        self.onRunDebugScenario = onRunDebugScenario
+    }
 
     private let contextSizeOptions: [UInt32] = [2048, 4096, 8192, 16384, 32768]
     private let maxTokenOptions: [Int] = [256, 512, 1024, 2048, 4096]
@@ -22,6 +31,12 @@ struct AdvancedSettingsView: View {
                     }
 
                     inferenceSection
+                    diagnosticsSection
+#if DEBUG
+                    if onRunDebugScenario != nil {
+                        debugSection
+                    }
+#endif
                     resetSection
                 }
                 .padding(.horizontal, 16)
@@ -212,6 +227,234 @@ struct AdvancedSettingsView: View {
         .padding(.horizontal, 18)
         .padding(.vertical, 16)
     }
+
+    // MARK: - Diagnostics
+
+    private var diagnosticsSection: some View {
+        settingsSection("Diagnostics") {
+            VStack(spacing: 0) {
+                infoRow(icon: "waveform.path.ecg", title: "Recent events", detail: "\(diagnostics.recentEvents.count)")
+                separator
+                Button {
+                    diagnostics.copyToPasteboard()
+                    diagnosticsCopied = true
+                } label: {
+                    HStack(spacing: 14) {
+                        Image(systemName: "doc.on.doc")
+                            .frame(width: 22)
+                            .foregroundStyle(AppTheme.textPrimary)
+                        Text("Copy diagnostics log")
+                            .font(.system(size: 18, weight: .medium, design: .rounded))
+                            .foregroundStyle(AppTheme.textPrimary)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 16)
+                }
+                .buttonStyle(.plain)
+                separator
+                destructiveRow(icon: "trash", title: "Clear diagnostics log") {
+                    diagnostics.clear()
+                }
+
+                if !diagnostics.recentEvents.isEmpty {
+                    separator
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            showEventLog.toggle()
+                        }
+                    } label: {
+                        HStack(spacing: 14) {
+                            Image(systemName: "list.bullet.rectangle")
+                                .frame(width: 22)
+                                .foregroundStyle(AppTheme.textPrimary)
+                            Text("Event log")
+                                .font(.system(size: 18, weight: .medium, design: .rounded))
+                                .foregroundStyle(AppTheme.textPrimary)
+                            Spacer()
+                            Text("\(diagnostics.recentEvents.suffix(8).count)")
+                                .font(.system(size: 16, weight: .medium, design: .rounded))
+                                .foregroundStyle(AppTheme.textSecondary)
+                            Image(systemName: showEventLog ? "chevron.up" : "chevron.down")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(AppTheme.textSecondary)
+                        }
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 16)
+                    }
+                    .buttonStyle(.plain)
+
+                    if showEventLog {
+                        ForEach(Array(diagnostics.recentEvents.suffix(8).reversed())) { event in
+                            separator
+                            diagnosticEventRow(event)
+                        }
+                    }
+                }
+            }
+        }
+        .alert("Diagnostics copied", isPresented: $diagnosticsCopied) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("The recent diagnostics log is on the pasteboard.")
+        }
+    }
+
+    private func diagnosticEventRow(_ event: DiagnosticEvent) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(event.category.uppercased())
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .foregroundStyle(AppTheme.textSecondary)
+
+                Spacer()
+
+                Text(event.timestamp.formatted(date: .omitted, time: .standard))
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+
+            Text(event.message)
+                .font(.system(size: 15, weight: .semibold, design: .rounded))
+                .foregroundStyle(AppTheme.textPrimary)
+
+            if !event.metadata.isEmpty {
+                Text(
+                    event.metadata
+                        .sorted { $0.key < $1.key }
+                        .map { "\($0.key): \($0.value)" }
+                        .joined(separator: " • ")
+                )
+                .font(.system(size: 13, weight: .medium, design: .rounded))
+                .foregroundStyle(AppTheme.textSecondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 14)
+    }
+
+    // MARK: - Debug
+
+#if DEBUG
+    private var debugSection: some View {
+        settingsSection("Debug Scenarios") {
+            VStack(spacing: 0) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Use these from a Debug build to probe formatting quality. Run the live prompts on a physical iPhone, since the simulator only returns mocked replies.")
+                        .font(.system(size: 14, weight: .medium, design: .rounded))
+                        .foregroundStyle(AppTheme.textSecondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 16)
+
+                if let onRunDebugScenario {
+                    ForEach(DebugInferenceScenario.allCases) { scenario in
+                        separator
+                        actionDetailRow(
+                            icon: scenario.icon,
+                            title: scenario.title,
+                            detail: scenario.detail
+                        ) {
+                            dismiss()
+                            onRunDebugScenario(scenario)
+                        }
+                    }
+                }
+            }
+        }
+    }
+#endif
+
+    private func actionDetailRow(
+        icon: String,
+        title: String,
+        detail: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 14) {
+                Image(systemName: icon)
+                    .frame(width: 22)
+                    .foregroundStyle(AppTheme.textPrimary)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.system(size: 18, weight: .medium, design: .rounded))
+                        .foregroundStyle(AppTheme.textPrimary)
+                    Text(detail)
+                        .font(.system(size: 14, weight: .medium, design: .rounded))
+                        .foregroundStyle(AppTheme.textSecondary)
+                        .multilineTextAlignment(.leading)
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 16)
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Shared Helpers
+
+    private func settingsSection<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title)
+                .font(.system(size: 19, weight: .semibold, design: .rounded))
+                .foregroundStyle(AppTheme.textSecondary)
+                .padding(.horizontal, 12)
+
+            VStack(spacing: 0) {
+                content()
+            }
+            .padding(.vertical, 4)
+            .glassCard(cornerRadius: 26)
+        }
+    }
+
+    private func infoRow(icon: String, title: String, detail: String) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: icon)
+                .frame(width: 22)
+                .foregroundStyle(AppTheme.textPrimary)
+
+            Text(title)
+                .font(.system(size: 18, weight: .medium, design: .rounded))
+                .foregroundStyle(AppTheme.textPrimary)
+
+            Spacer()
+
+            Text(detail)
+                .font(.system(size: 16, weight: .medium, design: .rounded))
+                .foregroundStyle(AppTheme.textSecondary)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 16)
+    }
+
+    private func destructiveRow(icon: String, title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 14) {
+                Image(systemName: icon)
+                    .frame(width: 22)
+                Text(title)
+                    .font(.system(size: 18, weight: .medium, design: .rounded))
+                Spacer()
+            }
+            .foregroundStyle(Color.red.opacity(0.9))
+            .padding(.horizontal, 18)
+            .padding(.vertical, 16)
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Reset
 
     private var resetSection: some View {
         VStack(alignment: .leading, spacing: 12) {
