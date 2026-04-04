@@ -125,8 +125,7 @@ final class LLMService: @unchecked Sendable {
 
 #if targetEnvironment(simulator)
         return makeSimulatorStream(prompt: prompt, history: history)
-#endif
-
+#else
         let currentResources = withLock {
             (model: model, context: context, vocab: vocab)
         }
@@ -198,15 +197,14 @@ final class LLMService: @unchecked Sendable {
         }
 
         return stream
+#endif
     }
 
     func stopGeneration() async {
         let taskAndGroup = takeGenerationHandles()
         taskAndGroup.task?.cancel()
         if let group = taskAndGroup.group {
-            await Task.detached(priority: .userInitiated) {
-                group.wait()
-            }.value
+            await Self.waitForGroup(group)
         }
         await MainActor.run {
             isGenerating = false
@@ -580,6 +578,15 @@ private extension LLMService {
             generationTask = nil
             generationGroup = nil
             return pair
+        }
+    }
+
+    static func waitForGroup(_ group: DispatchGroup) async {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                group.wait()
+                continuation.resume()
+            }
         }
     }
 
