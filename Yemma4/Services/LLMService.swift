@@ -1,6 +1,8 @@
 import Foundation
 import Observation
 import LlamaSwift
+import CryptoKit
+import os
 
 struct PromptImageAsset: Hashable, Sendable {
     let id: String
@@ -139,12 +141,50 @@ final class LLMService: @unchecked Sendable {
 
                 await self?.setModelLoadStage(.loadingModel)
 
+                // Log model file info
+                if let fileAttrs = try? FileManager.default.attributesOfItem(atPath: resolvedPath),
+                   let fileSize = fileAttrs[.size] as? Int64 {
+                    let fileSizeMB = Int(fileSize / (1024 * 1024))
+                    var sha256 = "unavailable"
+                    if let fileHandle = FileHandle(forReadingAtPath: resolvedPath) {
+                        var hasher = SHA256()
+                        while autoreleasepool(invoking: {
+                            let chunk = fileHandle.readData(ofLength: 8 * 1024 * 1024)
+                            guard !chunk.isEmpty else { return false }
+                            hasher.update(data: chunk)
+                            return true
+                        }) {}
+                        fileHandle.closeFile()
+                        sha256 = hasher.finalize().map { String(format: "%02x", $0) }.joined()
+                    }
+                    AppDiagnostics.shared.record(
+                        "Model file info",
+                        category: "model",
+                        metadata: ["fileSizeMB": fileSizeMB, "sha256": sha256]
+                    )
+                }
+
+                let memoryBeforeMB = Self.availableMemoryMB()
+                AppDiagnostics.shared.record(
+                    "Memory before model load",
+                    category: "model",
+                    metadata: ["availableMemoryMB": memoryBeforeMB]
+                )
+
                 let resourceLoadStart = Date()
                 let loadedResources = try Self.loadResources(
                     modelPath: resolvedPath,
                     mmprojPath: resolvedMMProjPath
                 )
                 let resourceLoadMs = Int(Date().timeIntervalSince(resourceLoadStart) * 1000)
+
+                let memoryAfterMB = Self.availableMemoryMB()
+                AppDiagnostics.shared.record(
+                    "Memory after model load",
+                    category: "model",
+                    metadata: ["availableMemoryMB": memoryAfterMB]
+                )
+
                 AppDiagnostics.shared.record(
                     "Model weights loaded",
                     category: "model",
@@ -406,6 +446,20 @@ private extension LLMService {
         _ = backendInitialized
     }
 
+    static func thermalStateLabel() -> String {
+        switch ProcessInfo.processInfo.thermalState {
+        case .nominal: return "nominal"
+        case .fair: return "fair"
+        case .serious: return "serious"
+        case .critical: return "critical"
+        @unknown default: return "unknown"
+        }
+    }
+
+    static func availableMemoryMB() -> Int {
+        Int(os_proc_available_memory() / (1024 * 1024))
+    }
+
     static func recommendedThreadCounts() -> ModelLoadThreadCounts {
         let activeCores = max(1, ProcessInfo.processInfo.activeProcessorCount)
         let decodeThreads = max(1, activeCores - 2)
@@ -562,6 +616,14 @@ private extension LLMService {
         do {
             Self.resetContextMemory(job.context)
 
+            AppDiagnostics.shared.record(
+                "Thermal state at generation start",
+                category: "generation",
+                metadata: ["thermalState": thermalStateLabel()]
+            )
+
+            let generationStartTime = Date()
+
             let sampler = try Self.makeSampler(config: job.samplerConfig)
             defer { llama_sampler_free(sampler) }
 
@@ -657,13 +719,24 @@ private extension LLMService {
                 }
             }
 
+            let generationDuration = Date().timeIntervalSince(generationStartTime)
+            let tokensPerSec = generationDuration > 0
+                ? Double(emittedTokenCount) / generationDuration
+                : 0
+            let contextFillPercent = contextLimit > 0
+                ? Double(nextPosition) / Double(contextLimit) * 100
+                : 0
+
             AppDiagnostics.shared.record(
                 "Generation finished",
                 category: "generation",
                 metadata: [
                     "emittedTokens": emittedTokenCount,
                     "finalPosition": nextPosition,
-                    "contextLimit": contextLimit
+                    "contextLimit": contextLimit,
+                    "tokensPerSec": String(format: "%.1f", tokensPerSec),
+                    "contextFillPercent": String(format: "%.1f", contextFillPercent),
+                    "thermalState": thermalStateLabel()
                 ]
             )
         } catch {
@@ -795,6 +868,10 @@ private extension LLMService {
             return FormattedPrompt(text: templatedPrompt, images: images)
         }
 
+        if let gemmaPrompt = tryApplyGemma4Template(conversation: conversation, model: model) {
+            return gemmaPrompt
+        }
+
         var pieces = ["<bos>"]
         pieces.reserveCapacity((serializedConversation.count * 2) + 2)
 
@@ -909,6 +986,61 @@ private extension LLMService {
         }
     }
 
+    static func isGemma4Template(_ template: String) -> Bool {
+        template.contains("<start_of_turn>") && template.contains("<end_of_turn>")
+    }
+
+    static func tryApplyGemma4Template(
+        conversation: [(role: String, content: String)],
+        model: OpaquePointer
+    ) -> String? {
+        guard let templatePointer = llama_model_chat_template(model, nil) else {
+            return nil
+        }
+
+        let template = String(cString: templatePointer)
+        guard isGemma4Template(template) else {
+            return nil
+        }
+
+        var pieces: [String] = []
+        pieces.reserveCapacity((conversation.count * 2) + 2)
+
+        for message in conversation {
+            let role = gemmaRole(message.role)
+            let content = role == "model"
+                ? stripThinkingBlocks(from: message.content)
+                : message.content.trimmingCharacters(in: .whitespacesAndNewlines)
+            pieces.append("<start_of_turn>\(role)\n\(content)<end_of_turn>\n")
+        }
+
+        pieces.append("<start_of_turn>model\n")
+        let prompt = pieces.joined()
+
+        AppDiagnostics.shared.record(
+            "Applied Gemma 4 chat template manually",
+            category: "generation",
+            metadata: [
+                "messageCount": conversation.count,
+                "formattedChars": prompt.count
+            ]
+        )
+
+        return prompt
+    }
+
+    static func gemmaRole(_ role: String) -> String {
+        let lowercased = role.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        switch lowercased {
+        case "assistant", "model":
+            return "model"
+        case "system", "developer":
+            return "user"
+        default:
+            return "user"
+        }
+    }
+
     static func resetContextMemory(_ context: OpaquePointer) {
         let memory = llama_get_memory(context)
         llama_memory_clear(memory, true)
@@ -918,7 +1050,7 @@ private extension LLMService {
         let lowercased = role.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         switch lowercased {
         case "assistant", "model":
-            return "assistant"
+            return "model"
         case "system", "developer":
             return "system"
         default:

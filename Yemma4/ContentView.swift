@@ -133,6 +133,13 @@ public struct ContentView: View {
                     .transition(.opacity.combined(with: .move(edge: .leading)))
             }
         }
+        .onAppear {
+            AppDiagnostics.shared.record(
+                "startup: view_appeared",
+                category: "startup",
+                metadata: ["view": "ContentView", "elapsedMs": StartupTiming.elapsedMs()]
+            )
+        }
         .task {
             guard !hasValidatedLocalModel else { return }
             hasValidatedLocalModel = true
@@ -204,6 +211,12 @@ public struct ContentView: View {
                 loadedModelSignature = signature
                 modelLoadError = nil
             }
+
+            AppDiagnostics.shared.record(
+                "startup: ready_for_input",
+                category: "startup",
+                metadata: ["totalElapsedMs": StartupTiming.elapsedMs()]
+            )
         } catch {
             await MainActor.run {
                 loadedModelSignature = nil

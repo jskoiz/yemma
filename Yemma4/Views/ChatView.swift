@@ -131,6 +131,13 @@ public struct ChatView: View {
                 .presentationDragIndicator(.hidden)
                 .presentationBackground(.clear)
             }
+            .onAppear {
+                AppDiagnostics.shared.record(
+                    "startup: view_appeared",
+                    category: "startup",
+                    metadata: ["view": "ChatView", "elapsedMs": StartupTiming.elapsedMs()]
+                )
+            }
             .onDisappear {
                 Task { @MainActor in
                     await stopGeneration()
