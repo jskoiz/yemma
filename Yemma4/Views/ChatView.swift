@@ -779,7 +779,8 @@ public struct ChatView: View {
                 user: .yemma,
                 status: .sent,
                 createdAt: Date(),
-                text: ""
+                text: "",
+                attachments: []
             )
         )
 
@@ -1091,7 +1092,8 @@ private extension ChatMessage {
             user: user,
             status: .sent,
             createdAt: .now,
-            text: text
+            text: text,
+            attachments: []
         )
     }
 }
