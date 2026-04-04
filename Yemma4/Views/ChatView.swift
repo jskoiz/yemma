@@ -25,6 +25,14 @@ public struct ChatView: View {
     @State private var showConversations = false
     @FocusState private var isComposerFocused: Bool
 
+    // MARK: - Streaming state
+    /// The ID of the assistant message currently being streamed.
+    @State private var streamingMessageID: String?
+    /// Monotonic counter bumped each time we flush visible text — drives auto-scroll.
+    @State private var streamFlushTick: UInt64 = 0
+    /// Whether the user was scrolled to the bottom before the last content change.
+    @State private var isPinnedToBottom = true
+
     private let leakedControlMarkers = [
         "<start_of_turn>",
         "<end_of_turn>",
@@ -205,15 +213,17 @@ public struct ChatView: View {
         .padding(.bottom, 12)
     }
 
+    // MARK: - Conversation content with auto-scroll
+
     private var conversationContent: some View {
         ScrollViewReader { proxy in
             ScrollView(showsIndicators: false) {
-                LazyVStack(spacing: messages.isEmpty ? 26 : 14) {
+                LazyVStack(spacing: messages.isEmpty ? 26 : 6) {
                     if messages.isEmpty {
                         emptyState
                     } else {
-                        ForEach(messages, id: \.id) { message in
-                            messageRow(message)
+                        ForEach(Array(messages.enumerated()), id: \.element.id) { index, message in
+                            messageRow(message, index: index)
                                 .id(message.id)
                         }
                     }
@@ -229,11 +239,18 @@ public struct ChatView: View {
             }
             .defaultScrollAnchor(.bottom)
             .onChange(of: messages.count) { _, _ in
-                guard let lastID = messages.last?.id else { return }
-                withAnimation(.easeOut(duration: 0.22)) {
-                    proxy.scrollTo(lastID, anchor: .bottom)
-                }
+                scrollToBottomIfPinned(proxy: proxy)
             }
+            .onChange(of: streamFlushTick) { _, _ in
+                scrollToBottomIfPinned(proxy: proxy)
+            }
+        }
+    }
+
+    private func scrollToBottomIfPinned(proxy: ScrollViewProxy) {
+        guard isPinnedToBottom, let lastID = messages.last?.id else { return }
+        withAnimation(.easeOut(duration: 0.15)) {
+            proxy.scrollTo(lastID, anchor: .bottom)
         }
     }
 
@@ -268,26 +285,40 @@ public struct ChatView: View {
         .frame(maxWidth: .infinity, minHeight: 320)
     }
 
-    private func messageRow(_ message: ChatMessage) -> some View {
+    // MARK: - Message rows with grouping
+
+    /// Whether to show the "Yemma 4" label above an assistant message.
+    /// Suppressed when the previous message is also from the assistant.
+    private func shouldShowAssistantLabel(at index: Int) -> Bool {
+        guard !messages[index].user.isCurrentUser else { return false }
+        if index == 0 { return true }
+        return messages[index - 1].user.isCurrentUser
+    }
+
+    private func messageRow(_ message: ChatMessage, index: Int) -> some View {
         HStack {
             if message.user.isCurrentUser {
                 Spacer(minLength: 54)
             }
 
-            VStack(alignment: message.user.isCurrentUser ? .trailing : .leading, spacing: 6) {
-                if !message.user.isCurrentUser {
+            VStack(alignment: message.user.isCurrentUser ? .trailing : .leading, spacing: 4) {
+                if shouldShowAssistantLabel(at: index) {
                     Text("Yemma 4")
                         .font(.system(size: 12, weight: .semibold, design: .rounded))
                         .foregroundStyle(AppTheme.textSecondary)
                         .padding(.horizontal, 2)
+                        .padding(.top, index == 0 ? 0 : 8)
                 }
 
                 messageBubble(message)
             }
-            .frame(maxWidth: 420, alignment: message.user.isCurrentUser ? .trailing : .leading)
+            .frame(
+                maxWidth: message.user.isCurrentUser ? 420 : .infinity,
+                alignment: message.user.isCurrentUser ? .trailing : .leading
+            )
 
             if !message.user.isCurrentUser {
-                Spacer(minLength: 54)
+                Spacer(minLength: 40)
             }
         }
     }
@@ -310,6 +341,7 @@ public struct ChatView: View {
     private func messageBubble(_ message: ChatMessage) -> some View {
         let text = displayText(for: message)
         let shouldRenderText = shouldRenderText(for: message, text: text)
+        let isStreaming = message.id == streamingMessageID && llmService.isGenerating
 
         VStack(
             alignment: message.user.isCurrentUser ? .trailing : .leading,
@@ -327,6 +359,8 @@ public struct ChatView: View {
                             .foregroundStyle(AppTheme.textPrimary)
                             .multilineTextAlignment(.trailing)
                             .textSelection(.enabled)
+                    } else if isStreaming {
+                        StreamingText(text: text)
                     } else {
                         RichMessageText(text: text)
                     }
@@ -341,7 +375,10 @@ public struct ChatView: View {
             RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .stroke(AppTheme.messageBubbleBorder, lineWidth: 1)
         )
+        .animation(.easeInOut(duration: 0.25), value: isStreaming)
     }
+
+    // MARK: - Composer
 
     private var composerSection: some View {
         VStack(spacing: 12) {
@@ -351,6 +388,7 @@ public struct ChatView: View {
 
             if shouldShowTypingIndicator {
                 typingIndicator
+                    .transition(.opacity.combined(with: .scale(scale: 0.8)))
             }
 
             if !pendingAttachments.isEmpty {
@@ -415,6 +453,7 @@ public struct ChatView: View {
             )
             .ignoresSafeArea(edges: .bottom)
         )
+        .animation(.easeInOut(duration: 0.2), value: shouldShowTypingIndicator)
     }
 
     private var quickPromptStrip: some View {
@@ -479,21 +518,16 @@ public struct ChatView: View {
         }
     }
 
+    // MARK: - Typing indicator (animated dots)
+
     private var typingIndicator: some View {
-        HStack(spacing: 10) {
-            ProgressView()
-                .progressViewStyle(.circular)
-                .tint(AppTheme.textSecondary)
-
-            Text("Yemma 4 is thinking…")
-                .font(.system(size: 14, weight: .semibold, design: .rounded))
-                .foregroundStyle(AppTheme.textSecondary)
-
+        HStack(spacing: 0) {
+            TypingDotsView()
+                .frame(width: 32, height: 20)
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .glassCard(cornerRadius: 18)
+        .padding(.vertical, 8)
     }
 
     private var shouldShowTypingIndicator: Bool {
@@ -642,6 +676,8 @@ public struct ChatView: View {
         )
     }
 
+    // MARK: - Photo import
+
     @MainActor
     private func importSelectedPhotos(from items: [PhotosPickerItem]) async {
         guard !items.isEmpty else { return }
@@ -722,6 +758,8 @@ public struct ChatView: View {
         return fileURL
     }
 
+    // MARK: - Prompt handling & streaming
+
     private func submitDraft() {
         let trimmedText = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedText.isEmpty || !pendingAttachments.isEmpty else { return }
@@ -784,6 +822,8 @@ public struct ChatView: View {
             )
         )
 
+        streamingMessageID = assistantID
+        isPinnedToBottom = true
         generationError = nil
         memoryAlertMessage = nil
         generationTask = Task {
@@ -802,26 +842,38 @@ public struct ChatView: View {
             }
     }
 
+    /// Streams tokens into a buffer and flushes visible text at ~50ms intervals or word boundaries.
     private func streamReply(
         prompt: PromptMessageInput,
         history: [PromptMessageInput],
         assistantID: String
     ) async {
-        var assistantText = ""
+        var rawBuffer = ""
+        var lastFlush = ContinuousClock.now
 
         defer {
             Task { @MainActor in
                 self.generationTask = nil
+                self.streamingMessageID = nil
             }
         }
 
         for await token in llmService.generate(prompt: prompt, history: history) {
-            assistantText.append(token)
-            let shouldStop = shouldStopStreaming(for: assistantText)
-            let visibleText = sanitizedAssistantText(assistantText)
+            rawBuffer.append(token)
+            let shouldStop = shouldStopStreaming(for: rawBuffer)
 
-            await MainActor.run {
-                updateMessageText(id: assistantID, text: visibleText)
+            let now = ContinuousClock.now
+            let elapsed = now - lastFlush
+            let atWordBoundary = token.last?.isWhitespace == true || token.last == "\n"
+
+            // Flush every ~50ms or at word boundaries (after initial 20ms warmup)
+            if elapsed >= .milliseconds(50) || (atWordBoundary && elapsed >= .milliseconds(20)) {
+                let visibleText = sanitizedAssistantText(rawBuffer)
+                await MainActor.run {
+                    updateMessageText(id: assistantID, text: visibleText)
+                    streamFlushTick &+= 1
+                }
+                lastFlush = now
             }
 
             if shouldStop {
@@ -830,9 +882,11 @@ public struct ChatView: View {
             }
         }
 
-        let finalText = finalizedAssistantText(assistantText)
+        // Final flush — applies full sanitization and switches to markdown rendering
+        let finalText = finalizedAssistantText(rawBuffer)
         await MainActor.run {
             finalizeAssistantMessage(id: assistantID, text: finalText)
+            streamFlushTick &+= 1
         }
 
         if let lastError = llmService.lastError {
@@ -863,6 +917,8 @@ public struct ChatView: View {
 
         messages[index].text = text
     }
+
+    // MARK: - Text sanitization
 
     private func shouldStopStreaming(for text: String) -> Bool {
         responseBoundaryMarkers.contains { text.contains($0) }
@@ -987,6 +1043,8 @@ public struct ChatView: View {
         return text
     }
 
+    // MARK: - Conversation management
+
     @MainActor
     private func clearConversation() async {
         AppDiagnostics.shared.record("Conversation cleared", category: "ui", metadata: ["previousMessages": messages.count])
@@ -999,6 +1057,7 @@ public struct ChatView: View {
         generationError = nil
         memoryAlertMessage = nil
         toastMessage = nil
+        streamingMessageID = nil
     }
 
     @MainActor
@@ -1081,9 +1140,63 @@ public struct ChatView: View {
     private func stopGeneration() async {
         generationTask?.cancel()
         generationTask = nil
+        streamingMessageID = nil
         await llmService.stopGeneration()
     }
 }
+
+// MARK: - Typing Dots Animation
+
+/// A small three-dot "thinking" animation inspired by ChatGPT/Claude iOS apps.
+private struct TypingDotsView: View {
+    @State private var phase: Int = 0
+
+    private let dotSize: CGFloat = 7
+    private let spacing: CGFloat = 4
+
+    var body: some View {
+        HStack(spacing: spacing) {
+            ForEach(0..<3, id: \.self) { index in
+                Circle()
+                    .fill(AppTheme.textSecondary)
+                    .frame(width: dotSize, height: dotSize)
+                    .opacity(dotOpacity(for: index))
+                    .scaleEffect(dotScale(for: index))
+            }
+        }
+        .onAppear {
+            startAnimation()
+        }
+    }
+
+    private func dotOpacity(for index: Int) -> Double {
+        let offset = (phase - index + 3) % 3
+        switch offset {
+        case 0: return 1.0
+        case 1: return 0.5
+        default: return 0.25
+        }
+    }
+
+    private func dotScale(for index: Int) -> CGFloat {
+        let offset = (phase - index + 3) % 3
+        switch offset {
+        case 0: return 1.0
+        case 1: return 0.85
+        default: return 0.7
+        }
+    }
+
+    private func startAnimation() {
+        Timer.scheduledTimer(withTimeInterval: 0.35, repeats: true) { _ in
+            withAnimation(.easeInOut(duration: 0.3)) {
+                phase = (phase + 1) % 3
+            }
+        }
+    }
+}
+
+// MARK: - Preview helpers
 
 private extension ChatMessage {
     static func previewMessage(user: ExyteChat.User, text: String) -> ChatMessage {
