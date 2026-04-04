@@ -425,7 +425,11 @@ public struct ChatView: View {
             return "Simulator mode: mock replies are enabled so you can test the chat UI without downloading the model."
         }
 
-        return "Loading your on-device model..."
+        if llmService.isModelLoading {
+            return llmService.modelLoadStage.statusText
+        }
+
+        return "Preparing your on-device model..."
     }
 
     private var modelStatusTextColor: Color {

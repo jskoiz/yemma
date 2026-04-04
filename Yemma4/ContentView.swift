@@ -139,6 +139,9 @@ public struct ContentView: View {
                 OnboardingView(
                     onContinue: canContinueFromOnboarding ? {
                         isShowingOnboardingPreview = false
+                    } : nil,
+                    onRetryModelLoad: modelDownloader.isDownloaded ? {
+                        Task { await loadModelIfNeeded(force: true) }
                     } : nil
                 )
                     .transition(.opacity.combined(with: .move(edge: .leading)))
@@ -154,6 +157,8 @@ public struct ContentView: View {
             await loadModelIfNeeded()
         }
         .animation(.easeInOut(duration: 0.25), value: modelDownloader.isDownloaded)
+        .animation(.easeInOut(duration: 0.25), value: llmService.isModelLoaded)
+        .animation(.easeInOut(duration: 0.25), value: llmService.isModelLoading)
         .animation(.easeInOut(duration: 0.25), value: isShowingOnboardingPreview)
         .alert(
             "Unable to Load Model",
@@ -174,11 +179,15 @@ public struct ContentView: View {
     }
 
     private var shouldShowChat: Bool {
-        !isShowingOnboardingPreview && (modelDownloader.isDownloaded || !supportsLocalModelRuntime)
+        !isShowingOnboardingPreview && (isReadyForChat || !supportsLocalModelRuntime)
     }
 
     private var canContinueFromOnboarding: Bool {
-        modelDownloader.isDownloaded || !supportsLocalModelRuntime
+        isReadyForChat || !supportsLocalModelRuntime
+    }
+
+    private var isReadyForChat: Bool {
+        modelDownloader.isDownloaded && llmService.isModelLoaded
     }
 
     private func loadModelIfNeeded(force: Bool = false) async {
