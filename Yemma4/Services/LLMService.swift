@@ -910,6 +910,17 @@ private extension LLMService {
 // MARK: - Model lifecycle (internal)
 
 extension LLMService {
+    /// Sets loading state immediately so the UI can reflect "preparing"
+    /// before the heavy model load begins. Call from ContentView before
+    /// yielding to the render loop.
+    @MainActor
+    func signalLoadingIntent() {
+        guard !isModelLoading else { return }
+        isModelLoading = true
+        modelLoadStage = .preparingRuntime
+        lastError = nil
+    }
+
     /// Unloads the model from memory and resets load state.
     /// Safe to call even when no model is loaded.
     func unloadModel() async {
