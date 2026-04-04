@@ -905,6 +905,11 @@ private extension LLMService {
         }
     }
 
+}
+
+// MARK: - Model lifecycle (internal)
+
+extension LLMService {
     /// Unloads the model from memory and resets load state.
     /// Safe to call even when no model is loaded.
     func unloadModel() async {
@@ -917,7 +922,9 @@ private extension LLMService {
         }
         AppDiagnostics.shared.record("Model unloaded", category: "model")
     }
+}
 
+private extension LLMService {
     func freeLoadedModel() {
         let resources = withLock {
             let current = (model: model, context: context, multimodalRuntime: multimodalRuntime)
