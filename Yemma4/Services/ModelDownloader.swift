@@ -23,6 +23,20 @@ public final class ModelDownloader {
     }
 
     public func validateDownloadedModel() async {
+        guard Yemma4AppConfiguration.supportsLocalModelRuntime else {
+            isDownloading = false
+            isDownloaded = false
+            canResumeDownload = false
+            downloadProgress = 0
+            modelPath = nil
+            error = Self.unsupportedRuntimeMessage
+            AppDiagnostics.shared.record(
+                "Skipped local model validation on unsupported runtime",
+                category: "download"
+            )
+            return
+        }
+
         let fileManager = self.fileManager
         let modelFileURL = self.modelFileURL
         let resumeDataURL = self.resumeDataURL
@@ -57,6 +71,20 @@ public final class ModelDownloader {
     }
 
     public func downloadModel() async {
+        guard Yemma4AppConfiguration.supportsLocalModelRuntime else {
+            isDownloading = false
+            isDownloaded = false
+            canResumeDownload = false
+            downloadProgress = 0
+            modelPath = nil
+            error = Self.unsupportedRuntimeMessage
+            AppDiagnostics.shared.record(
+                "Blocked model download on unsupported runtime",
+                category: "download"
+            )
+            return
+        }
+
         if isDownloading {
             _ = await observeBackgroundDownloadIfNeeded()
             return
@@ -258,6 +286,8 @@ public final class ModelDownloader {
 
         return nsError.localizedDescription
     }
+
+    private static let unsupportedRuntimeMessage = "Local GGUF downloads are disabled in the iOS Simulator. Simulator chat uses mocked replies for UI testing; run Yemma on a physical iPhone for real on-device inference."
 }
 
 private struct ValidationResult: Sendable {

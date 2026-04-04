@@ -6,6 +6,7 @@ public struct OnboardingView: View {
     @State private var isStartingDownload = false
 
     private let estimatedModelBytes: Int64 = 2_000_000_000
+    private let supportsLocalModelRuntime = Yemma4AppConfiguration.supportsLocalModelRuntime
     private let onContinue: (() -> Void)?
     private let trustPoints = [
         "Runs entirely on your iPhone",
@@ -28,10 +29,10 @@ public struct OnboardingView: View {
                     statusCard
                     downloadCard
 
-                    if modelDownloader.isDownloaded, let onContinue {
+                    if (modelDownloader.isDownloaded || !supportsLocalModelRuntime), let onContinue {
                         Button(action: onContinue) {
                             HStack {
-                                Text("Back to chat")
+                                Text(supportsLocalModelRuntime ? "Back to chat" : "Continue in simulator")
                                 Spacer()
                                 Image(systemName: "arrow.right")
                             }
@@ -99,6 +100,16 @@ public struct OnboardingView: View {
                 .padding(.vertical, 10)
                 .background(Color.white.opacity(0.62))
                 .clipShape(Capsule())
+
+            if !supportsLocalModelRuntime {
+                Text("You’re running in the iOS Simulator. Download is skipped here and chat uses mocked replies so you can test the UI. Use a physical iPhone for real on-device inference.")
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    .foregroundStyle(Color.orange.opacity(0.95))
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(Color.white.opacity(0.62))
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -141,7 +152,7 @@ public struct OnboardingView: View {
                         .font(.system(size: 19, weight: .semibold, design: .rounded))
                         .foregroundStyle(AppTheme.textPrimary)
 
-                    Text(modelDownloader.isDownloaded ? "The model is stored on this phone and ready whenever you open Yemma." : "This is the actual AI model that runs locally on your device. Once it’s here, day-to-day use feels much faster.")
+                    Text(statusDescription)
                         .font(.system(size: 15, weight: .medium, design: .rounded))
                         .foregroundStyle(AppTheme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -214,8 +225,8 @@ public struct OnboardingView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
             }
             .buttonStyle(.plain)
-            .disabled(modelDownloader.isDownloading || modelDownloader.isDownloaded || isStartingDownload)
-            .opacity(modelDownloader.isDownloading ? 0.5 : 1)
+            .disabled(!supportsLocalModelRuntime || modelDownloader.isDownloading || modelDownloader.isDownloaded || isStartingDownload)
+            .opacity((!supportsLocalModelRuntime || modelDownloader.isDownloading) ? 0.5 : 1)
 
             if modelDownloader.error != nil {
                 Button(modelDownloader.canResumeDownload ? "Resume download" : "Retry download") {
@@ -255,7 +266,11 @@ public struct OnboardingView: View {
     }
 
     private var progressString: String {
-        modelDownloader.isDownloaded ? "Ready" : "\(Int(modelDownloader.downloadProgress * 100))%"
+        if !supportsLocalModelRuntime {
+            return "Sim"
+        }
+
+        return modelDownloader.isDownloaded ? "Ready" : "\(Int(modelDownloader.downloadProgress * 100))%"
     }
 
     private var remainingString: String {
@@ -268,6 +283,10 @@ public struct OnboardingView: View {
     }
 
     private var buttonTitle: String {
+        if !supportsLocalModelRuntime {
+            return "Unavailable in Simulator"
+        }
+
         if modelDownloader.isDownloading || isStartingDownload {
             return "Downloading..."
         }
@@ -281,6 +300,18 @@ public struct OnboardingView: View {
         }
 
         return "Download Model"
+    }
+
+    private var statusDescription: String {
+        if modelDownloader.isDownloaded {
+            return "The model is stored on this phone and ready whenever you open Yemma."
+        }
+
+        if !supportsLocalModelRuntime {
+            return "Simulator mode skips the download flow and uses mocked chat replies so you can keep testing the UI. Run on a physical iPhone when you need the real on-device model."
+        }
+
+        return "This is the actual AI model that runs locally on your device. Once it’s here, day-to-day use feels much faster."
     }
 
     @MainActor
