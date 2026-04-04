@@ -26,8 +26,29 @@ public struct ChatView: View {
         "<end_of_turn>",
         "<|start_of_turn|>",
         "<|end_of_turn|>",
+        "<|turn>",
+        "<turn|>",
+        "<|channel>",
+        "<channel|>",
+        "<|think|>",
+        "<|tool>",
+        "<tool|>",
+        "<|tool_call>",
+        "<tool_call|>",
+        "<|tool_response>",
+        "<tool_response|>",
         "<eos>",
         "<bos>"
+    ]
+
+    private let responseBoundaryMarkers = [
+        "<end_of_turn>",
+        "<|end_of_turn|>",
+        "<turn|>",
+        "<start_of_turn>user",
+        "<|start_of_turn|>user",
+        "<|turn>user",
+        "<|turn>system"
     ]
 
     private let quickPrompts: [(title: String, subtitle: String, prompt: String)] = [
@@ -526,7 +547,7 @@ public struct ChatView: View {
             .filter { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
             .map {
                 (
-                    role: $0.user.isCurrentUser ? "user" : "model",
+                    role: $0.user.isCurrentUser ? "user" : "assistant",
                     content: $0.text
                 )
             }
@@ -595,13 +616,14 @@ public struct ChatView: View {
     }
 
     private func shouldStopStreaming(for text: String) -> Bool {
-        leakedControlMarkers.contains { text.contains($0) }
+        responseBoundaryMarkers.contains { text.contains($0) }
     }
 
     private func sanitizedAssistantText(_ text: String) -> String {
-        var cleaned = text
+        var cleaned = stripLeadingControlPreamble(from: text)
+        cleaned = stripThinkingBlocks(from: cleaned)
 
-        if let firstMarkerRange = firstControlMarkerRange(in: cleaned) {
+        if let firstMarkerRange = firstBoundaryMarkerRange(in: cleaned) {
             cleaned = String(cleaned[..<firstMarkerRange.lowerBound])
         }
 
@@ -610,6 +632,17 @@ public struct ChatView: View {
             .replacingOccurrences(of: "<end_of_turn>", with: "")
             .replacingOccurrences(of: "<|start_of_turn|>", with: "")
             .replacingOccurrences(of: "<|end_of_turn|>", with: "")
+            .replacingOccurrences(of: "<|turn>", with: "")
+            .replacingOccurrences(of: "<turn|>", with: "")
+            .replacingOccurrences(of: "<|channel>", with: "")
+            .replacingOccurrences(of: "<channel|>", with: "")
+            .replacingOccurrences(of: "<|think|>", with: "")
+            .replacingOccurrences(of: "<|tool>", with: "")
+            .replacingOccurrences(of: "<tool|>", with: "")
+            .replacingOccurrences(of: "<|tool_call>", with: "")
+            .replacingOccurrences(of: "<tool_call|>", with: "")
+            .replacingOccurrences(of: "<|tool_response>", with: "")
+            .replacingOccurrences(of: "<tool_response|>", with: "")
             .replacingOccurrences(of: "<eos>", with: "")
             .replacingOccurrences(of: "<bos>", with: "")
 
@@ -623,20 +656,69 @@ public struct ChatView: View {
         sanitizedAssistantText(text)
     }
 
-    private func firstControlMarkerRange(in text: String) -> Range<String.Index>? {
-        leakedControlMarkers
+    private func firstBoundaryMarkerRange(in text: String) -> Range<String.Index>? {
+        responseBoundaryMarkers
             .compactMap { marker in text.range(of: marker) }
             .min(by: { $0.lowerBound < $1.lowerBound })
     }
 
     private func stripLeadingLeakedRolePrefix(from text: String) -> String {
-        let prefixes = ["model\n", "assistant\n", "user\n"]
+        let prefixes = [
+            "model\n",
+            "assistant\n",
+            "user\n",
+            "system\n",
+            "<|turn>model\n",
+            "<|turn>assistant\n",
+            "<|turn>user\n",
+            "<|turn>system\n",
+            "<start_of_turn>model\n",
+            "<start_of_turn>assistant\n",
+            "<start_of_turn>user\n",
+            "<|start_of_turn|>model\n",
+            "<|start_of_turn|>assistant\n",
+            "<|start_of_turn|>user\n"
+        ]
 
         for prefix in prefixes where text.hasPrefix(prefix) {
             return String(text.dropFirst(prefix.count))
         }
 
         return text
+    }
+
+    private func stripLeadingControlPreamble(from text: String) -> String {
+        var cleaned = text
+
+        while true {
+            let updated = stripLeadingLeakedRolePrefix(from: cleaned)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+
+            if updated == cleaned {
+                return cleaned
+            }
+
+            cleaned = updated
+        }
+    }
+
+    private func stripThinkingBlocks(from text: String) -> String {
+        guard text.contains("<|channel>") else {
+            return text
+        }
+
+        var cleaned = text
+
+        while let startRange = cleaned.range(of: "<|channel>") {
+            if let endRange = cleaned.range(of: "<channel|>", range: startRange.upperBound..<cleaned.endIndex) {
+                cleaned.removeSubrange(startRange.lowerBound..<endRange.upperBound)
+            } else {
+                cleaned.removeSubrange(startRange.lowerBound..<cleaned.endIndex)
+                break
+            }
+        }
+
+        return cleaned
     }
 
     private func trimTrailingControlPrefix(from text: String) -> String {
