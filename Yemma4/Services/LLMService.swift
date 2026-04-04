@@ -414,7 +414,7 @@ final class LLMService: @unchecked Sendable {
 }
 
 private extension LLMService {
-    static let maxGeneratedTokens = 512
+    static let maxGeneratedTokens = 1024
     static let mediaPromptMarker = "<__media__>"
 
     struct ModelLoadThreadCounts: Sendable {
@@ -479,9 +479,10 @@ private extension LLMService {
 #endif
 
         var contextParams = llama_context_default_params()
-        contextParams.n_ctx = 4096
+        contextParams.n_ctx = 8192
         contextParams.n_batch = 512
         contextParams.n_ubatch = 512
+        contextParams.flash_attn = true
 
         let threadCounts = recommendedThreadCounts()
         contextParams.n_threads = threadCounts.decode
@@ -577,7 +578,7 @@ private extension LLMService {
             topK: 64,
             topP: 0.95,
             minP: 0.0,
-            temperature: 1.0
+            temperature: 0.7
         )
 
         func withTemperatureOverride(_ value: Double) -> SamplerConfig {
