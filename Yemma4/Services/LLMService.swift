@@ -47,6 +47,7 @@ final class LLMService: @unchecked Sendable {
     @ObservationIgnored private var generationTask: Task<Void, Never>?
     @ObservationIgnored private var generationGroup: DispatchGroup?
     @ObservationIgnored private let stateLock = NSLock()
+    @ObservationIgnored private var samplerConfig = SamplerConfig.defaults
 
     @ObservationIgnored private static let backendInitialized: Void = {
         llama_backend_init()
@@ -124,6 +125,9 @@ final class LLMService: @unchecked Sendable {
             model = newModel
             context = newContext
             vocab = newVocab
+            let config = Self.samplerConfig(for: newModel)
+            samplerConfig = config
+            temperature = config.temperature
             isModelLoaded = true
             lastError = nil
             return old
@@ -136,7 +140,10 @@ final class LLMService: @unchecked Sendable {
             metadata: [
                 "path": resolvedPath,
                 "context": llama_n_ctx(newContext),
-                "batch": llama_n_batch(newContext)
+                "batch": llama_n_batch(newContext),
+                "temperature": withLock { samplerConfig.temperature },
+                "topK": withLock { samplerConfig.topK },
+                "topP": withLock { samplerConfig.topP }
             ]
         )
     }
@@ -167,15 +174,21 @@ final class LLMService: @unchecked Sendable {
             }
         }
 
-        let formattedPrompt = Self.formatPrompt(prompt: prompt, history: history)
-        let currentTemperature = withLock { temperature }
+        let formattedPrompt = Self.formatPrompt(
+            prompt: prompt,
+            history: history,
+            model: currentModel
+        )
+        let generationConfig = withLock { samplerConfig.withTemperatureOverride(temperature) }
         AppDiagnostics.shared.record(
             "Generation requested",
             category: "generation",
             metadata: [
                 "historyCount": history.count,
                 "promptChars": prompt.count,
-                "temperature": currentTemperature
+                "temperature": generationConfig.temperature,
+                "topK": generationConfig.topK,
+                "topP": generationConfig.topP
             ]
         )
 
@@ -189,7 +202,7 @@ final class LLMService: @unchecked Sendable {
                 formattedPrompt: formattedPrompt,
                 context: currentContext,
                 vocab: currentVocab,
-                temperature: currentTemperature,
+                samplerConfig: generationConfig,
                 continuation: continuationBox,
                 completionGroup: completionGroup
             )
@@ -301,7 +314,7 @@ private extension LLMService {
         let formattedPrompt: String
         let context: OpaquePointer
         let vocab: OpaquePointer
-        let temperature: Double
+        let samplerConfig: SamplerConfig
         let continuation: StreamContinuationBox<String>
         let completionGroup: CompletionGroupBox
 
@@ -310,7 +323,7 @@ private extension LLMService {
             formattedPrompt: String,
             context: OpaquePointer,
             vocab: OpaquePointer,
-            temperature: Double,
+            samplerConfig: SamplerConfig,
             continuation: StreamContinuationBox<String>,
             completionGroup: CompletionGroupBox
         ) {
@@ -318,9 +331,29 @@ private extension LLMService {
             self.formattedPrompt = formattedPrompt
             self.context = context
             self.vocab = vocab
-            self.temperature = temperature
+            self.samplerConfig = samplerConfig
             self.continuation = continuation
             self.completionGroup = completionGroup
+        }
+    }
+
+    struct SamplerConfig: Sendable {
+        var topK: Int32
+        var topP: Float
+        var minP: Float
+        var temperature: Double
+
+        static let defaults = SamplerConfig(
+            topK: 64,
+            topP: 0.95,
+            minP: 0.0,
+            temperature: 1.0
+        )
+
+        func withTemperatureOverride(_ value: Double) -> SamplerConfig {
+            var copy = self
+            copy.temperature = value
+            return copy
         }
     }
 
@@ -353,7 +386,7 @@ private extension LLMService {
         do {
             Self.resetContextMemory(job.context)
 
-            let sampler = try Self.makeSampler(temperature: job.temperature)
+            let sampler = try Self.makeSampler(config: job.samplerConfig)
             defer { llama_sampler_free(sampler) }
 
             let promptTokens = try Self.tokenize(job.formattedPrompt, vocab: job.vocab)
@@ -479,10 +512,17 @@ private extension LLMService {
 
     static func formatPrompt(
         prompt: String,
-        history: [(role: String, content: String)]
+        history: [(role: String, content: String)],
+        model: OpaquePointer
     ) -> String {
+        let conversation = history + [(role: "user", content: prompt)]
+
+        if let templatedPrompt = tryApplyChatTemplate(conversation: conversation, model: model) {
+            return templatedPrompt
+        }
+
         var pieces: [String] = []
-        pieces.reserveCapacity(history.count + 1)
+        pieces.reserveCapacity(conversation.count + 1)
 
         for message in history {
             let role = normalizedRole(message.role)
@@ -491,6 +531,88 @@ private extension LLMService {
 
         pieces.append("<start_of_turn>user\n\(prompt)<end_of_turn>\n<start_of_turn>model\n")
         return pieces.joined()
+    }
+
+    static func tryApplyChatTemplate(
+        conversation: [(role: String, content: String)],
+        model: OpaquePointer
+    ) -> String? {
+        guard let templatePointer = llama_model_chat_template(model, nil) else {
+            AppDiagnostics.shared.record(
+                "Model chat template unavailable",
+                category: "generation"
+            )
+            return nil
+        }
+
+        var rolePointers: [UnsafeMutablePointer<CChar>?] = []
+        var contentPointers: [UnsafeMutablePointer<CChar>?] = []
+        var messages: [llama_chat_message] = []
+        rolePointers.reserveCapacity(conversation.count)
+        contentPointers.reserveCapacity(conversation.count)
+        messages.reserveCapacity(conversation.count)
+
+        for message in conversation {
+            let role = strdup(normalizedRole(message.role))
+            let content = strdup(message.content)
+
+            rolePointers.append(role)
+            contentPointers.append(content)
+            messages.append(
+                llama_chat_message(
+                    role: UnsafePointer(role),
+                    content: UnsafePointer(content)
+                )
+            )
+        }
+
+        defer {
+            rolePointers.forEach { free($0) }
+            contentPointers.forEach { free($0) }
+        }
+
+        var capacity = max(
+            512,
+            (conversation.reduce(into: 0) { partialResult, message in
+                partialResult += message.role.utf8.count + message.content.utf8.count
+            } * 2) + 128
+        )
+
+        while true {
+            var buffer = [CChar](repeating: 0, count: capacity)
+            let length = llama_chat_apply_template(
+                templatePointer,
+                messages,
+                messages.count,
+                true,
+                &buffer,
+                Int32(buffer.count)
+            )
+
+            if length < 0 {
+                AppDiagnostics.shared.record(
+                    "Chat template application failed",
+                    category: "generation",
+                    metadata: ["messageCount": conversation.count]
+                )
+                return nil
+            }
+
+            if Int(length) < buffer.count {
+                let prompt = String(cString: buffer)
+                AppDiagnostics.shared.record(
+                    "Applied model chat template",
+                    category: "generation",
+                    metadata: [
+                        "messageCount": conversation.count,
+                        "formattedChars": prompt.count
+                    ]
+                )
+                return prompt
+            }
+
+            capacity = Int(length) + 1
+        }
     }
 
     static func resetContextMemory(_ context: OpaquePointer) {
@@ -508,32 +630,32 @@ private extension LLMService {
         }
     }
 
-    static func makeSampler(temperature: Double) throws -> UnsafeMutablePointer<llama_sampler> {
+    static func makeSampler(config: SamplerConfig) throws -> UnsafeMutablePointer<llama_sampler> {
         let params = llama_sampler_chain_default_params()
 
         guard let sampler = llama_sampler_chain_init(params) else {
             throw LLMServiceError.samplerCreationFailed
         }
 
-        guard let topK = llama_sampler_init_top_k(64) else {
+        guard let topK = llama_sampler_init_top_k(config.topK) else {
             llama_sampler_free(sampler)
             throw LLMServiceError.samplerCreationFailed
         }
         llama_sampler_chain_add(sampler, topK)
 
-        guard let topP = llama_sampler_init_top_p(0.95, 1) else {
+        guard let topP = llama_sampler_init_top_p(config.topP, 1) else {
             llama_sampler_free(sampler)
             throw LLMServiceError.samplerCreationFailed
         }
         llama_sampler_chain_add(sampler, topP)
 
-        guard let minP = llama_sampler_init_min_p(0.0, 1) else {
+        guard let minP = llama_sampler_init_min_p(config.minP, 1) else {
             llama_sampler_free(sampler)
             throw LLMServiceError.samplerCreationFailed
         }
         llama_sampler_chain_add(sampler, minP)
 
-        guard let temp = llama_sampler_init_temp(Float(temperature)) else {
+        guard let temp = llama_sampler_init_temp(Float(config.temperature)) else {
             llama_sampler_free(sampler)
             throw LLMServiceError.samplerCreationFailed
         }
@@ -546,6 +668,55 @@ private extension LLMService {
         llama_sampler_chain_add(sampler, dist)
 
         return sampler
+    }
+
+    static func samplerConfig(for model: OpaquePointer) -> SamplerConfig {
+        var config = SamplerConfig.defaults
+
+        if let topK = modelMetadataValue(forKey: "general.sampling.top_k", model: model).flatMap(Int32.init) {
+            config.topK = max(1, topK)
+        }
+
+        if let topP = modelMetadataValue(forKey: "general.sampling.top_p", model: model).flatMap(Float.init) {
+            config.topP = min(max(topP, 0), 1)
+        }
+
+        if let temperature = modelMetadataValue(forKey: "general.sampling.temp", model: model).flatMap(Double.init) {
+            config.temperature = max(0, temperature)
+        }
+
+        AppDiagnostics.shared.record(
+            "Loaded sampler defaults from model metadata",
+            category: "model",
+            metadata: [
+                "topK": config.topK,
+                "topP": config.topP,
+                "temperature": config.temperature
+            ]
+        )
+
+        return config
+    }
+
+    static func modelMetadataValue(forKey key: String, model: OpaquePointer) -> String? {
+        var capacity = 128
+
+        while true {
+            var buffer = [CChar](repeating: 0, count: capacity)
+            let length = key.withCString { keyCString in
+                llama_model_meta_val_str(model, keyCString, &buffer, buffer.count)
+            }
+
+            if length < 0 {
+                return nil
+            }
+
+            if length < capacity {
+                return String(cString: buffer)
+            }
+
+            capacity = Int(length) + 1
+        }
     }
 
     static func tokenize(
