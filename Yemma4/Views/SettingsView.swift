@@ -306,7 +306,7 @@ public struct SettingsView: View {
     private var aboutSection: some View {
         settingsSection("About") {
             VStack(spacing: 0) {
-                linkRow(icon: "doc.text", title: "Term & Conditions", url: URL(string: "https://github.com/jskoiz/yemma-4/blob/main/LICENSE")!)
+                linkRow(icon: "doc.text", title: "Terms & Conditions", url: URL(string: "https://github.com/jskoiz/yemma-4/blob/main/LICENSE")!)
                 separator
                 linkRow(icon: "lock", title: "Privacy Policy", url: URL(string: "https://github.com/jskoiz/yemma-4")!)
                 separator
