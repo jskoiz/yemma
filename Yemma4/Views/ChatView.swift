@@ -284,6 +284,13 @@ public struct ChatView: View {
                             .foregroundStyle(AppTheme.textPrimary)
                             .multilineTextAlignment(.trailing)
                             .textSelection(.enabled)
+                    } else if session.streamingMessageID == message.id {
+                        // Plain text during streaming to avoid costly markdown parsing per token
+                        Text(text)
+                            .font(.system(size: 16))
+                            .foregroundStyle(AppTheme.textPrimary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .textSelection(.enabled)
                     } else {
                         RichMessageText(text: text)
                     }
