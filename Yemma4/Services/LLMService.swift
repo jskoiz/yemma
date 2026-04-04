@@ -520,7 +520,7 @@ private extension LLMService {
         contextParams.n_ctx = contextSize
         contextParams.n_batch = 512
         contextParams.n_ubatch = 512
-        contextParams.flash_attn = flashAttention
+        contextParams.flash_attn_type = flashAttention ? LLAMA_FLASH_ATTN_TYPE_ENABLED : LLAMA_FLASH_ATTN_TYPE_DISABLED
 
         let threadCounts = recommendedThreadCounts()
         contextParams.n_threads = threadCounts.decode
