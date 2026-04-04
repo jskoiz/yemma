@@ -63,6 +63,20 @@ struct StreamingRenderer: Sendable {
         responseBoundaryMarkers.contains { text.contains($0) }
     }
 
+    /// Optimized version that only checks the tail of the string.
+    /// Boundary markers are short (<30 chars), so checking the last ~100 chars suffices
+    /// for the streaming hot path where tokens are appended incrementally.
+    static func shouldStopStreaming(tailOf text: String) -> Bool {
+        let checkLength = 100
+        let tail: Substring
+        if text.count > checkLength {
+            tail = text.suffix(checkLength)
+        } else {
+            tail = text[...]
+        }
+        return responseBoundaryMarkers.contains { tail.contains($0) }
+    }
+
     /// Full sanitization pipeline applied each time the visible text is refreshed.
     ///
     /// Order of operations:
