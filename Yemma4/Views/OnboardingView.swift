@@ -25,6 +25,7 @@ public struct OnboardingView: View {
                 .padding(.bottom, 28)
                 .frame(maxWidth: .infinity)
             }
+            .scrollBounceBehavior(.basedOnSize)
         }
     }
 
