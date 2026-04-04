@@ -30,7 +30,7 @@
 		D3000009 /* EmptyStateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D300000A /* EmptyStateView.swift */; };
 		D300000B /* ComposerBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = D300000C /* ComposerBar.swift */; };
 		D300000D /* ChatSessionController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D300000E /* ChatSessionController.swift */; };
-		D3000011 /* Conversation.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3000012 /* Conversation.swift */; };
+
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -57,7 +57,7 @@
 		D300000A /* EmptyStateView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = EmptyStateView.swift; sourceTree = "<group>"; };
 		D300000C /* ComposerBar.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ComposerBar.swift; sourceTree = "<group>"; };
 		D300000E /* ChatSessionController.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ChatSessionController.swift; sourceTree = "<group>"; };
-		D3000012 /* Conversation.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = Conversation.swift; sourceTree = "<group>"; };
+
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -93,7 +93,6 @@
 			isa = PBXGroup;
 			children = (
 				9F1B5296369F631217B7F995 /* ChatMessage.swift */,
-				D3000012 /* Conversation.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -250,7 +249,6 @@
 				D300000B /* ComposerBar.swift in Sources */,
 				D3000007 /* ConversationBrowserSheet.swift in Sources */,
 				D3000009 /* EmptyStateView.swift in Sources */,
-				D3000011 /* Conversation.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

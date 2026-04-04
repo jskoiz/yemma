@@ -23,6 +23,8 @@ final class ChatSessionController {
     var generationError: String?
     var memoryAlertMessage: String?
     var toastMessage: String?
+    /// ID of the assistant message currently being streamed, nil when not streaming.
+    private(set) var streamingMessageID: String?
     private var toastTask: Task<Void, Never>?
 
     // MARK: - Dependencies
@@ -137,8 +139,14 @@ final class ChatSessionController {
         assistantID: String
     ) async {
         var assistantText = ""
+        // Throttle UI updates to ~20Hz to avoid O(n^2) sanitization + markdown re-parsing
+        let updateInterval: Double = 0.05
+        var lastUpdateTime = CFAbsoluteTimeGetCurrent()
+
+        streamingMessageID = assistantID
 
         defer {
+            streamingMessageID = nil
             Task { @MainActor in
                 self.generationTask = nil
             }
@@ -146,14 +154,20 @@ final class ChatSessionController {
 
         for await token in llmService.generate(prompt: prompt, history: history) {
             assistantText.append(token)
-            let shouldStop = StreamingRenderer.shouldStopStreaming(for: assistantText)
-            let visibleText = StreamingRenderer.sanitize(assistantText)
 
-            updateMessageText(id: assistantID, text: visibleText)
-
-            if shouldStop {
+            if StreamingRenderer.shouldStopStreaming(tailOf: assistantText) {
+                // Final UI update before stopping
+                let visibleText = StreamingRenderer.sanitize(assistantText)
+                updateMessageText(id: assistantID, text: visibleText)
                 await llmService.stopGeneration()
                 break
+            }
+
+            let now = CFAbsoluteTimeGetCurrent()
+            if now - lastUpdateTime >= updateInterval {
+                let visibleText = StreamingRenderer.sanitize(assistantText)
+                updateMessageText(id: assistantID, text: visibleText)
+                lastUpdateTime = now
             }
         }
 
@@ -182,6 +196,7 @@ final class ChatSessionController {
             metadata: ["previousMessages": messages.count]
         )
         await stopGeneration()
+        llmService.clearCachedPrefix()
         messages.removeAll()
         draft = ""
         pendingAttachments.removeAll()
