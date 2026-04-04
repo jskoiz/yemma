@@ -142,7 +142,7 @@ public struct ContentView: View {
             guard !hasValidatedLocalModel else { return }
             hasValidatedLocalModel = true
             await Task.yield()
-            modelDownloader.validateDownloadedModel()
+            await modelDownloader.validateDownloadedModel()
         }
         .animation(.easeInOut(duration: 0.25), value: modelDownloader.isDownloaded)
         .overlay {
@@ -182,21 +182,35 @@ public struct ContentView: View {
         .glassCard(cornerRadius: 22)
     }
 
-    @MainActor
     private func loadModelIfNeeded(force: Bool = false) async {
         guard let modelPath = modelDownloader.modelPath else { return }
         guard force || loadedModelPath != modelPath || !llmService.isModelLoaded else { return }
+        let service = llmService
 
-        isLoadingModel = true
-        defer { isLoadingModel = false }
+        await MainActor.run {
+            isLoadingModel = true
+        }
+
+        defer {
+            Task { @MainActor in
+                isLoadingModel = false
+            }
+        }
 
         do {
-            try llmService.loadModel(from: modelPath)
-            loadedModelPath = modelPath
-            modelLoadError = nil
+            try await Task.detached(priority: .userInitiated) {
+                try service.loadModel(from: modelPath)
+            }.value
+
+            await MainActor.run {
+                loadedModelPath = modelPath
+                modelLoadError = nil
+            }
         } catch {
-            loadedModelPath = nil
-            modelLoadError = error.localizedDescription
+            await MainActor.run {
+                loadedModelPath = nil
+                modelLoadError = error.localizedDescription
+            }
         }
     }
 }
