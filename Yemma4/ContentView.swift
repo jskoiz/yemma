@@ -106,7 +106,7 @@ public struct ContentView: View {
 
     private let supportsLocalModelRuntime = Yemma4AppConfiguration.supportsLocalModelRuntime
     @State private var modelLoadError: String?
-    @State private var loadedModelPath: String?
+    @State private var loadedModelSignature: String?
     @State private var hasValidatedLocalModel = false
     @State private var isShowingOnboardingPreview = false
 
@@ -139,7 +139,7 @@ public struct ContentView: View {
             await Task.yield()
             await modelDownloader.validateDownloadedModel()
         }
-        .task(id: modelDownloader.modelPath) {
+        .task(id: "\(modelDownloader.modelPath ?? "")|\(modelDownloader.mmprojPath ?? "")") {
             await loadModelIfNeeded()
         }
         .animation(.easeInOut(duration: 0.25), value: modelDownloader.isDownloaded)
@@ -179,27 +179,34 @@ public struct ContentView: View {
     private func loadModelIfNeeded(force: Bool = false) async {
         guard Yemma4AppConfiguration.supportsLocalModelRuntime else {
             await MainActor.run {
-                loadedModelPath = nil
+                loadedModelSignature = nil
                 modelLoadError = nil
             }
             return
         }
 
-        guard let modelPath = modelDownloader.modelPath else { return }
-        guard force || loadedModelPath != modelPath || (!llmService.isModelLoaded && !llmService.isModelLoading) else { return }
+        guard
+            let modelPath = modelDownloader.modelPath,
+            let mmprojPath = modelDownloader.mmprojPath
+        else {
+            return
+        }
+
+        let signature = "\(modelPath)|\(mmprojPath)"
+        guard force || loadedModelSignature != signature || (!llmService.isModelLoaded && !llmService.isModelLoading) else { return }
 
         do {
             // Let the download-state transition render before heavy model setup begins.
             await Task.yield()
-            try await llmService.loadModel(from: modelPath)
+            try await llmService.loadModel(from: modelPath, mmprojPath: mmprojPath)
 
             await MainActor.run {
-                loadedModelPath = modelPath
+                loadedModelSignature = signature
                 modelLoadError = nil
             }
         } catch {
             await MainActor.run {
-                loadedModelPath = nil
+                loadedModelSignature = nil
                 modelLoadError = error.localizedDescription
             }
         }

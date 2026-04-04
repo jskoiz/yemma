@@ -2,6 +2,17 @@ import Foundation
 import Observation
 import LlamaSwift
 
+struct PromptImageAsset: Hashable, Sendable {
+    let id: String
+    let filePath: String
+}
+
+struct PromptMessageInput: Sendable {
+    let role: String
+    let text: String
+    let images: [PromptImageAsset]
+}
+
 enum ModelLoadStage: Sendable {
     case idle
     case preparingRuntime
@@ -30,6 +41,7 @@ enum ModelLoadStage: Sendable {
 
 enum LLMServiceError: LocalizedError {
     case modelNotLoaded
+    case multimodalRuntimeUnavailable
     case modelLoadFailed(path: String)
     case contextCreationFailed(path: String)
     case samplerCreationFailed
@@ -42,6 +54,8 @@ enum LLMServiceError: LocalizedError {
         switch self {
         case .modelNotLoaded:
             return "No model is loaded."
+        case .multimodalRuntimeUnavailable:
+            return "The multimodal runtime is not available for image input."
         case let .modelLoadFailed(path):
             return "Failed to load the GGUF model at \(path)."
         case let .contextCreationFailed(path):
@@ -72,6 +86,7 @@ final class LLMService: @unchecked Sendable {
     @ObservationIgnored private var model: OpaquePointer?
     @ObservationIgnored private var context: OpaquePointer?
     @ObservationIgnored private var vocab: OpaquePointer?
+    @ObservationIgnored private var multimodalRuntime: YemmaMultimodalRuntime?
     @ObservationIgnored private var generationTask: Task<Void, Never>?
     @ObservationIgnored private var generationGroup: DispatchGroup?
     @ObservationIgnored private let stateLock = NSLock()
@@ -88,8 +103,9 @@ final class LLMService: @unchecked Sendable {
         freeLoadedModel()
     }
 
-    func loadModel(from path: String) async throws {
+    func loadModel(from path: String, mmprojPath: String) async throws {
         let resolvedPath = (path as NSString).expandingTildeInPath
+        let resolvedMMProjPath = (mmprojPath as NSString).expandingTildeInPath
         let loadStart = Date()
         await stopGeneration()
         await MainActor.run {
@@ -97,7 +113,14 @@ final class LLMService: @unchecked Sendable {
             modelLoadStage = .preparingRuntime
             lastError = nil
         }
-        AppDiagnostics.shared.record("Loading model", category: "model", metadata: ["path": resolvedPath])
+        AppDiagnostics.shared.record(
+            "Loading model",
+            category: "model",
+            metadata: [
+                "path": resolvedPath,
+                "mmprojPath": resolvedMMProjPath
+            ]
+        )
 
         do {
             let preparedResources = try await Task.detached(priority: .utility) { [weak self] in
@@ -109,6 +132,7 @@ final class LLMService: @unchecked Sendable {
                     category: "model",
                     metadata: [
                         "path": resolvedPath,
+                        "mmprojPath": resolvedMMProjPath,
                         "backendInitMs": backendInitMs
                     ]
                 )
@@ -116,13 +140,17 @@ final class LLMService: @unchecked Sendable {
                 await self?.setModelLoadStage(.loadingModel)
 
                 let resourceLoadStart = Date()
-                let loadedResources = try Self.loadResources(from: resolvedPath)
+                let loadedResources = try Self.loadResources(
+                    modelPath: resolvedPath,
+                    mmprojPath: resolvedMMProjPath
+                )
                 let resourceLoadMs = Int(Date().timeIntervalSince(resourceLoadStart) * 1000)
                 AppDiagnostics.shared.record(
                     "Model weights loaded",
                     category: "model",
                     metadata: [
                         "path": resolvedPath,
+                        "mmprojPath": resolvedMMProjPath,
                         "resourceLoadMs": resourceLoadMs
                     ]
                 )
@@ -136,18 +164,21 @@ final class LLMService: @unchecked Sendable {
 
             await setModelLoadStage(.activatingModel)
 
-            let oldResources: (model: OpaquePointer?, context: OpaquePointer?) = withLock {
-                let old = (model: model, context: context)
+            let oldResources: (model: OpaquePointer?, context: OpaquePointer?, multimodalRuntime: YemmaMultimodalRuntime?) = withLock {
+                let old = (model: model, context: context, multimodalRuntime: multimodalRuntime)
                 model = preparedResources.loadedResources.model
                 context = preparedResources.loadedResources.context
                 vocab = preparedResources.loadedResources.vocab
+                multimodalRuntime = preparedResources.loadedResources.multimodalRuntime
                 samplerConfig = preparedResources.loadedResources.samplerConfig
                 return old
             }
 
-            Task.detached(priority: .utility) {
-                Self.freeResources(model: oldResources.model, context: oldResources.context)
-            }
+            Self.freeResources(
+                model: oldResources.model,
+                context: oldResources.context,
+                multimodalRuntime: oldResources.multimodalRuntime
+            )
 
             await MainActor.run {
                 temperature = preparedResources.loadedResources.samplerConfig.temperature
@@ -163,6 +194,7 @@ final class LLMService: @unchecked Sendable {
                 category: "model",
                 metadata: [
                     "path": resolvedPath,
+                    "mmprojPath": resolvedMMProjPath,
                     "context": llama_n_ctx(preparedResources.loadedResources.context),
                     "batch": llama_n_batch(preparedResources.loadedResources.context),
                     "temperature": preparedResources.loadedResources.samplerConfig.temperature,
@@ -181,14 +213,14 @@ final class LLMService: @unchecked Sendable {
         }
     }
 
-    func generate(prompt: String, history: [(role: String, content: String)]) -> AsyncStream<String> {
+    func generate(prompt: PromptMessageInput, history: [PromptMessageInput]) -> AsyncStream<String> {
         Self.ensureBackendInitialized()
 
 #if targetEnvironment(simulator)
         return makeSimulatorStream(prompt: prompt, history: history)
 #else
         let currentResources = withLock {
-            (model: model, context: context, vocab: vocab)
+            (model: model, context: context, vocab: vocab, multimodalRuntime: multimodalRuntime)
         }
 
         guard
@@ -217,7 +249,11 @@ final class LLMService: @unchecked Sendable {
             category: "generation",
             metadata: [
                 "historyCount": history.count,
-                "promptChars": prompt.count,
+                "promptChars": prompt.text.count,
+                "promptImages": prompt.images.count,
+                "historyImages": history.reduce(into: 0) { count, message in
+                    count += message.images.count
+                },
                 "temperature": generationConfig.temperature,
                 "topK": generationConfig.topK,
                 "topP": generationConfig.topP
@@ -234,6 +270,7 @@ final class LLMService: @unchecked Sendable {
                 formattedPrompt: formattedPrompt,
                 context: currentContext,
                 vocab: currentVocab,
+                multimodalRuntime: currentResources.multimodalRuntime,
                 samplerConfig: generationConfig,
                 continuation: continuationBox,
                 completionGroup: completionGroup
@@ -279,14 +316,16 @@ final class LLMService: @unchecked Sendable {
         isGenerating = false
     }
 
-    func makeSimulatorStream(prompt: String, history: [(role: String, content: String)]) -> AsyncStream<String> {
+    func makeSimulatorStream(prompt: PromptMessageInput, history: [PromptMessageInput]) -> AsyncStream<String> {
         let transcriptCount = history.count + 1
         let response = """
         Simulator mode reply: the local UI loop is working, and the model file is present.
 
-        Prompt received: \(prompt)
+        Prompt received: \(prompt.text.isEmpty ? "[image only]" : prompt.text)
 
         Conversation turns in memory: \(transcriptCount)
+
+        Attached images in this turn: \(prompt.images.count)
 
         Real Gemma inference still needs a physical iPhone. Use the simulator for UI, download state, settings, and chat-shell iteration.
         """
@@ -336,16 +375,23 @@ final class LLMService: @unchecked Sendable {
 
 private extension LLMService {
     static let maxGeneratedTokens = 512
+    static let mediaPromptMarker = "<__media__>"
 
     struct ModelLoadThreadCounts: Sendable {
         let decode: Int32
         let batch: Int32
     }
 
+    struct FormattedPrompt: Sendable {
+        let text: String
+        let images: [PromptImageAsset]
+    }
+
     struct LoadedResources: @unchecked Sendable {
         let model: OpaquePointer
         let context: OpaquePointer
         let vocab: OpaquePointer
+        let multimodalRuntime: YemmaMultimodalRuntime
         let samplerConfig: SamplerConfig
         let threadCounts: ModelLoadThreadCounts
     }
@@ -370,7 +416,7 @@ private extension LLMService {
         )
     }
 
-    static func loadResources(from path: String) throws -> LoadedResources {
+    static func loadResources(modelPath: String, mmprojPath: String) throws -> LoadedResources {
         var modelParams = llama_model_default_params()
 #if targetEnvironment(simulator)
         modelParams.n_gpu_layers = 0
@@ -387,25 +433,38 @@ private extension LLMService {
         contextParams.n_threads = threadCounts.decode
         contextParams.n_threads_batch = threadCounts.batch
 
-        guard let newModel = path.withCString({ llama_model_load_from_file($0, modelParams) }) else {
-            throw LLMServiceError.modelLoadFailed(path: path)
+        guard let newModel = modelPath.withCString({ llama_model_load_from_file($0, modelParams) }) else {
+            throw LLMServiceError.modelLoadFailed(path: modelPath)
         }
 
         guard let newContext = llama_init_from_model(newModel, contextParams) else {
             llama_model_free(newModel)
-            throw LLMServiceError.contextCreationFailed(path: path)
+            throw LLMServiceError.contextCreationFailed(path: modelPath)
         }
 
         guard let newVocab = llama_model_get_vocab(newModel) else {
             llama_free(newContext)
             llama_model_free(newModel)
-            throw LLMServiceError.contextCreationFailed(path: path)
+            throw LLMServiceError.contextCreationFailed(path: modelPath)
+        }
+
+        let runtime: YemmaMultimodalRuntime
+        do {
+            runtime = try YemmaMultimodalRuntime(
+                mmProjPath: mmprojPath,
+                model: UnsafeMutableRawPointer(newModel)
+            )
+        } catch {
+            llama_free(newContext)
+            llama_model_free(newModel)
+            throw error
         }
 
         return LoadedResources(
             model: newModel,
             context: newContext,
             vocab: newVocab,
+            multimodalRuntime: runtime,
             samplerConfig: samplerConfig(for: newModel),
             threadCounts: threadCounts
         )
@@ -425,18 +484,20 @@ private extension LLMService {
 
     final class GenerationJob: @unchecked Sendable {
         weak var service: LLMService?
-        let formattedPrompt: String
+        let formattedPrompt: FormattedPrompt
         let context: OpaquePointer
         let vocab: OpaquePointer
+        let multimodalRuntime: YemmaMultimodalRuntime?
         let samplerConfig: SamplerConfig
         let continuation: StreamContinuationBox<String>
         let completionGroup: CompletionGroupBox
 
         init(
             service: LLMService,
-            formattedPrompt: String,
+            formattedPrompt: FormattedPrompt,
             context: OpaquePointer,
             vocab: OpaquePointer,
+            multimodalRuntime: YemmaMultimodalRuntime?,
             samplerConfig: SamplerConfig,
             continuation: StreamContinuationBox<String>,
             completionGroup: CompletionGroupBox
@@ -445,6 +506,7 @@ private extension LLMService {
             self.formattedPrompt = formattedPrompt
             self.context = context
             self.vocab = vocab
+            self.multimodalRuntime = multimodalRuntime
             self.samplerConfig = samplerConfig
             self.continuation = continuation
             self.completionGroup = completionGroup
@@ -503,26 +565,63 @@ private extension LLMService {
             let sampler = try Self.makeSampler(config: job.samplerConfig)
             defer { llama_sampler_free(sampler) }
 
-            let promptTokens = try Self.tokenize(job.formattedPrompt, vocab: job.vocab)
             let contextLimit = max(1, Int(llama_n_ctx(job.context)))
-            let promptTokenLimit = max(1, contextLimit - maxGeneratedTokens)
+            let promptPositionLimit = max(1, contextLimit - maxGeneratedTokens)
+            let promptTokenCount: Int
+            let promptPositionCount: Int
+            var nextPosition: Int32
+
+            if job.formattedPrompt.images.isEmpty {
+                let promptTokens = try Self.tokenize(job.formattedPrompt.text, vocab: job.vocab)
+                promptTokenCount = promptTokens.count
+                promptPositionCount = promptTokens.count
+
+                guard promptPositionCount <= promptPositionLimit else {
+                    throw LLMServiceError.promptTooLong(tokenCount: promptPositionCount, limit: promptPositionLimit)
+                }
+
+                try Self.decode(tokens: promptTokens, context: job.context)
+                nextPosition = Int32(promptTokens.count)
+            } else {
+                guard let multimodalRuntime = job.multimodalRuntime else {
+                    throw LLMServiceError.multimodalRuntimeUnavailable
+                }
+
+                var tokenCount = Int32(0)
+                var positionCount = Int32(0)
+                var evaluatedPosition = Int32(0)
+                let promptImages = job.formattedPrompt.images.map {
+                    YemmaPromptImageInput(identifier: $0.id, filePath: $0.filePath)
+                }
+
+                try multimodalRuntime.evaluatePrompt(
+                    job.formattedPrompt.text,
+                    images: promptImages,
+                    context: UnsafeMutableRawPointer(job.context),
+                    promptPositionLimit: Int32(promptPositionLimit),
+                    promptTokenCount: &tokenCount,
+                    promptPositionCount: &positionCount,
+                    nPast: 0,
+                    nBatch: Int32(llama_n_batch(job.context)),
+                    newNPast: &evaluatedPosition
+                )
+
+                promptTokenCount = Int(tokenCount)
+                promptPositionCount = Int(positionCount)
+                nextPosition = evaluatedPosition
+            }
+
             AppDiagnostics.shared.record(
                 "Prompt tokenized",
                 category: "generation",
                 metadata: [
-                    "promptTokens": promptTokens.count,
+                    "promptTokens": promptTokenCount,
+                    "promptPositions": promptPositionCount,
                     "contextLimit": contextLimit,
-                    "promptTokenLimit": promptTokenLimit
+                    "promptPositionLimit": promptPositionLimit,
+                    "promptImages": job.formattedPrompt.images.count
                 ]
             )
-
-            guard promptTokens.count <= promptTokenLimit else {
-                throw LLMServiceError.promptTooLong(tokenCount: promptTokens.count, limit: promptTokenLimit)
-            }
-
-            try Self.decode(tokens: promptTokens, context: job.context)
-
-            var nextPosition = Int32(promptTokens.count)
             var emittedTokenCount = 0
 
             while !Task.isCancelled {
@@ -553,6 +652,9 @@ private extension LLMService {
                 )
                 nextPosition += 1
                 emittedTokenCount += 1
+                if nextPosition >= Int32(contextLimit) {
+                    break
+                }
             }
 
             AppDiagnostics.shared.record(
@@ -606,7 +708,7 @@ private extension LLMService {
 
     func publishLoadFailure(_ error: Error) async {
         let stillHasLoadedModel = withLock {
-            model != nil && context != nil && vocab != nil
+            model != nil && context != nil && vocab != nil && multimodalRuntime != nil
         }
 
         await MainActor.run {
@@ -619,18 +721,29 @@ private extension LLMService {
 
     func freeLoadedModel() {
         let resources = withLock {
-            let current = (model: model, context: context)
+            let current = (model: model, context: context, multimodalRuntime: multimodalRuntime)
             model = nil
             context = nil
             vocab = nil
+            multimodalRuntime = nil
             isModelLoaded = false
             return current
         }
 
-        Self.freeResources(model: resources.model, context: resources.context)
+        Self.freeResources(
+            model: resources.model,
+            context: resources.context,
+            multimodalRuntime: resources.multimodalRuntime
+        )
     }
 
-    static func freeResources(model: OpaquePointer?, context: OpaquePointer?) {
+    static func freeResources(
+        model: OpaquePointer?,
+        context: OpaquePointer?,
+        multimodalRuntime: YemmaMultimodalRuntime?
+    ) {
+        _ = multimodalRuntime
+
         if let context {
             llama_free(context)
         }
@@ -665,29 +778,53 @@ private extension LLMService {
     }
 
     static func formatPrompt(
-        prompt: String,
-        history: [(role: String, content: String)],
+        prompt: PromptMessageInput,
+        history: [PromptMessageInput],
         model: OpaquePointer
-    ) -> String {
-        let conversation = history + [(role: "user", content: prompt)]
+    ) -> FormattedPrompt {
+        let conversation = history + [prompt]
+        let serializedConversation = conversation.map {
+            (
+                role: $0.role,
+                content: serializedContent(for: $0)
+            )
+        }
+        let images = conversation.flatMap(\.images)
 
-        if let templatedPrompt = tryApplyChatTemplate(conversation: conversation, model: model) {
-            return templatedPrompt
+        if let templatedPrompt = tryApplyChatTemplate(conversation: serializedConversation, model: model) {
+            return FormattedPrompt(text: templatedPrompt, images: images)
         }
 
         var pieces = ["<bos>"]
-        pieces.reserveCapacity((conversation.count * 2) + 2)
+        pieces.reserveCapacity((serializedConversation.count * 2) + 2)
 
-        for message in conversation {
+        for message in serializedConversation {
             let role = serializedRole(message.role)
-            let content = role == "model"
-                ? stripThinkingBlocks(from: message.content)
-                : message.content.trimmingCharacters(in: .whitespacesAndNewlines)
-            pieces.append("<|turn>\(role)\n\(content)<turn|>\n")
+            pieces.append("<|turn>\(role)\n\(message.content)<turn|>\n")
         }
 
         pieces.append("<|turn>model\n")
-        return pieces.joined()
+        return FormattedPrompt(text: pieces.joined(), images: images)
+    }
+
+    static func serializedContent(for message: PromptMessageInput) -> String {
+        let baseText = templateRole(message.role) == "assistant"
+            ? stripThinkingBlocks(from: message.text)
+            : message.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let markerSection = Array(
+            repeating: mediaPromptMarker,
+            count: message.images.count
+        )
+        .joined(separator: "\n")
+
+        switch (markerSection.isEmpty, baseText.isEmpty) {
+        case (true, _):
+            return baseText
+        case (false, true):
+            return markerSection
+        case (false, false):
+            return markerSection + "\n" + baseText
+        }
     }
 
     static func tryApplyChatTemplate(

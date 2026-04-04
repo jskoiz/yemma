@@ -608,19 +608,24 @@ public struct SettingsView: View {
     }
 
     private var modelSizeText: String {
-        guard let modelPath = modelDownloader.modelPath else {
+        let localPaths = [modelDownloader.modelPath, modelDownloader.mmprojPath].compactMap { $0 }
+        guard !localPaths.isEmpty else {
             return "Not downloaded"
         }
 
         let fileManager = FileManager.default
-        guard
-            let attributes = try? fileManager.attributesOfItem(atPath: modelPath),
-            let size = attributes[.size] as? NSNumber
-        else {
-            return "Unknown"
+        let totalBytes = localPaths.reduce(into: Int64(0)) { total, path in
+            guard
+                let attributes = try? fileManager.attributesOfItem(atPath: path),
+                let size = attributes[.size] as? NSNumber
+            else {
+                return
+            }
+            total += size.int64Value
         }
 
-        return ByteCountFormatter.string(fromByteCount: size.int64Value, countStyle: .file)
+        guard totalBytes > 0 else { return "Unknown" }
+        return ByteCountFormatter.string(fromByteCount: totalBytes, countStyle: .file)
     }
 
     private var temperatureText: String {

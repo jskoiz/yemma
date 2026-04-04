@@ -1,4 +1,5 @@
 import Observation
+import PhotosUI
 import SwiftUI
 import ExyteChat
 
@@ -12,6 +13,9 @@ public struct ChatView: View {
     private let supportsLocalModelRuntime = Yemma4AppConfiguration.supportsLocalModelRuntime
     @State private var messages: [ChatMessage] = []
     @State private var draft = ""
+    @State private var selectedPhotoItems: [PhotosPickerItem] = []
+    @State private var pendingAttachments: [Attachment] = []
+    @State private var isImportingAttachments = false
     @State private var generationTask: Task<Void, Never>?
     @State private var generationError: String?
     @State private var memoryAlertMessage: String?
@@ -130,6 +134,12 @@ public struct ChatView: View {
             .onDisappear {
                 Task { @MainActor in
                     await stopGeneration()
+                }
+            }
+            .onChange(of: selectedPhotoItems) { _, newItems in
+                guard !newItems.isEmpty else { return }
+                Task { @MainActor in
+                    await importSelectedPhotos(from: newItems)
                 }
             }
             .animation(.easeInOut(duration: 0.2), value: toastMessage)
@@ -292,16 +302,28 @@ public struct ChatView: View {
     @ViewBuilder
     private func messageBubble(_ message: ChatMessage) -> some View {
         let text = displayText(for: message)
+        let shouldRenderText = shouldRenderText(for: message, text: text)
 
-        Group {
-            if message.user.isCurrentUser {
-                Text(text)
-                    .font(.system(size: 16, weight: .medium, design: .rounded))
-                    .foregroundStyle(AppTheme.textPrimary)
-                    .multilineTextAlignment(.trailing)
-                    .textSelection(.enabled)
-            } else {
-                RichMessageText(text: text)
+        VStack(
+            alignment: message.user.isCurrentUser ? .trailing : .leading,
+            spacing: message.attachments.isEmpty || !shouldRenderText ? 0 : 12
+        ) {
+            if !message.attachments.isEmpty {
+                attachmentGrid(for: message)
+            }
+
+            if shouldRenderText {
+                Group {
+                    if message.user.isCurrentUser {
+                        Text(text)
+                            .font(.system(size: 16, weight: .medium, design: .rounded))
+                            .foregroundStyle(AppTheme.textPrimary)
+                            .multilineTextAlignment(.trailing)
+                            .textSelection(.enabled)
+                    } else {
+                        RichMessageText(text: text)
+                    }
+                }
             }
         }
         .padding(.horizontal, 16)
@@ -324,8 +346,12 @@ public struct ChatView: View {
                 typingIndicator
             }
 
+            if !pendingAttachments.isEmpty {
+                composerAttachmentStrip
+            }
+
             HStack(spacing: 10) {
-                composerIcon(systemName: "plus", action: {})
+                attachmentPickerButton
 
                 TextField("Ask anything", text: $draft, axis: .vertical)
                     .textFieldStyle(.plain)
@@ -419,6 +445,33 @@ public struct ChatView: View {
         .buttonStyle(.plain)
     }
 
+    private var attachmentPickerButton: some View {
+        PhotosPicker(
+            selection: $selectedPhotoItems,
+            maxSelectionCount: 4,
+            matching: .images,
+            preferredItemEncoding: .automatic
+        ) {
+            Image(systemName: isImportingAttachments ? "hourglass" : "plus")
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(AppTheme.textSecondary)
+                .frame(width: 36, height: 36)
+        }
+        .buttonStyle(.plain)
+        .disabled(isImportingAttachments)
+    }
+
+    private var composerAttachmentStrip: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 10) {
+                ForEach(pendingAttachments, id: \.id) { attachment in
+                    attachmentPreviewChip(for: attachment)
+                }
+            }
+            .padding(.horizontal, 2)
+        }
+    }
+
     private var typingIndicator: some View {
         HStack(spacing: 10) {
             ProgressView()
@@ -443,8 +496,9 @@ public struct ChatView: View {
     }
 
     private var canSubmitDraft: Bool {
+        guard !isImportingAttachments else { return false }
         let hasDraft = !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        guard hasDraft else { return false }
+        guard hasDraft || !pendingAttachments.isEmpty else { return false }
         return llmService.isModelLoaded || !supportsLocalModelRuntime
     }
 
@@ -488,9 +542,182 @@ public struct ChatView: View {
         return message.text
     }
 
+    private func shouldRenderText(for message: ChatMessage, text: String) -> Bool {
+        if message.user.isCurrentUser {
+            return !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+
+        return !text.isEmpty
+    }
+
+    private func imageAttachments(for message: ChatMessage) -> [Attachment] {
+        message.attachments.filter { $0.type == .image }
+    }
+
+    @ViewBuilder
+    private func attachmentGrid(for message: ChatMessage) -> some View {
+        let attachments = imageAttachments(for: message)
+
+        if attachments.count == 1, let attachment = attachments.first {
+            attachmentTile(for: attachment, height: 216)
+        } else {
+            LazyVGrid(columns: [
+                GridItem(.flexible(), spacing: 8),
+                GridItem(.flexible(), spacing: 8)
+            ], spacing: 8) {
+                ForEach(attachments, id: \.id) { attachment in
+                    attachmentTile(for: attachment, height: 112)
+                }
+            }
+        }
+    }
+
+    private func attachmentTile(for attachment: Attachment, height: CGFloat) -> some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(AppTheme.controlFill)
+
+            if
+                attachment.thumbnail.isFileURL,
+                let image = UIImage(contentsOfFile: attachment.thumbnail.path)
+            {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                Image(systemName: "photo")
+                    .font(.system(size: 24, weight: .medium))
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: height)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(AppTheme.messageBubbleBorder, lineWidth: 1)
+        )
+    }
+
+    private func attachmentPreviewChip(for attachment: Attachment) -> some View {
+        ZStack(alignment: .topTrailing) {
+            attachmentTile(for: attachment, height: 76)
+                .frame(width: 76)
+
+            Button {
+                pendingAttachments.removeAll { $0.id == attachment.id }
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundStyle(AppTheme.accentForeground, AppTheme.textSecondary.opacity(0.8))
+            }
+            .buttonStyle(.plain)
+            .offset(x: 6, y: -6)
+        }
+        .padding(.top, 6)
+        .padding(.trailing, 2)
+    }
+
+    private func promptInput(from message: ChatMessage) -> PromptMessageInput {
+        PromptMessageInput(
+            role: message.user.isCurrentUser ? "user" : "assistant",
+            text: message.text,
+            images: message.attachments.compactMap { attachment in
+                guard attachment.type == .image, attachment.full.isFileURL else {
+                    return nil
+                }
+
+                return PromptImageAsset(
+                    id: attachment.id,
+                    filePath: attachment.full.path
+                )
+            }
+        )
+    }
+
+    @MainActor
+    private func importSelectedPhotos(from items: [PhotosPickerItem]) async {
+        guard !items.isEmpty else { return }
+
+        isImportingAttachments = true
+        defer {
+            isImportingAttachments = false
+            selectedPhotoItems = []
+        }
+
+        var importedAttachments: [Attachment] = []
+        var failedCount = 0
+
+        for item in items {
+            do {
+                if let attachment = try await makeAttachment(from: item) {
+                    importedAttachments.append(attachment)
+                }
+            } catch {
+                failedCount += 1
+            }
+        }
+
+        if !importedAttachments.isEmpty {
+            pendingAttachments.append(contentsOf: importedAttachments)
+        }
+
+        if failedCount > 0 {
+            showToast("Some images could not be added")
+        }
+    }
+
+    private func makeAttachment(from item: PhotosPickerItem) async throws -> Attachment? {
+        guard let data = try await item.loadTransferable(type: Data.self) else {
+            return nil
+        }
+
+#if canImport(UIKit)
+        guard let image = UIImage(data: data) else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+
+        let encodedData: Data
+        let fileExtension: String
+
+        if let jpegData = image.jpegData(compressionQuality: 0.9) {
+            encodedData = jpegData
+            fileExtension = "jpg"
+        } else if let pngData = image.pngData() {
+            encodedData = pngData
+            fileExtension = "png"
+        } else {
+            throw CocoaError(.fileWriteUnknown)
+        }
+#else
+        let encodedData = data
+        let fileExtension = "bin"
+#endif
+
+        let fileURL = try storeAttachmentData(encodedData, fileExtension: fileExtension)
+        return Attachment(id: UUID().uuidString, url: fileURL, type: .image)
+    }
+
+    private func storeAttachmentData(_ data: Data, fileExtension: String) throws -> URL {
+        let directory = FileManager.default
+            .urls(for: .cachesDirectory, in: .userDomainMask)
+            .first!
+            .appendingPathComponent("chat-attachments", isDirectory: true)
+
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true,
+            attributes: nil
+        )
+
+        let fileURL = directory.appendingPathComponent("\(UUID().uuidString).\(fileExtension)")
+        try data.write(to: fileURL, options: [.atomic])
+        return fileURL
+    }
+
     private func submitDraft() {
         let trimmedText = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedText.isEmpty else { return }
+        guard !trimmedText.isEmpty || !pendingAttachments.isEmpty else { return }
         guard llmService.isModelLoaded || !supportsLocalModelRuntime else {
             AppDiagnostics.shared.record("Send blocked because model is not loaded", category: "ui")
             generationError = "The model is not loaded yet."
@@ -507,17 +734,21 @@ public struct ChatView: View {
             category: "ui",
             metadata: [
                 "chars": trimmedText.count,
+                "images": pendingAttachments.count,
                 "existingMessages": messages.count
             ]
         )
         draft = ""
         Task { @MainActor in
-            await handlePrompt(trimmedText)
+            let attachments = pendingAttachments
+            pendingAttachments = []
+            selectedPhotoItems = []
+            await handlePrompt(trimmedText, attachments: attachments)
         }
     }
 
     @MainActor
-    private func handlePrompt(_ trimmedText: String) async {
+    private func handlePrompt(_ trimmedText: String, attachments: [Attachment]) async {
         triggerSendHaptic()
         await stopGeneration()
 
@@ -527,9 +758,12 @@ public struct ChatView: View {
             user: .user,
             status: .sent,
             createdAt: Date(),
-            text: trimmedText
+            text: trimmedText,
+            attachments: attachments
         )
         messages.append(userMessage)
+
+        let prompt = promptInput(from: userMessage)
 
         let assistantID = UUID().uuidString
         messages.append(
@@ -545,24 +779,24 @@ public struct ChatView: View {
         generationError = nil
         memoryAlertMessage = nil
         generationTask = Task {
-            await streamReply(prompt: trimmedText, history: history, assistantID: assistantID)
+            await streamReply(prompt: prompt, history: history, assistantID: assistantID)
         }
     }
 
-    private func conversationHistory(from messages: [ChatMessage]) -> [(role: String, content: String)] {
+    private func conversationHistory(from messages: [ChatMessage]) -> [PromptMessageInput] {
         messages
-            .filter { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-            .map {
-                (
-                    role: $0.user.isCurrentUser ? "user" : "assistant",
-                    content: $0.text
-                )
+            .compactMap { message in
+                let prompt = promptInput(from: message)
+                if prompt.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && prompt.images.isEmpty {
+                    return nil
+                }
+                return prompt
             }
     }
 
     private func streamReply(
-        prompt: String,
-        history: [(role: String, content: String)],
+        prompt: PromptMessageInput,
+        history: [PromptMessageInput],
         assistantID: String
     ) async {
         var assistantText = ""
@@ -751,6 +985,9 @@ public struct ChatView: View {
         await stopGeneration()
         messages.removeAll()
         draft = ""
+        pendingAttachments.removeAll()
+        selectedPhotoItems.removeAll()
+        isImportingAttachments = false
         generationError = nil
         memoryAlertMessage = nil
         toastMessage = nil
@@ -890,9 +1127,14 @@ private struct ConversationsView: View {
     let onStartFresh: () -> Void
 
     private var conversationPreview: String {
-        let firstUserMessage = messages.first(where: \.user.isCurrentUser)?.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let firstUserMessage, !firstUserMessage.isEmpty {
-            return firstUserMessage
+        let firstUserMessage = messages.first(where: \.user.isCurrentUser)
+        let firstUserText = firstUserMessage?.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let firstUserText, !firstUserText.isEmpty {
+            return firstUserText
+        }
+
+        if let firstUserMessage, !firstUserMessage.attachments.isEmpty {
+            return "Image prompt"
         }
 
         return "Hello"
