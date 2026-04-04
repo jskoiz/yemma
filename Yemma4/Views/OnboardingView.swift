@@ -6,13 +6,13 @@ public struct OnboardingView: View {
     @Environment(LLMService.self) private var llmService
     @State private var isStartingDownload = false
 
-    private let estimatedModelBytes: Int64 = 2_000_000_000
+    private let estimatedModelBytes: Int64 = 6_400_000_000
     private let supportsLocalModelRuntime = Yemma4AppConfiguration.supportsLocalModelRuntime
     private let onContinue: (() -> Void)?
     private let onRetryModelLoad: (() -> Void)?
     private let setupFacts = [
         "100% on-device",
-        "~2 GB once",
+        "~6.4 GB once",
         "Works offline"
     ]
 
@@ -79,7 +79,7 @@ public struct OnboardingView: View {
                 .font(.system(size: 40, weight: .bold, design: .serif))
                 .foregroundStyle(AppTheme.textPrimary)
 
-            Text("Yemma runs Gemma 4 entirely on your iPhone. Download the model once, then every conversation stays on-device.")
+            Text("Yemma runs Gemma 4 entirely on your iPhone. Download the model and vision projector once, then every conversation stays on-device.")
                 .font(.system(size: 16, weight: .medium))
                 .foregroundStyle(AppTheme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -354,7 +354,7 @@ public struct OnboardingView: View {
             return "Use the simulator to check the UI flow. Run on a physical iPhone for real on-device inference."
         }
 
-        return "First launch downloads Gemma 4 once, then it stays on this iPhone."
+        return "First launch downloads Gemma 4 and its vision projector once, then both stay on this iPhone."
     }
 
     private var isModelDownloadedNotReady: Bool {

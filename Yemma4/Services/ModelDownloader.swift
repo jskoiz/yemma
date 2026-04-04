@@ -1,6 +1,29 @@
 import Foundation
 import Observation
 
+public struct LocalModelResources: Sendable {
+    public let modelPath: String
+    public let mmprojPath: String
+}
+
+private enum LocalModelAssetKind: String, Sendable {
+    case model
+    case mmproj
+}
+
+private struct LocalModelAsset: Sendable {
+    let kind: LocalModelAssetKind
+    let downloadURL: URL
+    let fileName: String
+    let resumeDataFileName: String
+    let expectedBytes: Int64
+}
+
+private struct ValidationResult: Sendable {
+    let isDownloaded: Bool
+    let localPath: String?
+}
+
 @MainActor
 @Observable
 public final class ModelDownloader {
@@ -10,12 +33,48 @@ public final class ModelDownloader {
     public var canResumeDownload: Bool = false
     public var error: String?
     public var modelPath: String?
+    public var mmprojPath: String?
 
-    private let modelDownloadURL = URL(string: "https://huggingface.co/bartowski/google_gemma-4-E4B-it-GGUF/resolve/main/google_gemma-4-E4B-it-Q4_K_M.gguf")!
-    private let modelFileName = "gemma-4-e4b-it-q4km.gguf"
-    private let resumeDataFileName = "gemma-4-e4b-it-q4km.resume-data"
+    public var localResources: LocalModelResources? {
+        guard
+            isDownloaded,
+            let modelPath,
+            let mmprojPath
+        else {
+            return nil
+        }
+
+        return LocalModelResources(modelPath: modelPath, mmprojPath: mmprojPath)
+    }
+
+    public var estimatedDownloadBytes: Int64 {
+        Self.totalExpectedBytes
+    }
+
+    private static let downloadAssets: [LocalModelAsset] = [
+        LocalModelAsset(
+            kind: .model,
+            downloadURL: URL(string: "https://huggingface.co/bartowski/google_gemma-4-E4B-it-GGUF/resolve/main/google_gemma-4-E4B-it-Q4_K_M.gguf")!,
+            fileName: "gemma-4-e4b-it-q4km.gguf",
+            resumeDataFileName: "gemma-4-e4b-it-q4km.resume-data",
+            expectedBytes: 5_405_163_520
+        ),
+        LocalModelAsset(
+            kind: .mmproj,
+            downloadURL: URL(string: "https://huggingface.co/bartowski/google_gemma-4-E4B-it-GGUF/resolve/main/mmproj-google_gemma-4-E4B-it-f16.gguf")!,
+            fileName: "gemma-4-e4b-it-mmproj-f16.gguf",
+            resumeDataFileName: "gemma-4-e4b-it-mmproj-f16.resume-data",
+            expectedBytes: 990_372_352
+        ),
+    ]
+
+    private static let totalExpectedBytes = downloadAssets.reduce(into: Int64(0)) { total, asset in
+        total += asset.expectedBytes
+    }
+
     private let fileManager: FileManager
     private let backgroundDownloadSession: BackgroundModelDownloadSession
+    private var activeAssetKind: LocalModelAssetKind?
 
     public init(fileManager: FileManager = .default) {
         self.fileManager = fileManager
@@ -29,6 +88,8 @@ public final class ModelDownloader {
             canResumeDownload = false
             downloadProgress = 0
             modelPath = nil
+            mmprojPath = nil
+            activeAssetKind = nil
             error = Self.unsupportedRuntimeMessage
             AppDiagnostics.shared.record(
                 "Skipped local model validation on unsupported runtime",
@@ -37,33 +98,20 @@ public final class ModelDownloader {
             return
         }
 
-        let fileManager = self.fileManager
-        let modelFileURL = self.modelFileURL
-        let resumeDataURL = self.resumeDataURL
-
-        let result = ModelDownloaderIO.validateLocalModel(
-            fileManager: fileManager,
-            modelFileURL: modelFileURL,
-            resumeDataURL: resumeDataURL
-        )
-
-        isDownloaded = result.isDownloaded
-        modelPath = result.modelPath
-        canResumeDownload = ModelDownloaderIO.loadResumeDataIfAvailable(
-            fileManager: fileManager,
-            resumeDataURL: resumeDataURL
-        ) != nil
+        refreshLocalState()
         let restoredDownload = await observeBackgroundDownloadIfNeeded()
 
         if !isDownloading {
-            downloadProgress = result.isDownloaded ? max(downloadProgress, 1) : 0
+            downloadProgress = aggregatedProgress()
         }
+
         AppDiagnostics.shared.record(
             "Validated local model state",
             category: "download",
             metadata: [
-                "isDownloaded": result.isDownloaded,
-                "modelPath": result.modelPath ?? "nil",
+                "isDownloaded": isDownloaded,
+                "modelPath": modelPath ?? "nil",
+                "mmprojPath": mmprojPath ?? "nil",
                 "canResume": canResumeDownload,
                 "restoredDownload": restoredDownload
             ]
@@ -77,6 +125,8 @@ public final class ModelDownloader {
             canResumeDownload = false
             downloadProgress = 0
             modelPath = nil
+            mmprojPath = nil
+            activeAssetKind = nil
             error = Self.unsupportedRuntimeMessage
             AppDiagnostics.shared.record(
                 "Blocked model download on unsupported runtime",
@@ -90,78 +140,47 @@ public final class ModelDownloader {
             return
         }
 
-        await validateDownloadedModel()
+        refreshLocalState()
         error = nil
         AppDiagnostics.shared.record("Starting model download flow", category: "download")
 
-        if isDownloaded, let modelPath {
+        if let localResources {
             downloadProgress = 1
-            self.modelPath = modelPath
-            AppDiagnostics.shared.record("Model already present", category: "download", metadata: ["path": modelPath])
+            AppDiagnostics.shared.record(
+                "Model assets already present",
+                category: "download",
+                metadata: [
+                    "modelPath": localResources.modelPath,
+                    "mmprojPath": localResources.mmprojPath
+                ]
+            )
             return
         }
 
-        isDownloading = true
-        downloadProgress = 0
-
-        let fileManager = self.fileManager
-        let destinationURL = modelFileURL
-        let resumeDataURL = self.resumeDataURL
-        let resumeData = ModelDownloaderIO.loadResumeDataIfAvailable(
-            fileManager: fileManager,
-            resumeDataURL: resumeDataURL
-        )
-
-        let startResult = await backgroundDownloadSession.startOrReconnect(
-            downloadURL: modelDownloadURL,
-            destinationURL: destinationURL,
-            resumeData: resumeData,
-            progressHandler: { [weak self] progress in
-                Task { @MainActor [weak self] in
-                    self?.downloadProgress = progress
-                }
-            },
-            completionHandler: { [weak self] result in
-                Task { @MainActor [weak self] in
-                    await self?.handleBackgroundDownloadCompletion(result)
-                }
-            }
-        )
-
-        switch startResult {
-        case let .started(progress), let .reconnected(progress):
-            downloadProgress = progress
-            isDownloading = true
-            canResumeDownload = false
-            error = nil
-            AppDiagnostics.shared.record(
-                "Background download active",
-                category: "download",
-                metadata: [
-                    "mode": startResult.modeLabel,
-                    "progress": progress
-                ]
-            )
-        case .completed:
-            await validateDownloadedModel()
-        case .idle:
+        guard let nextAsset = nextPendingAsset() else {
             isDownloading = false
+            return
         }
+
+        await startDownload(for: nextAsset)
     }
 
     public func deleteModel() {
-        let urlsToDelete = [modelFileURL, resumeDataURL]
         var lastError: Error?
 
-        for url in urlsToDelete {
-            do {
-                if fileManager.fileExists(atPath: url.path) {
-                    try fileManager.removeItem(at: url)
+        for asset in Self.downloadAssets {
+            for url in [localFileURL(for: asset), resumeDataURL(for: asset)] {
+                do {
+                    if fileManager.fileExists(atPath: url.path) {
+                        try fileManager.removeItem(at: url)
+                    }
+                } catch {
+                    lastError = error
                 }
-            } catch {
-                lastError = error
             }
         }
+
+        activeAssetKind = nil
 
         if let lastError {
             error = Self.describe(lastError)
@@ -171,9 +190,7 @@ public final class ModelDownloader {
             AppDiagnostics.shared.record("Deleted local model files", category: "download")
         }
 
-        Task {
-            await validateDownloadedModel()
-        }
+        refreshLocalState()
     }
 
     private var documentsDirectory: URL {
@@ -184,26 +201,142 @@ public final class ModelDownloader {
         fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first!
     }
 
-    private var modelFileURL: URL {
-        documentsDirectory.appendingPathComponent(modelFileName)
+    private func localFileURL(for asset: LocalModelAsset) -> URL {
+        documentsDirectory.appendingPathComponent(asset.fileName)
     }
 
-    private var resumeDataURL: URL {
-        cachesDirectory.appendingPathComponent(resumeDataFileName)
+    private func resumeDataURL(for asset: LocalModelAsset) -> URL {
+        cachesDirectory.appendingPathComponent(asset.resumeDataFileName)
     }
 
-    private func observeBackgroundDownloadIfNeeded() async -> Bool {
-        let status = await backgroundDownloadSession.observeExistingDownload(
-            downloadURL: modelDownloadURL,
-            destinationURL: modelFileURL,
+    private func refreshLocalState() {
+        let modelResult = ModelDownloaderIO.validateLocalFile(
+            fileManager: fileManager,
+            fileURL: localFileURL(for: asset(.model))
+        )
+        let mmprojResult = ModelDownloaderIO.validateLocalFile(
+            fileManager: fileManager,
+            fileURL: localFileURL(for: asset(.mmproj))
+        )
+
+        modelPath = modelResult.localPath
+        mmprojPath = mmprojResult.localPath
+        isDownloaded = modelResult.isDownloaded && mmprojResult.isDownloaded
+
+        if !isDownloading {
+            downloadProgress = aggregatedProgress()
+        }
+
+        if let pendingAsset = nextPendingAsset() {
+            canResumeDownload = ModelDownloaderIO.loadResumeDataIfAvailable(
+                fileManager: fileManager,
+                resumeDataURL: resumeDataURL(for: pendingAsset)
+            ) != nil
+        } else {
+            canResumeDownload = false
+        }
+    }
+
+    private func asset(_ kind: LocalModelAssetKind) -> LocalModelAsset {
+        Self.downloadAssets.first(where: { $0.kind == kind })!
+    }
+
+    private func nextPendingAsset() -> LocalModelAsset? {
+        Self.downloadAssets.first { asset in
+            !fileManager.fileExists(atPath: localFileURL(for: asset).path)
+        }
+    }
+
+    private func aggregatedProgress(
+        activeAsset: LocalModelAsset? = nil,
+        activeProgress: Double = 0
+    ) -> Double {
+        var downloadedBytes: Int64 = 0
+
+        for asset in Self.downloadAssets {
+            if let activeAsset, activeAsset.kind == asset.kind {
+                downloadedBytes += Int64(Double(asset.expectedBytes) * min(max(activeProgress, 0), 1))
+                continue
+            }
+
+            if fileManager.fileExists(atPath: localFileURL(for: asset).path) {
+                downloadedBytes += asset.expectedBytes
+            }
+        }
+
+        guard Self.totalExpectedBytes > 0 else { return 0 }
+        return min(1, max(0, Double(downloadedBytes) / Double(Self.totalExpectedBytes)))
+    }
+
+    private func startDownload(for asset: LocalModelAsset) async {
+        activeAssetKind = asset.kind
+        isDownloading = true
+        canResumeDownload = false
+        error = nil
+        downloadProgress = aggregatedProgress(activeAsset: asset, activeProgress: 0)
+
+        let resumeData = ModelDownloaderIO.loadResumeDataIfAvailable(
+            fileManager: fileManager,
+            resumeDataURL: resumeDataURL(for: asset)
+        )
+
+        let startResult = await backgroundDownloadSession.startOrReconnect(
+            downloadURL: asset.downloadURL,
+            destinationURL: localFileURL(for: asset),
+            resumeData: resumeData,
             progressHandler: { [weak self] progress in
                 Task { @MainActor [weak self] in
-                    self?.downloadProgress = progress
+                    self?.downloadProgress = self?.aggregatedProgress(activeAsset: asset, activeProgress: progress) ?? progress
                 }
             },
             completionHandler: { [weak self] result in
                 Task { @MainActor [weak self] in
-                    await self?.handleBackgroundDownloadCompletion(result)
+                    await self?.handleBackgroundDownloadCompletion(result, for: asset)
+                }
+            }
+        )
+
+        switch startResult {
+        case let .started(progress), let .reconnected(progress):
+            downloadProgress = aggregatedProgress(activeAsset: asset, activeProgress: progress)
+            isDownloading = true
+            canResumeDownload = false
+            AppDiagnostics.shared.record(
+                "Background download active",
+                category: "download",
+                metadata: [
+                    "mode": startResult.modeLabel,
+                    "asset": asset.kind.rawValue,
+                    "progress": progress
+                ]
+            )
+        case .completed:
+            await handleSuccessfulAssetDownload(asset)
+        case .idle:
+            isDownloading = false
+            activeAssetKind = nil
+        }
+    }
+
+    private func observeBackgroundDownloadIfNeeded() async -> Bool {
+        guard let asset = nextPendingAsset() else {
+            isDownloading = false
+            activeAssetKind = nil
+            return false
+        }
+
+        activeAssetKind = asset.kind
+        let status = await backgroundDownloadSession.observeExistingDownload(
+            downloadURL: asset.downloadURL,
+            destinationURL: localFileURL(for: asset),
+            progressHandler: { [weak self] progress in
+                Task { @MainActor [weak self] in
+                    self?.downloadProgress = self?.aggregatedProgress(activeAsset: asset, activeProgress: progress) ?? progress
+                }
+            },
+            completionHandler: { [weak self] result in
+                Task { @MainActor [weak self] in
+                    await self?.handleBackgroundDownloadCompletion(result, for: asset)
                 }
             }
         )
@@ -213,52 +346,69 @@ public final class ModelDownloader {
             isDownloading = true
             canResumeDownload = false
             error = nil
-            downloadProgress = progress
+            downloadProgress = aggregatedProgress(activeAsset: asset, activeProgress: progress)
             return true
         case .completed:
-            isDownloading = false
-            downloadProgress = 1
-            isDownloaded = true
-            canResumeDownload = false
-            modelPath = modelFileURL.path
+            await handleSuccessfulAssetDownload(asset)
             return false
         case .idle:
             isDownloading = false
+            activeAssetKind = nil
             return false
         }
     }
 
-    private func handleBackgroundDownloadCompletion(_ result: BackgroundDownloadCompletion) async {
+    private func handleSuccessfulAssetDownload(_ asset: LocalModelAsset) async {
+        ModelDownloaderIO.clearResumeData(fileManager: fileManager, resumeDataURL: resumeDataURL(for: asset))
+        activeAssetKind = nil
+        error = nil
+        refreshLocalState()
+
+        AppDiagnostics.shared.record(
+            "Model asset download completed",
+            category: "download",
+            metadata: [
+                "asset": asset.kind.rawValue,
+                "path": localFileURL(for: asset).path
+            ]
+        )
+
+        if let nextAsset = nextPendingAsset() {
+            await startDownload(for: nextAsset)
+            return
+        }
+
+        isDownloading = false
+        canResumeDownload = false
+        downloadProgress = 1
+    }
+
+    private func handleBackgroundDownloadCompletion(
+        _ result: BackgroundDownloadCompletion,
+        for asset: LocalModelAsset
+    ) async {
         switch result {
         case .success:
-            ModelDownloaderIO.clearResumeData(fileManager: fileManager, resumeDataURL: resumeDataURL)
-            downloadProgress = 1
-            isDownloading = false
-            isDownloaded = true
-            canResumeDownload = false
-            modelPath = modelFileURL.path
-            error = nil
-            AppDiagnostics.shared.record(
-                "Model download completed",
-                category: "download",
-                metadata: ["path": modelFileURL.path]
-            )
+            await handleSuccessfulAssetDownload(asset)
         case let .failure(error, resumeData):
             if let resumeData {
-                try? resumeData.write(to: resumeDataURL, options: [.atomic])
+                try? resumeData.write(to: resumeDataURL(for: asset), options: [.atomic])
             }
+
             isDownloading = false
-            canResumeDownload = resumeData != nil
+            activeAssetKind = nil
+            refreshLocalState()
             self.error = Self.describe(error)
+
             AppDiagnostics.shared.record(
                 "Model download failed",
                 category: "download",
                 metadata: [
+                    "asset": asset.kind.rawValue,
                     "error": self.error ?? error.localizedDescription,
                     "hasResumeData": resumeData != nil
                 ]
             )
-            await validateDownloadedModel()
         }
     }
 
@@ -290,11 +440,6 @@ public final class ModelDownloader {
     private static let unsupportedRuntimeMessage = "Local GGUF downloads are disabled in the iOS Simulator. Simulator chat uses mocked replies for UI testing; run Yemma on a physical iPhone for real on-device inference."
 }
 
-private struct ValidationResult: Sendable {
-    let isDownloaded: Bool
-    let modelPath: String?
-}
-
 private enum ModelDownloaderIO {
     static func loadResumeDataIfAvailable(fileManager: FileManager, resumeDataURL: URL) -> Data? {
         guard fileManager.fileExists(atPath: resumeDataURL.path) else {
@@ -309,31 +454,30 @@ private enum ModelDownloaderIO {
         try? fileManager.removeItem(at: resumeDataURL)
     }
 
-    static func validateLocalModel(
+    static func validateLocalFile(
         fileManager: FileManager,
-        modelFileURL: URL,
-        resumeDataURL: URL
+        fileURL: URL
     ) -> ValidationResult {
-        guard fileManager.fileExists(atPath: modelFileURL.path) else {
-            clearInvalidModelFile(fileManager: fileManager, modelFileURL: modelFileURL)
-            return ValidationResult(isDownloaded: false, modelPath: nil)
+        guard fileManager.fileExists(atPath: fileURL.path) else {
+            clearInvalidFile(fileManager: fileManager, fileURL: fileURL)
+            return ValidationResult(isDownloaded: false, localPath: nil)
         }
 
         guard
-            let attributes = try? fileManager.attributesOfItem(atPath: modelFileURL.path),
+            let attributes = try? fileManager.attributesOfItem(atPath: fileURL.path),
             let size = attributes[.size] as? NSNumber,
             size.int64Value > 0
         else {
-            clearInvalidModelFile(fileManager: fileManager, modelFileURL: modelFileURL)
-            return ValidationResult(isDownloaded: false, modelPath: nil)
+            clearInvalidFile(fileManager: fileManager, fileURL: fileURL)
+            return ValidationResult(isDownloaded: false, localPath: nil)
         }
 
-        return ValidationResult(isDownloaded: true, modelPath: modelFileURL.path)
+        return ValidationResult(isDownloaded: true, localPath: fileURL.path)
     }
 
-    static func clearInvalidModelFile(fileManager: FileManager, modelFileURL: URL) {
-        if fileManager.fileExists(atPath: modelFileURL.path) {
-            try? fileManager.removeItem(at: modelFileURL)
+    static func clearInvalidFile(fileManager: FileManager, fileURL: URL) {
+        if fileManager.fileExists(atPath: fileURL.path) {
+            try? fileManager.removeItem(at: fileURL)
         }
     }
 
