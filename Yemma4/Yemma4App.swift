@@ -6,6 +6,12 @@ import UIKit
 
 public enum Yemma4AppConfiguration {
     public static let bundleIdentifier = "com.avmillabs.yemma4"
+
+#if targetEnvironment(simulator)
+    public static let supportsLocalModelRuntime = false
+#else
+    public static let supportsLocalModelRuntime = true
+#endif
 }
 
 final class Yemma4AppDelegate: NSObject, UIApplicationDelegate {
