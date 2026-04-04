@@ -203,7 +203,9 @@ public struct ContentView: View {
         guard force || loadedModelSignature != signature || (!llmService.isModelLoaded && !llmService.isModelLoading) else { return }
 
         do {
-            // Let the download-state transition render before heavy model setup begins.
+            // Signal loading state immediately so OnboardingView shows "Preparing model"
+            // before the heavy work begins — prevents the "Download model" flash.
+            await llmService.signalLoadingIntent()
             await Task.yield()
             try await llmService.loadModel(from: modelPath, mmprojPath: mmprojPath)
 

@@ -206,6 +206,13 @@ public struct OnboardingView: View {
                 isEnabled: true,
                 action: onRetryModelLoad
             )
+        } else if isPreparingModel {
+            actionButton(
+                title: "Preparing model...",
+                subtitle: "Finishing first-time setup",
+                isEnabled: false,
+                action: {}
+            )
         } else {
             actionButton(
                 title: downloadActionTitle,
@@ -363,6 +370,9 @@ public struct OnboardingView: View {
         isModelDownloadedNotReady && !llmService.isModelLoading && llmService.lastError != nil
     }
 
+    /// True when the model files are on disk and we're loading (or about to load) into memory.
+    /// Covers the race window where isDownloaded just became true but isModelLoading
+    /// hasn't flipped yet — in that case lastError is nil and no error state applies.
     private var isPreparingModel: Bool {
         isModelDownloadedNotReady && !hasModelPreparationError
     }
