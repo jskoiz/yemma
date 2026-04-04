@@ -197,26 +197,29 @@ public struct SettingsView: View {
     }
 
     public var body: some View {
-        ZStack {
-            AppBackground()
+        NavigationStack {
+            ZStack {
+                AppBackground()
 
-            ScrollView(showsIndicators: false) {
-                VStack(spacing: 24) {
-                    header
-                    appSection
-                    diagnosticsSection
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 24) {
+                        header
+                        appSection
+                        diagnosticsSection
 #if DEBUG
-                    if onRunDebugScenario != nil {
-                        debugSection
-                    }
+                        if onRunDebugScenario != nil {
+                            debugSection
+                        }
 #endif
-                    aboutSection
-                    moreSection
+                        aboutSection
+                        moreSection
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 20)
+                    .padding(.bottom, 28)
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 20)
-                .padding(.bottom, 28)
             }
+            .toolbar(.hidden, for: .navigationBar)
         }
         .confirmationDialog(
             "Delete the downloaded model?",
@@ -270,7 +273,7 @@ public struct SettingsView: View {
                 separator
                 appearanceRow
                 separator
-                temperatureRow
+                advancedRow
                 separator
                 Button {
                     dismiss()
@@ -436,36 +439,26 @@ public struct SettingsView: View {
         .padding(.vertical, 16)
     }
 
-    private var temperatureRow: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                Label("Creativity", systemImage: "slider.horizontal.3")
+    private var advancedRow: some View {
+        NavigationLink {
+            AdvancedSettingsView()
+        } label: {
+            HStack(spacing: 14) {
+                Image(systemName: "gearshape.2")
+                    .frame(width: 22)
+                    .foregroundStyle(AppTheme.textPrimary)
+                Text("Advanced")
                     .font(.system(size: 18, weight: .medium, design: .rounded))
                     .foregroundStyle(AppTheme.textPrimary)
-
                 Spacer()
-
-                Text(temperatureText)
-                    .font(.system(size: 16, weight: .semibold, design: .rounded))
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(AppTheme.textSecondary)
             }
-
-            Slider(
-                value: Binding(
-                    get: { llmService.temperature },
-                    set: { llmService.temperature = $0 }
-                ),
-                in: 0.1...2.0,
-                step: 0.1
-            )
-            .tint(AppTheme.accent)
-
-            Text("Lower values stay focused. Higher values improvise more.")
-                .font(.system(size: 14, weight: .medium, design: .rounded))
-                .foregroundStyle(AppTheme.textSecondary)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 16)
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 16)
+        .buttonStyle(.plain)
     }
 
     private func actionDetailRow(
@@ -626,10 +619,6 @@ public struct SettingsView: View {
 
         guard totalBytes > 0 else { return "Unknown" }
         return ByteCountFormatter.string(fromByteCount: totalBytes, countStyle: .file)
-    }
-
-    private var temperatureText: String {
-        String(format: "%.1f", llmService.temperature)
     }
 
     private var selectedAppearancePreference: AppearancePreference {
