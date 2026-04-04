@@ -1,11 +1,32 @@
 import SwiftUI
 
+#if canImport(UIKit)
+import UIKit
+#endif
+
 public enum Yemma4AppConfiguration {
     public static let bundleIdentifier = "com.avmillabs.yemma4"
 }
 
+final class Yemma4AppDelegate: NSObject, UIApplicationDelegate {
+    func application(
+        _ application: UIApplication,
+        handleEventsForBackgroundURLSession identifier: String,
+        completionHandler: @escaping () -> Void
+    ) {
+        guard identifier == "\(Yemma4AppConfiguration.bundleIdentifier).model-download" else {
+            completionHandler()
+            return
+        }
+
+        BackgroundModelDownloadEvents.shared.setCompletionHandler(completionHandler)
+    }
+}
+
 @main
 public struct Yemma4App: App {
+    @UIApplicationDelegateAdaptor(Yemma4AppDelegate.self) private var appDelegate
+    @State private var diagnostics = AppDiagnostics.shared
     @State private var modelDownloader = ModelDownloader()
     @State private var llmService = LLMService()
 
@@ -16,6 +37,7 @@ public struct Yemma4App: App {
     public var body: some Scene {
         WindowGroup {
             ContentView()
+                .environment(diagnostics)
                 .environment(modelDownloader)
                 .environment(llmService)
         }

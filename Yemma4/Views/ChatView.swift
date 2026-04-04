@@ -20,14 +20,29 @@ public struct ChatView: View {
     @State private var showConversations = false
     @FocusState private var isComposerFocused: Bool
 
+    private let leakedControlMarkers = [
+        "<start_of_turn>",
+        "<end_of_turn>",
+        "<|start_of_turn|>",
+        "<|end_of_turn|>",
+        "<eos>",
+        "<bos>"
+    ]
+
     private let quickPrompts: [(title: String, subtitle: String, prompt: String)] = [
         ("Design", "a workout routine", "Design a simple workout routine I can do at home."),
         ("Begin", "meditating", "Begin a meditation habit with a simple 7-day plan."),
         ("Explain", "a complex idea", "Explain a complex idea in a simple way.")
     ]
 
-    public init(initialMessages: [ChatMessage] = []) {
+    private let onShowOnboarding: () -> Void
+
+    public init(
+        initialMessages: [ChatMessage] = [],
+        onShowOnboarding: @escaping () -> Void = {}
+    ) {
         _messages = State(initialValue: initialMessages)
+        self.onShowOnboarding = onShowOnboarding
     }
 
     public var body: some View {
@@ -38,7 +53,6 @@ public struct ChatView: View {
                 VStack(spacing: 0) {
                     topBar
                     conversationContent
-                    composerSection
                 }
 
                 if let toastMessage {
@@ -59,8 +73,17 @@ public struct ChatView: View {
                     }
                 }
             }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                composerSection
+            }
             .sheet(isPresented: $showSettings) {
-                SettingsView(onClearConversation: clearConversation)
+                SettingsView(
+                    onClearConversation: clearConversation,
+                    onShowOnboarding: {
+                        showSettings = false
+                        onShowOnboarding()
+                    }
+                )
                     .presentationDetents([.large])
                     .presentationDragIndicator(.hidden)
                     .presentationBackground(.clear)
@@ -398,14 +421,24 @@ public struct ChatView: View {
         let trimmedText = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedText.isEmpty else { return }
         guard llmService.isModelLoaded else {
+            AppDiagnostics.shared.record("Send blocked because model is not loaded", category: "ui")
             generationError = "The model is not loaded yet."
             return
         }
         guard !llmService.isGenerating else {
+            AppDiagnostics.shared.record("Send blocked because generation is already active", category: "ui")
             showToast("Please wait for Yemma 4 to finish")
             return
         }
 
+        AppDiagnostics.shared.record(
+            "User submitted prompt",
+            category: "ui",
+            metadata: [
+                "chars": trimmedText.count,
+                "existingMessages": messages.count
+            ]
+        )
         draft = ""
         handlePrompt(trimmedText)
     }
@@ -468,14 +501,22 @@ public struct ChatView: View {
 
         for await token in llmService.generate(prompt: prompt, history: history) {
             assistantText.append(token)
+            let shouldStop = shouldStopStreaming(for: assistantText)
+            let visibleText = sanitizedAssistantText(assistantText)
+
             await MainActor.run {
-                updateMessageText(id: assistantID, text: sanitizedAssistantText(assistantText))
+                updateMessageText(id: assistantID, text: visibleText)
             }
 
-            if shouldStopStreaming(for: assistantText) {
+            if shouldStop {
                 stopGeneration()
                 break
             }
+        }
+
+        let finalText = finalizedAssistantText(assistantText)
+        await MainActor.run {
+            finalizeAssistantMessage(id: assistantID, text: finalText)
         }
 
         if let lastError = llmService.lastError {
@@ -495,28 +536,83 @@ public struct ChatView: View {
         messages[index].text = text
     }
 
+    @MainActor
+    private func finalizeAssistantMessage(id: String, text: String) {
+        guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
+
+        if text.isEmpty {
+            messages.remove(at: index)
+            return
+        }
+
+        messages[index].text = text
+    }
+
     private func shouldStopStreaming(for text: String) -> Bool {
-        text.contains("<start_of_turn>") || text.contains("<end_of_turn>")
+        leakedControlMarkers.contains { text.contains($0) }
     }
 
     private func sanitizedAssistantText(_ text: String) -> String {
         var cleaned = text
 
-        if let firstMarkerRange = cleaned.range(of: "<start_of_turn>") {
+        if let firstMarkerRange = firstControlMarkerRange(in: cleaned) {
             cleaned = String(cleaned[..<firstMarkerRange.lowerBound])
         }
 
         cleaned = cleaned
             .replacingOccurrences(of: "<start_of_turn>", with: "")
             .replacingOccurrences(of: "<end_of_turn>", with: "")
-            .replacingOccurrences(of: "model\n", with: "")
-            .replacingOccurrences(of: "user\n", with: "")
+            .replacingOccurrences(of: "<|start_of_turn|>", with: "")
+            .replacingOccurrences(of: "<|end_of_turn|>", with: "")
+            .replacingOccurrences(of: "<eos>", with: "")
+            .replacingOccurrences(of: "<bos>", with: "")
+
+        cleaned = stripLeadingLeakedRolePrefix(from: cleaned)
+        cleaned = trimTrailingControlPrefix(from: cleaned)
 
         return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    private func finalizedAssistantText(_ text: String) -> String {
+        sanitizedAssistantText(text)
+    }
+
+    private func firstControlMarkerRange(in text: String) -> Range<String.Index>? {
+        leakedControlMarkers
+            .compactMap { marker in text.range(of: marker) }
+            .min(by: { $0.lowerBound < $1.lowerBound })
+    }
+
+    private func stripLeadingLeakedRolePrefix(from text: String) -> String {
+        let prefixes = ["model\n", "assistant\n", "user\n"]
+
+        for prefix in prefixes where text.hasPrefix(prefix) {
+            return String(text.dropFirst(prefix.count))
+        }
+
+        return text
+    }
+
+    private func trimTrailingControlPrefix(from text: String) -> String {
+        guard !text.isEmpty else { return text }
+
+        for marker in leakedControlMarkers {
+            guard marker.count > 1 else { continue }
+
+            for prefixLength in stride(from: marker.count - 1, through: 1, by: -1) {
+                let prefix = String(marker.prefix(prefixLength))
+                if text.hasSuffix(prefix) {
+                    return String(text.dropLast(prefixLength))
+                }
+            }
+        }
+
+        return text
+    }
+
     @MainActor
     private func clearConversation() {
+        AppDiagnostics.shared.record("Conversation cleared", category: "ui", metadata: ["previousMessages": messages.count])
         stopGeneration()
         messages.removeAll()
         draft = ""

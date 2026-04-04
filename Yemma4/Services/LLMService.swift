@@ -8,6 +8,7 @@ enum LLMServiceError: LocalizedError {
     case contextCreationFailed(path: String)
     case samplerCreationFailed
     case tokenizationFailed
+    case promptTooLong(tokenCount: Int, limit: Int)
     case decodeFailed(status: Int32)
     case tokenConversionFailed
 
@@ -23,6 +24,8 @@ enum LLMServiceError: LocalizedError {
             return "Failed to create the sampler chain."
         case .tokenizationFailed:
             return "Failed to tokenize the prompt."
+        case let .promptTooLong(tokenCount, limit):
+            return "This conversation is too long for the model context (\(tokenCount) tokens, limit \(limit)). Start a new chat or shorten your message."
         case let .decodeFailed(status):
             return "llama_decode returned error status \(status)."
         case .tokenConversionFailed:
@@ -62,6 +65,7 @@ final class LLMService: @unchecked Sendable {
         stopGeneration()
 
         let resolvedPath = (path as NSString).expandingTildeInPath
+        AppDiagnostics.shared.record("Loading model", category: "model", metadata: ["path": resolvedPath])
 
 #if targetEnvironment(simulator)
         guard FileManager.default.fileExists(atPath: resolvedPath) else {
@@ -78,6 +82,7 @@ final class LLMService: @unchecked Sendable {
             isModelLoaded = true
             lastError = nil
         }
+        AppDiagnostics.shared.record("Simulator model stub ready", category: "model")
         return
 #endif
 
@@ -125,6 +130,15 @@ final class LLMService: @unchecked Sendable {
         }
 
         freeResources(model: oldResources.model, context: oldResources.context)
+        AppDiagnostics.shared.record(
+            "Model loaded",
+            category: "model",
+            metadata: [
+                "path": resolvedPath,
+                "context": llama_n_ctx(newContext),
+                "batch": llama_n_batch(newContext)
+            ]
+        )
     }
 
     func generate(prompt: String, history: [(role: String, content: String)]) -> AsyncStream<String> {
@@ -136,10 +150,16 @@ final class LLMService: @unchecked Sendable {
         return makeSimulatorStream(prompt: prompt, history: history)
 #endif
 
-        let currentContext = withLock { context }
-        let currentVocab = withLock { vocab }
+        let currentResources = withLock {
+            (model: model, context: context, vocab: vocab)
+        }
 
-        guard isModelLoaded, let currentContext, let currentVocab else {
+        guard
+            isModelLoaded,
+            let currentModel = currentResources.model,
+            let currentContext = currentResources.context,
+            let currentVocab = currentResources.vocab
+        else {
             let error = LLMServiceError.modelNotLoaded
             setLastError(error.localizedDescription)
             return AsyncStream { continuation in
@@ -149,6 +169,15 @@ final class LLMService: @unchecked Sendable {
 
         let formattedPrompt = Self.formatPrompt(prompt: prompt, history: history)
         let currentTemperature = withLock { temperature }
+        AppDiagnostics.shared.record(
+            "Generation requested",
+            category: "generation",
+            metadata: [
+                "historyCount": history.count,
+                "promptChars": prompt.count,
+                "temperature": currentTemperature
+            ]
+        )
 
         let completionGroup = CompletionGroupBox()
         completionGroup.enter()
@@ -249,6 +278,8 @@ final class LLMService: @unchecked Sendable {
 }
 
 private extension LLMService {
+    static let maxGeneratedTokens = 512
+
     static func ensureBackendInitialized() {
         _ = backendInitialized
     }
@@ -326,14 +357,32 @@ private extension LLMService {
             defer { llama_sampler_free(sampler) }
 
             let promptTokens = try Self.tokenize(job.formattedPrompt, vocab: job.vocab)
+            let contextLimit = max(1, Int(llama_n_ctx(job.context)))
+            let promptTokenLimit = max(1, contextLimit - maxGeneratedTokens)
+            AppDiagnostics.shared.record(
+                "Prompt tokenized",
+                category: "generation",
+                metadata: [
+                    "promptTokens": promptTokens.count,
+                    "contextLimit": contextLimit,
+                    "promptTokenLimit": promptTokenLimit
+                ]
+            )
+
+            guard promptTokens.count <= promptTokenLimit else {
+                throw LLMServiceError.promptTooLong(tokenCount: promptTokens.count, limit: promptTokenLimit)
+            }
+
             try Self.decode(tokens: promptTokens, context: job.context)
 
             var nextPosition = Int32(promptTokens.count)
             var emittedTokenCount = 0
-            let maxGeneratedTokens = 512
 
             while !Task.isCancelled {
                 guard emittedTokenCount < maxGeneratedTokens else {
+                    break
+                }
+                guard nextPosition < Int32(contextLimit) else {
                     break
                 }
 
@@ -358,8 +407,23 @@ private extension LLMService {
                 nextPosition += 1
                 emittedTokenCount += 1
             }
+
+            AppDiagnostics.shared.record(
+                "Generation finished",
+                category: "generation",
+                metadata: [
+                    "emittedTokens": emittedTokenCount,
+                    "finalPosition": nextPosition,
+                    "contextLimit": contextLimit
+                ]
+            )
         } catch {
             if !Task.isCancelled {
+                AppDiagnostics.shared.record(
+                    "Generation failed",
+                    category: "generation",
+                    metadata: ["error": error.localizedDescription]
+                )
                 service.setLastError(error.localizedDescription)
             }
         }
@@ -381,6 +445,7 @@ private extension LLMService {
             lastError = message
             isGenerating = false
         }
+        AppDiagnostics.shared.record("Service error recorded", category: "generation", metadata: ["error": message])
     }
 
     func freeLoadedModel() {
@@ -519,26 +584,35 @@ private extension LLMService {
             return
         }
 
-        var batch = llama_batch_init(Int32(tokens.count), 0, 1)
-        defer { llama_batch_free(batch) }
+        let batchLimit = max(1, Int(llama_n_batch(context)))
+        var startIndex = 0
 
-        batch.n_tokens = Int32(tokens.count)
+        while startIndex < tokens.count {
+            let endIndex = min(startIndex + batchLimit, tokens.count)
+            let batchTokens = endIndex - startIndex
+            var batch = llama_batch_init(Int32(batchTokens), 0, 1)
+            defer { llama_batch_free(batch) }
 
-        for index in tokens.indices {
-            batch.token[index] = tokens[index]
-            batch.pos[index] = Int32(index)
-            batch.n_seq_id[index] = 1
+            batch.n_tokens = Int32(batchTokens)
 
-            if let seqIds = batch.seq_id, let seqId = seqIds[index] {
-                seqId[0] = 0
+            for (batchIndex, tokenIndex) in (startIndex..<endIndex).enumerated() {
+                batch.token[batchIndex] = tokens[tokenIndex]
+                batch.pos[batchIndex] = Int32(tokenIndex)
+                batch.n_seq_id[batchIndex] = 1
+
+                if let seqIds = batch.seq_id, let seqId = seqIds[batchIndex] {
+                    seqId[0] = 0
+                }
+
+                batch.logits[batchIndex] = tokenIndex == tokens.count - 1 ? 1 : 0
             }
 
-            batch.logits[index] = index == tokens.count - 1 ? 1 : 0
-        }
+            let status = llama_decode(context, batch)
+            guard status == 0 else {
+                throw LLMServiceError.decodeFailed(status: status)
+            }
 
-        let status = llama_decode(context, batch)
-        guard status == 0 else {
-            throw LLMServiceError.decodeFailed(status: status)
+            startIndex = endIndex
         }
     }
 
