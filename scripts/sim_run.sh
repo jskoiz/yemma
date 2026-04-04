@@ -35,12 +35,6 @@ APP_PATH="$DERIVED_DATA_PATH/Build/Products/Debug-iphonesimulator/$SCHEME.app"
 
 xcrun simctl terminate "$DEVICE_ID" "$BUNDLE_ID" >/dev/null 2>&1 || true
 xcrun simctl install "$DEVICE_ID" "$APP_PATH"
-
-if [[ -f "$ROOT_DIR/.local-models/gemma-4-e4b-it-q4km.gguf" ]]; then
-  "$ROOT_DIR/scripts/sim_seed_model.sh" "$DEVICE_ID"
-else
-  echo "No local model found at $ROOT_DIR/.local-models/gemma-4-e4b-it-q4km.gguf"
-  echo "The app will fall back to its normal download screen."
-fi
+echo "Launching simulator build in UI-test mode (mock chat replies, no local model download)."
 
 xcrun simctl launch "$DEVICE_ID" "$BUNDLE_ID"

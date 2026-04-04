@@ -30,9 +30,9 @@ Yemma 4 is a fully private, on-device LLM chat app for iPhone. It downloads a Ge
 2. Open the project in Xcode 15+.
 3. Build and run on a physical device.
 
-The app relies on Metal acceleration, so device testing is required. The simulator is useful for UI work, but it is not the target runtime for model inference.
+The app relies on Metal acceleration for the intended on-device experience, so device testing is still required for meaningful performance validation.
 
-For faster Simulator iteration, you can keep a local GGUF at `.local-models/gemma-4-e4b-it-q4km.gguf` and run `./scripts/sim_run.sh`. That build/install script seeds the simulator app with a symlink to the local model file so you do not need to redownload it between runs. Simulator chat uses a mocked response path for UI/debug loops; real Gemma inference should still be tested on a physical iPhone.
+For faster Simulator iteration, run `./scripts/sim_run.sh`. The simulator build skips the model download and uses mocked replies so you can test the shell, onboarding, settings, and interaction flow quickly. Real Gemma inference should still be tested on a physical iPhone.
 
 ## Architecture
 The flow is:

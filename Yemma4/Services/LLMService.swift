@@ -37,6 +37,7 @@ enum LLMServiceError: LocalizedError {
 @Observable
 final class LLMService: @unchecked Sendable {
     var isModelLoaded = false
+    var isModelLoading = false
     var isGenerating = false
     var temperature = 1.0
     var lastError: String?
@@ -56,101 +57,70 @@ final class LLMService: @unchecked Sendable {
     init() {}
 
     deinit {
-        stopGeneration()
+        stopGenerationSynchronously()
         freeLoadedModel()
     }
 
-    func loadModel(from path: String) throws {
+    func loadModel(from path: String) async throws {
         Self.ensureBackendInitialized()
 
-        stopGeneration()
-
         let resolvedPath = (path as NSString).expandingTildeInPath
+        let loadStart = Date()
+        await stopGeneration()
+        await MainActor.run {
+            isModelLoading = true
+            lastError = nil
+        }
         AppDiagnostics.shared.record("Loading model", category: "model", metadata: ["path": resolvedPath])
 
-#if targetEnvironment(simulator)
-        guard FileManager.default.fileExists(atPath: resolvedPath) else {
-            let error = LLMServiceError.modelLoadFailed(path: resolvedPath)
-            setLastError(error.localizedDescription)
+        do {
+            let loadedResources = try await Task.detached(priority: .utility) {
+                try Self.loadResources(from: resolvedPath)
+            }.value
+
+            let oldResources: (model: OpaquePointer?, context: OpaquePointer?) = withLock {
+                let old = (model: model, context: context)
+                model = loadedResources.model
+                context = loadedResources.context
+                vocab = loadedResources.vocab
+                samplerConfig = loadedResources.samplerConfig
+                return old
+            }
+
+            Task.detached(priority: .utility) {
+                Self.freeResources(model: oldResources.model, context: oldResources.context)
+            }
+
+            await MainActor.run {
+                temperature = loadedResources.samplerConfig.temperature
+                isModelLoaded = true
+                isModelLoading = false
+                lastError = nil
+            }
+
+            let loadDurationMs = Int(Date().timeIntervalSince(loadStart) * 1000)
+            AppDiagnostics.shared.record(
+                "Model loaded",
+                category: "model",
+                metadata: [
+                    "path": resolvedPath,
+                    "context": llama_n_ctx(loadedResources.context),
+                    "batch": llama_n_batch(loadedResources.context),
+                    "temperature": loadedResources.samplerConfig.temperature,
+                    "topK": loadedResources.samplerConfig.topK,
+                    "topP": loadedResources.samplerConfig.topP,
+                    "loadMs": loadDurationMs,
+                    "threads": loadedResources.threadCounts.decode,
+                    "batchThreads": loadedResources.threadCounts.batch
+                ]
+            )
+        } catch {
+            await publishLoadFailure(error)
             throw error
         }
-
-        withLock {
-            freeResources(model: model, context: context)
-            model = nil
-            context = nil
-            vocab = nil
-            isModelLoaded = true
-            lastError = nil
-        }
-        AppDiagnostics.shared.record("Simulator model stub ready", category: "model")
-        return
-#endif
-
-        var modelParams = llama_model_default_params()
-        modelParams.n_gpu_layers = 99
-
-        var contextParams = llama_context_default_params()
-        contextParams.n_ctx = 4096
-        contextParams.n_batch = 512
-        contextParams.n_ubatch = 512
-
-        let cores = max(1, ProcessInfo.processInfo.activeProcessorCount)
-        contextParams.n_threads = Int32(cores)
-        contextParams.n_threads_batch = Int32(cores)
-
-        guard let newModel = resolvedPath.withCString({ llama_model_load_from_file($0, modelParams) }) else {
-            let error = LLMServiceError.modelLoadFailed(path: resolvedPath)
-            setLastError(error.localizedDescription)
-            throw error
-        }
-
-        guard let newContext = llama_init_from_model(newModel, contextParams) else {
-            llama_model_free(newModel)
-            let error = LLMServiceError.contextCreationFailed(path: resolvedPath)
-            setLastError(error.localizedDescription)
-            throw error
-        }
-
-        guard let newVocab = llama_model_get_vocab(newModel) else {
-            llama_free(newContext)
-            llama_model_free(newModel)
-            let error = LLMServiceError.contextCreationFailed(path: resolvedPath)
-            setLastError(error.localizedDescription)
-            throw error
-        }
-
-        let oldResources: (model: OpaquePointer?, context: OpaquePointer?) = withLock {
-            let old = (model: model, context: context)
-            model = newModel
-            context = newContext
-            vocab = newVocab
-            let config = Self.samplerConfig(for: newModel)
-            samplerConfig = config
-            temperature = config.temperature
-            isModelLoaded = true
-            lastError = nil
-            return old
-        }
-
-        freeResources(model: oldResources.model, context: oldResources.context)
-        AppDiagnostics.shared.record(
-            "Model loaded",
-            category: "model",
-            metadata: [
-                "path": resolvedPath,
-                "context": llama_n_ctx(newContext),
-                "batch": llama_n_batch(newContext),
-                "temperature": withLock { samplerConfig.temperature },
-                "topK": withLock { samplerConfig.topK },
-                "topP": withLock { samplerConfig.topP }
-            ]
-        )
     }
 
     func generate(prompt: String, history: [(role: String, content: String)]) -> AsyncStream<String> {
-        stopGeneration()
-
         Self.ensureBackendInitialized()
 
 #if targetEnvironment(simulator)
@@ -168,7 +138,9 @@ final class LLMService: @unchecked Sendable {
             let currentVocab = currentResources.vocab
         else {
             let error = LLMServiceError.modelNotLoaded
-            setLastError(error.localizedDescription)
+            Task { [weak self] in
+                await self?.setLastError(error.localizedDescription)
+            }
             return AsyncStream { continuation in
                 continuation.finish()
             }
@@ -213,8 +185,11 @@ final class LLMService: @unchecked Sendable {
             self.withLock {
                 generationTask = task
                 generationGroup = completionGroup.group
-                isGenerating = true
-                lastError = nil
+            }
+
+            Task { @MainActor [weak self] in
+                self?.isGenerating = true
+                self?.lastError = nil
             }
 
             continuation.onTermination = { @Sendable _ in
@@ -225,17 +200,24 @@ final class LLMService: @unchecked Sendable {
         return stream
     }
 
-    func stopGeneration() {
-        let taskAndGroup: (task: Task<Void, Never>?, group: DispatchGroup?) = withLock {
-            let pair = (task: generationTask, group: generationGroup)
-            generationTask = nil
-            generationGroup = nil
-            isGenerating = false
-            return pair
+    func stopGeneration() async {
+        let taskAndGroup = takeGenerationHandles()
+        taskAndGroup.task?.cancel()
+        if let group = taskAndGroup.group {
+            await Task.detached(priority: .userInitiated) {
+                group.wait()
+            }.value
         }
+        await MainActor.run {
+            isGenerating = false
+        }
+    }
 
+    func stopGenerationSynchronously() {
+        let taskAndGroup = takeGenerationHandles()
         taskAndGroup.task?.cancel()
         taskAndGroup.group?.wait()
+        isGenerating = false
     }
 
     func makeSimulatorStream(prompt: String, history: [(role: String, content: String)]) -> AsyncStream<String> {
@@ -272,15 +254,18 @@ final class LLMService: @unchecked Sendable {
                     }
                 }
 
-                self.finishGeneration()
+                await self.finishGeneration()
                 continuation.finish()
             }
 
             self.withLock {
                 generationTask = task
                 generationGroup = nil
-                isGenerating = true
-                lastError = nil
+            }
+
+            Task { @MainActor [weak self] in
+                self?.isGenerating = true
+                self?.lastError = nil
             }
 
             continuation.onTermination = { @Sendable _ in
@@ -293,8 +278,72 @@ final class LLMService: @unchecked Sendable {
 private extension LLMService {
     static let maxGeneratedTokens = 512
 
+    struct ModelLoadThreadCounts: Sendable {
+        let decode: Int32
+        let batch: Int32
+    }
+
+    struct LoadedResources: @unchecked Sendable {
+        let model: OpaquePointer
+        let context: OpaquePointer
+        let vocab: OpaquePointer
+        let samplerConfig: SamplerConfig
+        let threadCounts: ModelLoadThreadCounts
+    }
+
     static func ensureBackendInitialized() {
         _ = backendInitialized
+    }
+
+    static func recommendedThreadCounts() -> ModelLoadThreadCounts {
+        let activeCores = max(1, ProcessInfo.processInfo.activeProcessorCount)
+        let decodeThreads = max(1, activeCores - 2)
+        let batchThreads = max(1, min(4, decodeThreads))
+        return ModelLoadThreadCounts(
+            decode: Int32(decodeThreads),
+            batch: Int32(batchThreads)
+        )
+    }
+
+    static func loadResources(from path: String) throws -> LoadedResources {
+        var modelParams = llama_model_default_params()
+#if targetEnvironment(simulator)
+        modelParams.n_gpu_layers = 0
+#else
+        modelParams.n_gpu_layers = 99
+#endif
+
+        var contextParams = llama_context_default_params()
+        contextParams.n_ctx = 4096
+        contextParams.n_batch = 512
+        contextParams.n_ubatch = 512
+
+        let threadCounts = recommendedThreadCounts()
+        contextParams.n_threads = threadCounts.decode
+        contextParams.n_threads_batch = threadCounts.batch
+
+        guard let newModel = path.withCString({ llama_model_load_from_file($0, modelParams) }) else {
+            throw LLMServiceError.modelLoadFailed(path: path)
+        }
+
+        guard let newContext = llama_init_from_model(newModel, contextParams) else {
+            llama_model_free(newModel)
+            throw LLMServiceError.contextCreationFailed(path: path)
+        }
+
+        guard let newVocab = llama_model_get_vocab(newModel) else {
+            llama_free(newContext)
+            llama_model_free(newModel)
+            throw LLMServiceError.contextCreationFailed(path: path)
+        }
+
+        return LoadedResources(
+            model: newModel,
+            context: newContext,
+            vocab: newVocab,
+            samplerConfig: samplerConfig(for: newModel),
+            threadCounts: threadCounts
+        )
     }
 
     final class CompletionGroupBox: @unchecked Sendable {
@@ -457,28 +506,43 @@ private extension LLMService {
                     category: "generation",
                     metadata: ["error": error.localizedDescription]
                 )
-                service.setLastError(error.localizedDescription)
+                await service.setLastError(error.localizedDescription)
             }
         }
 
-        service.finishGeneration()
+        await service.finishGeneration()
         job.continuation.finish()
     }
 
-    func finishGeneration() {
+    func finishGeneration() async {
         withLock {
             generationTask = nil
             generationGroup = nil
+        }
+
+        await MainActor.run {
             isGenerating = false
         }
     }
 
-    func setLastError(_ message: String) {
-        withLock {
+    func setLastError(_ message: String) async {
+        await MainActor.run {
             lastError = message
             isGenerating = false
         }
         AppDiagnostics.shared.record("Service error recorded", category: "generation", metadata: ["error": message])
+    }
+
+    func publishLoadFailure(_ error: Error) async {
+        let stillHasLoadedModel = withLock {
+            model != nil && context != nil && vocab != nil
+        }
+
+        await MainActor.run {
+            isModelLoading = false
+            isModelLoaded = stillHasLoadedModel
+            lastError = error.localizedDescription
+        }
     }
 
     func freeLoadedModel() {
@@ -491,10 +555,10 @@ private extension LLMService {
             return current
         }
 
-        freeResources(model: resources.model, context: resources.context)
+        Self.freeResources(model: resources.model, context: resources.context)
     }
 
-    func freeResources(model: OpaquePointer?, context: OpaquePointer?) {
+    static func freeResources(model: OpaquePointer?, context: OpaquePointer?) {
         if let context {
             llama_free(context)
         }
@@ -508,6 +572,15 @@ private extension LLMService {
         stateLock.lock()
         defer { stateLock.unlock() }
         return try body()
+    }
+
+    func takeGenerationHandles() -> (task: Task<Void, Never>?, group: DispatchGroup?) {
+        withLock {
+            let pair = (task: generationTask, group: generationGroup)
+            generationTask = nil
+            generationGroup = nil
+            return pair
+        }
     }
 
     static func formatPrompt(
