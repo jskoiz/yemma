@@ -41,6 +41,13 @@ public struct OnboardingView: View {
             }
             .scrollBounceBehavior(.basedOnSize)
         }
+        .onAppear {
+            AppDiagnostics.shared.record(
+                "startup: view_appeared",
+                category: "startup",
+                metadata: ["view": "OnboardingView", "elapsedMs": StartupTiming.elapsedMs()]
+            )
+        }
     }
 
     private var hero: some View {

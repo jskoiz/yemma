@@ -4,6 +4,14 @@ import SwiftUI
 import UIKit
 #endif
 
+public enum StartupTiming {
+    public static let launchDate = Date()
+
+    public static func elapsedMs() -> Int {
+        Int(Date().timeIntervalSince(launchDate) * 1000)
+    }
+}
+
 public enum Yemma4AppConfiguration {
     public static let bundleIdentifier = "com.avmillabs.yemma4"
 
