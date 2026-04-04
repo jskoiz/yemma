@@ -10,7 +10,6 @@ public struct OnboardingView: View {
     private let supportsLocalModelRuntime = Yemma4AppConfiguration.supportsLocalModelRuntime
     private let onContinue: (() -> Void)?
     private let onRetryModelLoad: (() -> Void)?
-    private let siteAccent = Color(red: 0.35, green: 0.23, blue: 0.63)
     private let setupFacts = [
         "100% on-device",
         "~2 GB once",
@@ -48,27 +47,31 @@ public struct OnboardingView: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 8) {
                 Circle()
-                    .fill(siteAccent)
+                    .fill(AppTheme.accent)
                     .frame(width: 8, height: 8)
 
                 Text("Available now on iPhone")
                     .font(.system(size: 12, weight: .medium, design: .monospaced))
-                    .foregroundStyle(siteAccent)
+                    .foregroundStyle(AppTheme.accent)
                     .textCase(.uppercase)
             }
 
             HStack(spacing: 14) {
                 Image("BrandMark")
                     .resizable()
+                    .renderingMode(.template)
                     .interpolation(.high)
                     .scaledToFit()
                     .frame(width: 44, height: 44)
+                    .foregroundStyle(AppTheme.accent)
 
                 Image("BrandWordmark")
                     .resizable()
+                    .renderingMode(.template)
                     .interpolation(.high)
                     .scaledToFit()
                     .frame(height: 28)
+                    .foregroundStyle(AppTheme.textPrimary)
                     .accessibilityLabel("Yemma 4")
             }
 
@@ -97,8 +100,12 @@ public struct OnboardingView: View {
                     .foregroundStyle(AppTheme.textSecondary)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
-                    .background(Color.white.opacity(0.62))
+                    .background(AppTheme.controlFill)
                     .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .stroke(AppTheme.controlBorder, lineWidth: 1)
+                    )
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -108,7 +115,7 @@ public struct OnboardingView: View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Setup")
                 .font(.system(size: 11, weight: .medium, design: .monospaced))
-                .foregroundStyle(siteAccent)
+                .foregroundStyle(AppTheme.accent)
                 .textCase(.uppercase)
 
             HStack(alignment: .top, spacing: 16) {
@@ -131,7 +138,7 @@ public struct OnboardingView: View {
 
             if modelDownloader.isDownloading {
                 ProgressView(value: modelDownloader.downloadProgress)
-                    .tint(siteAccent)
+                    .tint(AppTheme.accent)
 
                 HStack {
                     Text("Downloading model")
@@ -142,7 +149,7 @@ public struct OnboardingView: View {
                 .foregroundStyle(AppTheme.textSecondary)
             } else if isPreparingModel {
                 ProgressView()
-                    .tint(siteAccent)
+                    .tint(AppTheme.accent)
 
                 HStack(alignment: .top) {
                     Text(llmService.modelLoadStage.statusText)
@@ -168,11 +175,11 @@ public struct OnboardingView: View {
             .foregroundStyle(AppTheme.textPrimary)
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
-            .background(Color.white.opacity(0.68))
+            .background(AppTheme.chipFill)
             .clipShape(Capsule())
             .overlay(
                 Capsule()
-                    .stroke(Color.white.opacity(0.82), lineWidth: 1)
+                    .stroke(AppTheme.controlBorder, lineWidth: 1)
             )
     }
 
@@ -215,22 +222,22 @@ public struct OnboardingView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(title)
                         .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(AppTheme.accentForeground)
 
                     Text(subtitle)
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(Color.white.opacity(0.72))
+                        .foregroundStyle(AppTheme.accentSecondaryForeground)
                 }
 
                 Spacer()
 
                 Image(systemName: "arrow.right")
                     .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(Color.white.opacity(0.88))
+                    .foregroundStyle(AppTheme.accentForeground.opacity(0.88))
             }
             .padding(.horizontal, 18)
             .padding(.vertical, 17)
-            .background(Color.black)
+            .background(AppTheme.accent)
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
         .buttonStyle(.plain)
