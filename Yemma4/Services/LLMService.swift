@@ -2,6 +2,32 @@ import Foundation
 import Observation
 import LlamaSwift
 
+enum ModelLoadStage: Sendable {
+    case idle
+    case preparingRuntime
+    case loadingModel
+    case activatingModel
+    case ready
+    case failed
+
+    var statusText: String {
+        switch self {
+        case .idle:
+            return "Waiting to prepare the model."
+        case .preparingRuntime:
+            return "Preparing the local runtime."
+        case .loadingModel:
+            return "Loading the model into memory."
+        case .activatingModel:
+            return "Finalizing the local chat engine."
+        case .ready:
+            return "Model ready."
+        case .failed:
+            return "Model preparation failed."
+        }
+    }
+}
+
 enum LLMServiceError: LocalizedError {
     case modelNotLoaded
     case modelLoadFailed(path: String)
@@ -41,6 +67,7 @@ final class LLMService: @unchecked Sendable {
     var isGenerating = false
     var temperature = 1.0
     var lastError: String?
+    var modelLoadStage: ModelLoadStage = .idle
 
     @ObservationIgnored private var model: OpaquePointer?
     @ObservationIgnored private var context: OpaquePointer?
@@ -62,28 +89,59 @@ final class LLMService: @unchecked Sendable {
     }
 
     func loadModel(from path: String) async throws {
-        Self.ensureBackendInitialized()
-
         let resolvedPath = (path as NSString).expandingTildeInPath
         let loadStart = Date()
         await stopGeneration()
         await MainActor.run {
             isModelLoading = true
+            modelLoadStage = .preparingRuntime
             lastError = nil
         }
         AppDiagnostics.shared.record("Loading model", category: "model", metadata: ["path": resolvedPath])
 
         do {
-            let loadedResources = try await Task.detached(priority: .utility) {
-                try Self.loadResources(from: resolvedPath)
+            let preparedResources = try await Task.detached(priority: .utility) { [weak self] in
+                let backendStart = Date()
+                Self.ensureBackendInitialized()
+                let backendInitMs = Int(Date().timeIntervalSince(backendStart) * 1000)
+                AppDiagnostics.shared.record(
+                    "Model runtime prepared",
+                    category: "model",
+                    metadata: [
+                        "path": resolvedPath,
+                        "backendInitMs": backendInitMs
+                    ]
+                )
+
+                await self?.setModelLoadStage(.loadingModel)
+
+                let resourceLoadStart = Date()
+                let loadedResources = try Self.loadResources(from: resolvedPath)
+                let resourceLoadMs = Int(Date().timeIntervalSince(resourceLoadStart) * 1000)
+                AppDiagnostics.shared.record(
+                    "Model weights loaded",
+                    category: "model",
+                    metadata: [
+                        "path": resolvedPath,
+                        "resourceLoadMs": resourceLoadMs
+                    ]
+                )
+
+                return PreparedResources(
+                    loadedResources: loadedResources,
+                    backendInitMs: backendInitMs,
+                    resourceLoadMs: resourceLoadMs
+                )
             }.value
+
+            await setModelLoadStage(.activatingModel)
 
             let oldResources: (model: OpaquePointer?, context: OpaquePointer?) = withLock {
                 let old = (model: model, context: context)
-                model = loadedResources.model
-                context = loadedResources.context
-                vocab = loadedResources.vocab
-                samplerConfig = loadedResources.samplerConfig
+                model = preparedResources.loadedResources.model
+                context = preparedResources.loadedResources.context
+                vocab = preparedResources.loadedResources.vocab
+                samplerConfig = preparedResources.loadedResources.samplerConfig
                 return old
             }
 
@@ -92,9 +150,10 @@ final class LLMService: @unchecked Sendable {
             }
 
             await MainActor.run {
-                temperature = loadedResources.samplerConfig.temperature
+                temperature = preparedResources.loadedResources.samplerConfig.temperature
                 isModelLoaded = true
                 isModelLoading = false
+                modelLoadStage = .ready
                 lastError = nil
             }
 
@@ -104,14 +163,16 @@ final class LLMService: @unchecked Sendable {
                 category: "model",
                 metadata: [
                     "path": resolvedPath,
-                    "context": llama_n_ctx(loadedResources.context),
-                    "batch": llama_n_batch(loadedResources.context),
-                    "temperature": loadedResources.samplerConfig.temperature,
-                    "topK": loadedResources.samplerConfig.topK,
-                    "topP": loadedResources.samplerConfig.topP,
+                    "context": llama_n_ctx(preparedResources.loadedResources.context),
+                    "batch": llama_n_batch(preparedResources.loadedResources.context),
+                    "temperature": preparedResources.loadedResources.samplerConfig.temperature,
+                    "topK": preparedResources.loadedResources.samplerConfig.topK,
+                    "topP": preparedResources.loadedResources.samplerConfig.topP,
                     "loadMs": loadDurationMs,
-                    "threads": loadedResources.threadCounts.decode,
-                    "batchThreads": loadedResources.threadCounts.batch
+                    "backendInitMs": preparedResources.backendInitMs,
+                    "resourceLoadMs": preparedResources.resourceLoadMs,
+                    "threads": preparedResources.loadedResources.threadCounts.decode,
+                    "batchThreads": preparedResources.loadedResources.threadCounts.batch
                 ]
             )
         } catch {
@@ -287,6 +348,12 @@ private extension LLMService {
         let vocab: OpaquePointer
         let samplerConfig: SamplerConfig
         let threadCounts: ModelLoadThreadCounts
+    }
+
+    struct PreparedResources: @unchecked Sendable {
+        let loadedResources: LoadedResources
+        let backendInitMs: Int
+        let resourceLoadMs: Int
     }
 
     static func ensureBackendInitialized() {
@@ -531,6 +598,12 @@ private extension LLMService {
         AppDiagnostics.shared.record("Service error recorded", category: "generation", metadata: ["error": message])
     }
 
+    func setModelLoadStage(_ stage: ModelLoadStage) async {
+        await MainActor.run {
+            modelLoadStage = stage
+        }
+    }
+
     func publishLoadFailure(_ error: Error) async {
         let stillHasLoadedModel = withLock {
             model != nil && context != nil && vocab != nil
@@ -539,6 +612,7 @@ private extension LLMService {
         await MainActor.run {
             isModelLoading = false
             isModelLoaded = stillHasLoadedModel
+            modelLoadStage = stillHasLoadedModel ? .ready : .failed
             lastError = error.localizedDescription
         }
     }
