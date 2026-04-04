@@ -13,6 +13,7 @@
 		38135214F3C193EF4A21DDEE /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 53CB1EB0E92750BF686F214C /* LaunchScreen.storyboard */; };
 		64FB319E19C91C284A890874 /* LlamaSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 5A2070CA61B2F9D46485B217 /* LlamaSwift */; };
 		8804C30D1CAED09270D51D6D /* LLMService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70EEE36ABE229B869B690BFB /* LLMService.swift */; };
+		8AA2B0C32D410A8900E8C001 /* AppDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AA2B0C22D410A8900E8C001 /* AppDiagnostics.swift */; };
 		8ED5E2862DF091C3920ED85D /* ExyteChat in Frameworks */ = {isa = PBXBuildFile; productRef = 9D280E543558115939ECD091 /* ExyteChat */; };
 		B10000001 /* Yemma4App.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000002 /* Yemma4App.swift */; };
 		B10000003 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000004 /* ContentView.swift */; };
@@ -29,6 +30,7 @@
 		4E23D9EC68D2134067159DFB /* OnboardingView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		53CB1EB0E92750BF686F214C /* LaunchScreen.storyboard */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
 		70EEE36ABE229B869B690BFB /* LLMService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LLMService.swift; sourceTree = "<group>"; };
+		8AA2B0C22D410A8900E8C001 /* AppDiagnostics.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AppDiagnostics.swift; sourceTree = "<group>"; };
 		92A43CA0C38A9D38EFA94487 /* SettingsView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		9F1B5296369F631217B7F995 /* ChatMessage.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ChatMessage.swift; sourceTree = "<group>"; };
 		A1000002 /* RichMessageText.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RichMessageText.swift; sourceTree = "<group>"; };
@@ -106,6 +108,7 @@
 		CE67C04D23A2513EC55AA96D /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				8AA2B0C22D410A8900E8C001 /* AppDiagnostics.swift */,
 				70EEE36ABE229B869B690BFB /* LLMService.swift */,
 				11FB93FF040AF083B453837C /* ModelDownloader.swift */,
 			);
@@ -196,6 +199,7 @@
 				B10000001 /* Yemma4App.swift in Sources */,
 				B10000003 /* ContentView.swift in Sources */,
 				C18F96B6430B9FFB84F7095B /* ChatMessage.swift in Sources */,
+				8AA2B0C32D410A8900E8C001 /* AppDiagnostics.swift in Sources */,
 				8804C30D1CAED09270D51D6D /* LLMService.swift in Sources */,
 				F6A19338069476EC14B97082 /* ModelDownloader.swift in Sources */,
 				DF571A73493F2913161C6971 /* ChatView.swift in Sources */,

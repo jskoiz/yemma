@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Y4 dark logo</title>
+  <desc id="desc">Y4 monogram for dark surfaces.</desc>
+  <text
+    x="50%"
+    y="57%"
+    fill="#FAF8F5"
+    font-family="orpheuspro, Georgia, serif"
+    font-size="244"
+    font-weight="400"
+    letter-spacing="-16"
+    text-anchor="middle"
+  >Y4</text>
+</svg>

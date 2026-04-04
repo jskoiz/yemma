@@ -2,16 +2,23 @@ import SwiftUI
 
 public struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(AppDiagnostics.self) private var diagnostics
     @Environment(ModelDownloader.self) private var modelDownloader
     @Environment(LLMService.self) private var llmService
 
     @State private var showDeleteModelConfirmation = false
     @State private var showClearConversationConfirmation = false
+    @State private var diagnosticsCopied = false
 
     private let onClearConversation: () -> Void
+    private let onShowOnboarding: () -> Void
 
-    public init(onClearConversation: @escaping () -> Void) {
+    public init(
+        onClearConversation: @escaping () -> Void,
+        onShowOnboarding: @escaping () -> Void
+    ) {
         self.onClearConversation = onClearConversation
+        self.onShowOnboarding = onShowOnboarding
     }
 
     public var body: some View {
@@ -22,6 +29,7 @@ public struct SettingsView: View {
                 VStack(spacing: 24) {
                     header
                     appSection
+                    diagnosticsSection
                     aboutSection
                     moreSection
                 }
@@ -56,6 +64,11 @@ public struct SettingsView: View {
         } message: {
             Text("This removes the current local chat history.")
         }
+        .alert("Diagnostics copied", isPresented: $diagnosticsCopied) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("The recent diagnostics log is on the pasteboard.")
+        }
     }
 
     private var header: some View {
@@ -77,6 +90,27 @@ public struct SettingsView: View {
                 separator
                 temperatureRow
                 separator
+                Button {
+                    dismiss()
+                    onShowOnboarding()
+                } label: {
+                    HStack(spacing: 14) {
+                        Image(systemName: "sparkles.rectangle.stack")
+                            .frame(width: 22)
+                            .foregroundStyle(AppTheme.textPrimary)
+                        Text("View onboarding screen")
+                            .font(.system(size: 18, weight: .medium, design: .rounded))
+                            .foregroundStyle(AppTheme.textPrimary)
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(AppTheme.textSecondary)
+                    }
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 16)
+                }
+                .buttonStyle(.plain)
+                separator
                 destructiveRow(icon: "trash", title: "Delete conversation history") {
                     showClearConversationConfirmation = true
                 }
@@ -96,6 +130,46 @@ public struct SettingsView: View {
                 infoRow(icon: "building.2", title: "Made by", detail: "AVMIL Labs in Honolulu, Hawaii")
                 separator
                 infoRow(icon: "info.circle", title: "Version", detail: appVersionText)
+            }
+        }
+    }
+
+    private var diagnosticsSection: some View {
+        settingsSection("Diagnostics") {
+            VStack(spacing: 0) {
+                infoRow(icon: "waveform.path.ecg", title: "Recent events", detail: "\(diagnostics.recentEvents.count)")
+                separator
+                Button {
+                    diagnostics.copyToPasteboard()
+                    diagnosticsCopied = true
+                } label: {
+                    HStack(spacing: 14) {
+                        Image(systemName: "doc.on.doc")
+                            .frame(width: 22)
+                            .foregroundStyle(AppTheme.textPrimary)
+                        Text("Copy diagnostics log")
+                            .font(.system(size: 18, weight: .medium, design: .rounded))
+                            .foregroundStyle(AppTheme.textPrimary)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 16)
+                }
+                .buttonStyle(.plain)
+                separator
+                destructiveRow(icon: "trash", title: "Clear diagnostics log") {
+                    diagnostics.clear()
+                }
+
+                if diagnostics.recentEvents.isEmpty {
+                    separator
+                    infoRow(icon: "info.circle", title: "Latest", detail: "No events yet")
+                } else {
+                    ForEach(Array(diagnostics.recentEvents.suffix(8).reversed())) { event in
+                        separator
+                        diagnosticEventRow(event)
+                    }
+                }
             }
         }
     }
@@ -214,6 +288,40 @@ public struct SettingsView: View {
             .padding(.horizontal, 18)
             .padding(.vertical, 16)
         }
+    }
+
+    private func diagnosticEventRow(_ event: DiagnosticEvent) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(event.category.uppercased())
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .foregroundStyle(AppTheme.textSecondary)
+
+                Spacer()
+
+                Text(event.timestamp.formatted(date: .omitted, time: .standard))
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+
+            Text(event.message)
+                .font(.system(size: 15, weight: .semibold, design: .rounded))
+                .foregroundStyle(AppTheme.textPrimary)
+
+            if !event.metadata.isEmpty {
+                Text(
+                    event.metadata
+                        .sorted { $0.key < $1.key }
+                        .map { "\($0.key): \($0.value)" }
+                        .joined(separator: " • ")
+                )
+                .font(.system(size: 13, weight: .medium, design: .rounded))
+                .foregroundStyle(AppTheme.textSecondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 14)
     }
 
     private var separator: some View {

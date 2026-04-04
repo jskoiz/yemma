@@ -118,23 +118,28 @@ public struct ContentView: View {
     @Environment(ModelDownloader.self) private var modelDownloader
     @Environment(LLMService.self) private var llmService
 
-    @State private var isLoadingModel = false
     @State private var modelLoadError: String?
     @State private var loadedModelPath: String?
     @State private var hasValidatedLocalModel = false
+    @State private var isShowingOnboardingPreview = false
 
     public init() {}
 
     public var body: some View {
         ZStack {
-            if modelDownloader.isDownloaded {
-                ChatView()
-                    .transition(.opacity.combined(with: .move(edge: .trailing)))
-                    .task(id: modelDownloader.modelPath) {
-                        await loadModelIfNeeded()
+            if modelDownloader.isDownloaded && !isShowingOnboardingPreview {
+                ChatView(
+                    onShowOnboarding: {
+                        isShowingOnboardingPreview = true
                     }
+                )
+                    .transition(.opacity.combined(with: .move(edge: .trailing)))
             } else {
-                OnboardingView()
+                OnboardingView(
+                    onContinue: modelDownloader.isDownloaded ? {
+                        isShowingOnboardingPreview = false
+                    } : nil
+                )
                     .transition(.opacity.combined(with: .move(edge: .leading)))
             }
         }
@@ -144,13 +149,11 @@ public struct ContentView: View {
             await Task.yield()
             await modelDownloader.validateDownloadedModel()
         }
-        .animation(.easeInOut(duration: 0.25), value: modelDownloader.isDownloaded)
-        .overlay {
-            if isLoadingModel {
-                loadingOverlay
-                    .transition(.opacity)
-            }
+        .task(id: modelDownloader.modelPath) {
+            await loadModelIfNeeded()
         }
+        .animation(.easeInOut(duration: 0.25), value: modelDownloader.isDownloaded)
+        .animation(.easeInOut(duration: 0.25), value: isShowingOnboardingPreview)
         .alert(
             "Unable to Load Model",
             isPresented: Binding(
@@ -169,33 +172,10 @@ public struct ContentView: View {
         }
     }
 
-    private var loadingOverlay: some View {
-        VStack(spacing: 12) {
-            ProgressView()
-                .tint(.black)
-            Text("Loading model...")
-                .font(.system(size: 18, weight: .semibold, design: .rounded))
-                .foregroundStyle(AppTheme.textPrimary)
-        }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 16)
-        .glassCard(cornerRadius: 22)
-    }
-
     private func loadModelIfNeeded(force: Bool = false) async {
         guard let modelPath = modelDownloader.modelPath else { return }
         guard force || loadedModelPath != modelPath || !llmService.isModelLoaded else { return }
         let service = llmService
-
-        await MainActor.run {
-            isLoadingModel = true
-        }
-
-        defer {
-            Task { @MainActor in
-                isLoadingModel = false
-            }
-        }
 
         do {
             try await Task.detached(priority: .userInitiated) {
