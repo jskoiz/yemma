@@ -109,6 +109,8 @@ final class LLMService: @unchecked Sendable {
     @ObservationIgnored private var generationGroup: DispatchGroup?
     @ObservationIgnored private let stateLock = NSLock()
     @ObservationIgnored private var samplerConfig = SamplerConfig.defaults
+    /// Tokens from the last successful generation (prompt + response) used for KV cache reuse.
+    @ObservationIgnored private var cachedPromptTokens: [llama_token] = []
 
     @ObservationIgnored private static let backendInitialized: Void = {
         llama_backend_init()
@@ -244,6 +246,7 @@ final class LLMService: @unchecked Sendable {
                 vocab = preparedResources.loadedResources.vocab
                 multimodalRuntime = preparedResources.loadedResources.multimodalRuntime
                 samplerConfig = preparedResources.loadedResources.samplerConfig
+                cachedPromptTokens = []
                 return old
             }
 
@@ -336,6 +339,8 @@ final class LLMService: @unchecked Sendable {
         let completionGroup = CompletionGroupBox()
         completionGroup.enter()
 
+        let previousCached = withLock { cachedPromptTokens }
+
         let stream = AsyncStream<String> { continuation in
             let continuationBox = StreamContinuationBox(continuation)
             let job = GenerationJob(
@@ -347,7 +352,8 @@ final class LLMService: @unchecked Sendable {
                 samplerConfig: generationConfig,
                 maxGeneratedTokens: self.maxResponseTokens,
                 continuation: continuationBox,
-                completionGroup: completionGroup
+                completionGroup: completionGroup,
+                previousCachedTokens: previousCached
             )
             let task = Task {
                 await Self.runGeneration(job)
@@ -388,6 +394,11 @@ final class LLMService: @unchecked Sendable {
         taskAndGroup.task?.cancel()
         taskAndGroup.group?.wait()
         isGenerating = false
+    }
+
+    /// Invalidates the KV cache prefix so the next generation does a full rebuild.
+    func clearCachedPrefix() {
+        withLock { cachedPromptTokens = [] }
     }
 
     func makeSimulatorStream(prompt: PromptMessageInput, history: [PromptMessageInput]) -> AsyncStream<String> {
@@ -585,6 +596,7 @@ private extension LLMService {
         let maxGeneratedTokens: Int
         let continuation: StreamContinuationBox<String>
         let completionGroup: CompletionGroupBox
+        let previousCachedTokens: [llama_token]
 
         init(
             service: LLMService,
@@ -595,7 +607,8 @@ private extension LLMService {
             samplerConfig: SamplerConfig,
             maxGeneratedTokens: Int,
             continuation: StreamContinuationBox<String>,
-            completionGroup: CompletionGroupBox
+            completionGroup: CompletionGroupBox,
+            previousCachedTokens: [llama_token] = []
         ) {
             self.service = service
             self.formattedPrompt = formattedPrompt
@@ -606,6 +619,7 @@ private extension LLMService {
             self.maxGeneratedTokens = maxGeneratedTokens
             self.continuation = continuation
             self.completionGroup = completionGroup
+            self.previousCachedTokens = previousCachedTokens
         }
     }
 
@@ -656,8 +670,6 @@ private extension LLMService {
         }
 
         do {
-            Self.resetContextMemory(job.context)
-
             AppDiagnostics.shared.record(
                 "Thermal state at generation start",
                 category: "generation",
@@ -674,6 +686,7 @@ private extension LLMService {
             let promptTokenCount: Int
             let promptPositionCount: Int
             var nextPosition: Int32
+            var allPromptTokens: [llama_token] = []
 
             if job.formattedPrompt.images.isEmpty {
                 let promptTokens = try Self.tokenize(job.formattedPrompt.text, vocab: job.vocab)
@@ -684,9 +697,53 @@ private extension LLMService {
                     throw LLMServiceError.promptTooLong(tokenCount: promptPositionCount, limit: promptPositionLimit)
                 }
 
-                try Self.decode(tokens: promptTokens, context: job.context)
+                // KV cache reuse: find how many tokens match the cached prefix
+                let cached = job.previousCachedTokens
+                var commonPrefixLen = 0
+                if !cached.isEmpty {
+                    let limit = min(cached.count, promptTokens.count)
+                    while commonPrefixLen < limit && cached[commonPrefixLen] == promptTokens[commonPrefixLen] {
+                        commonPrefixLen += 1
+                    }
+                }
+
+                if commonPrefixLen > 0 {
+                    // Trim KV cache entries after the common prefix
+                    let memory = llama_get_memory(job.context)
+                    let removed = llama_memory_seq_rm(memory, 0, Int32(commonPrefixLen), -1)
+
+                    if removed {
+                        let newTokens = Array(promptTokens[commonPrefixLen...])
+                        if !newTokens.isEmpty {
+                            try Self.decodeFromPosition(tokens: newTokens, startPosition: Int32(commonPrefixLen), context: job.context)
+                        }
+
+                        AppDiagnostics.shared.record(
+                            "KV cache reused",
+                            category: "generation",
+                            metadata: [
+                                "cachedTokens": cached.count,
+                                "commonPrefix": commonPrefixLen,
+                                "newTokensDecoded": promptTokens.count - commonPrefixLen
+                            ]
+                        )
+                    } else {
+                        // Partial removal failed, fall back to full rebuild
+                        Self.resetContextMemory(job.context)
+                        try Self.decode(tokens: promptTokens, context: job.context)
+                    }
+                } else {
+                    // Full rebuild: no usable cached prefix
+                    Self.resetContextMemory(job.context)
+                    try Self.decode(tokens: promptTokens, context: job.context)
+                }
+
+                allPromptTokens = promptTokens
                 nextPosition = Int32(promptTokens.count)
             } else {
+                // Multimodal path: always do full rebuild (image embeddings can't be prefix-matched)
+                Self.resetContextMemory(job.context)
+                service.withLock { service.cachedPromptTokens = [] }
                 guard let multimodalRuntime = job.multimodalRuntime else {
                     throw LLMServiceError.multimodalRuntimeUnavailable
                 }
@@ -727,6 +784,7 @@ private extension LLMService {
                 ]
             )
             var emittedTokenCount = 0
+            var generatedTokens: [llama_token] = []
 
             while !Task.isCancelled {
                 guard emittedTokenCount < job.maxGeneratedTokens else {
@@ -743,6 +801,7 @@ private extension LLMService {
                 }
 
                 llama_sampler_accept(sampler, nextToken)
+                generatedTokens.append(nextToken)
 
                 let piece = try Self.tokenText(for: nextToken, vocab: job.vocab)
                 if !piece.isEmpty {
@@ -759,6 +818,16 @@ private extension LLMService {
                 if nextPosition >= Int32(contextLimit) {
                     break
                 }
+            }
+
+            // Update the cached prefix for next generation's KV cache reuse.
+            // Only cache for text-only prompts; multimodal prompts clear the cache above.
+            if !allPromptTokens.isEmpty && !Task.isCancelled {
+                let fullSequence = allPromptTokens + generatedTokens
+                service.withLock { service.cachedPromptTokens = fullSequence }
+            } else if Task.isCancelled {
+                // KV cache may be in a partial state after cancellation
+                service.withLock { service.cachedPromptTokens = [] }
             }
 
             let generationDuration = Date().timeIntervalSince(generationStartTime)
@@ -782,6 +851,8 @@ private extension LLMService {
                 ]
             )
         } catch {
+            // Invalidate cache on error -- KV cache state may be inconsistent
+            service.withLock { service.cachedPromptTokens = [] }
             if !Task.isCancelled {
                 AppDiagnostics.shared.record(
                     "Generation failed",
@@ -855,6 +926,7 @@ private extension LLMService {
             vocab = nil
             multimodalRuntime = nil
             isModelLoaded = false
+            cachedPromptTokens = []
             return current
         }
 
@@ -1264,31 +1336,39 @@ private extension LLMService {
     }
 
     static func decode(tokens: [llama_token], context: OpaquePointer) throws {
+        try decodeFromPosition(tokens: tokens, startPosition: 0, context: context)
+    }
+
+    /// Decodes tokens into the context starting at the given KV cache position.
+    static func decodeFromPosition(tokens: [llama_token], startPosition: Int32, context: OpaquePointer) throws {
         guard !tokens.isEmpty else {
             return
         }
 
         let batchLimit = max(1, Int(llama_n_batch(context)))
+        let totalTokens = tokens.count
         var startIndex = 0
 
-        while startIndex < tokens.count {
-            let endIndex = min(startIndex + batchLimit, tokens.count)
+        while startIndex < totalTokens {
+            let endIndex = min(startIndex + batchLimit, totalTokens)
             let batchTokens = endIndex - startIndex
             var batch = llama_batch_init(Int32(batchTokens), 0, 1)
             defer { llama_batch_free(batch) }
 
             batch.n_tokens = Int32(batchTokens)
 
-            for (batchIndex, tokenIndex) in (startIndex..<endIndex).enumerated() {
-                batch.token[batchIndex] = tokens[tokenIndex]
-                batch.pos[batchIndex] = Int32(tokenIndex)
+            for batchIndex in 0..<batchTokens {
+                let globalIndex = startIndex + batchIndex
+                batch.token[batchIndex] = tokens[globalIndex]
+                batch.pos[batchIndex] = startPosition + Int32(globalIndex)
                 batch.n_seq_id[batchIndex] = 1
 
                 if let seqIds = batch.seq_id, let seqId = seqIds[batchIndex] {
                     seqId[0] = 0
                 }
 
-                batch.logits[batchIndex] = tokenIndex == tokens.count - 1 ? 1 : 0
+                // Only compute logits for the very last token of the entire sequence
+                batch.logits[batchIndex] = (globalIndex == totalTokens - 1) ? 1 : 0
             }
 
             let status = llama_decode(context, batch)
