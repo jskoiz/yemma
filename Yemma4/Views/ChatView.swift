@@ -164,8 +164,8 @@ public struct ChatView: View {
             .padding(3)
             .background(
                 Capsule()
-                    .fill(Color.white.opacity(0.76))
-                    .overlay(Capsule().stroke(Color.white.opacity(0.82), lineWidth: 1))
+                    .fill(AppTheme.controlFill)
+                    .overlay(Capsule().stroke(AppTheme.controlBorder, lineWidth: 1))
             )
 
             Spacer(minLength: 0)
@@ -272,14 +272,14 @@ public struct ChatView: View {
         if message.user.isCurrentUser {
             return AnyShapeStyle(
                 LinearGradient(
-                    colors: [Color.white.opacity(0.92), Color.white.opacity(0.72)],
+                    colors: [AppTheme.userBubbleTop, AppTheme.userBubbleBottom],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
             )
         }
 
-        return AnyShapeStyle(Color.white.opacity(0.62))
+        return AnyShapeStyle(AppTheme.assistantBubble)
     }
 
     @ViewBuilder
@@ -303,7 +303,7 @@ public struct ChatView: View {
         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(Color.white.opacity(0.78), lineWidth: 1)
+                .stroke(AppTheme.messageBubbleBorder, lineWidth: 1)
         )
     }
 
@@ -341,7 +341,7 @@ public struct ChatView: View {
                 } label: {
                     Image(systemName: llmService.isGenerating ? "stop.fill" : "arrow.up")
                         .font(.system(size: 18, weight: .bold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(AppTheme.accentForeground)
                         .frame(width: 42, height: 42)
                         .background(AppTheme.accent)
                         .clipShape(Circle())
@@ -356,7 +356,7 @@ public struct ChatView: View {
                     .fill(AppTheme.inputFill)
                     .overlay(
                         RoundedRectangle(cornerRadius: 24, style: .continuous)
-                            .stroke(Color.white.opacity(0.82), lineWidth: 1)
+                            .stroke(AppTheme.controlBorder, lineWidth: 1)
                     )
             )
             .contentShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
@@ -369,7 +369,7 @@ public struct ChatView: View {
         .padding(.bottom, 14)
         .background(
             LinearGradient(
-                colors: [Color.white.opacity(0), Color.white.opacity(0.5), Color.white.opacity(0.82)],
+                colors: [Color.clear, AppTheme.composerFadeMiddle, AppTheme.composerFadeBottom],
                 startPoint: .top,
                 endPoint: .bottom
             )
@@ -464,12 +464,12 @@ public struct ChatView: View {
     private func toastView(message: String) -> some View {
         Text(message)
             .font(.system(size: 14, weight: .semibold, design: .rounded))
-            .foregroundStyle(.white)
+            .foregroundStyle(AppTheme.accentForeground)
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
-            .background(.black.opacity(0.82))
+            .background(AppTheme.toastFill)
             .clipShape(Capsule())
-            .shadow(color: .black.opacity(0.16), radius: 18, x: 0, y: 10)
+            .shadow(color: AppTheme.toastShadow, radius: 18, x: 0, y: 10)
             .padding(.horizontal, 24)
     }
 
@@ -896,6 +896,7 @@ private struct ConversationsView: View {
 
                         Divider()
                             .padding(.leading, 18)
+                            .overlay(AppTheme.separator)
 
                         Button {
                             onStartFresh()

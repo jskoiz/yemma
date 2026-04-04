@@ -4,6 +4,17 @@
       "filename" : "brandwordmark.png",
       "idiom" : "universal",
       "scale" : "1x"
+    },
+    {
+      "appearances" : [
+        {
+          "appearance" : "luminosity",
+          "value" : "dark"
+        }
+      ],
+      "filename" : "brandwordmark-dark.png",
+      "idiom" : "universal",
+      "scale" : "1x"
     }
   ],
   "info" : {

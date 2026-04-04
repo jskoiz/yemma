@@ -1,20 +1,6 @@
 import Observation
 import SwiftUI
 
-enum AppTheme {
-    static let backgroundTop = Color(red: 0.98, green: 0.97, blue: 0.96)
-    static let backgroundBottom = Color(red: 0.94, green: 0.94, blue: 0.96)
-    static let card = Color.white.opacity(0.72)
-    static let cardBorder = Color.white.opacity(0.7)
-    static let textPrimary = Color(red: 0.11, green: 0.11, blue: 0.13)
-    static let textSecondary = Color(red: 0.47, green: 0.48, blue: 0.52)
-    static let inputFill = Color.white.opacity(0.78)
-    static let chipFill = Color.white.opacity(0.78)
-    static let accent = Color.black
-    static let warmGlow = Color(red: 0.97, green: 0.85, blue: 0.76).opacity(0.58)
-    static let coolGlow = Color(red: 0.88, green: 0.90, blue: 0.98).opacity(0.65)
-}
-
 struct AppBackground: View {
     var body: some View {
         ZStack {
@@ -38,8 +24,8 @@ struct AppBackground: View {
 
             LinearGradient(
                 colors: [
-                    Color.white.opacity(0.1),
-                    Color.white.opacity(0.45),
+                    AppTheme.backgroundSheenTop,
+                    AppTheme.backgroundSheenMiddle,
                     Color.clear
                 ],
                 startPoint: .bottom,
@@ -63,7 +49,7 @@ struct GlassCardModifier: ViewModifier {
                             .stroke(AppTheme.cardBorder, lineWidth: 1)
                     )
             )
-            .shadow(color: Color.black.opacity(0.05), radius: 30, x: 0, y: 18)
+            .shadow(color: AppTheme.shadow, radius: 30, x: 0, y: 18)
     }
 }
 
@@ -86,11 +72,11 @@ struct CircleIconButton: View {
                 .frame(width: 34, height: 34)
                 .background(
                     Circle()
-                        .fill(filled ? Color.white.opacity(0.86) : Color.clear)
+                        .fill(filled ? AppTheme.controlFill : Color.clear)
                 )
                 .overlay(
                     Circle()
-                        .stroke(Color.white.opacity(0.72), lineWidth: filled ? 1 : 0)
+                        .stroke(AppTheme.controlBorder, lineWidth: filled ? 1 : 0)
                 )
         }
         .buttonStyle(.plain)
@@ -99,7 +85,7 @@ struct CircleIconButton: View {
 
 struct PillButtonStyle: ButtonStyle {
     var fill: Color = AppTheme.chipFill
-    var pressedFill: Color = Color.white.opacity(0.92)
+    var pressedFill: Color = AppTheme.chipPressedFill
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
@@ -109,7 +95,7 @@ struct PillButtonStyle: ButtonStyle {
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(Color.white.opacity(0.74), lineWidth: 1)
+                    .stroke(AppTheme.controlBorder, lineWidth: 1)
             )
     }
 }

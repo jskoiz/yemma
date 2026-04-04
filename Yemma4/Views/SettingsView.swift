@@ -5,6 +5,7 @@ public struct SettingsView: View {
     @Environment(AppDiagnostics.self) private var diagnostics
     @Environment(ModelDownloader.self) private var modelDownloader
     @Environment(LLMService.self) private var llmService
+    @AppStorage(AppearancePreference.storageKey) private var appearancePreferenceRaw = AppearancePreference.system.rawValue
 
     @State private var showDeleteModelConfirmation = false
     @State private var showClearConversationConfirmation = false
@@ -87,6 +88,8 @@ public struct SettingsView: View {
         settingsSection("App") {
             VStack(spacing: 0) {
                 infoRow(icon: "shippingbox", title: "Manage models", detail: modelSizeText)
+                separator
+                appearanceRow
                 separator
                 temperatureRow
                 separator
@@ -245,9 +248,39 @@ public struct SettingsView: View {
                 in: 0.1...2.0,
                 step: 0.1
             )
-            .tint(.black)
+            .tint(AppTheme.accent)
 
             Text("Lower values stay focused. Higher values improvise more.")
+                .font(.system(size: 14, weight: .medium, design: .rounded))
+                .foregroundStyle(AppTheme.textSecondary)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 16)
+    }
+
+    private var appearanceRow: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Label("Appearance", systemImage: "circle.lefthalf.filled")
+                    .font(.system(size: 18, weight: .medium, design: .rounded))
+                    .foregroundStyle(AppTheme.textPrimary)
+
+                Spacer()
+
+                Text(selectedAppearancePreference.title)
+                    .font(.system(size: 16, weight: .medium, design: .rounded))
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+
+            Picker("Appearance", selection: appearancePreferenceBinding) {
+                ForEach(AppearancePreference.allCases) { appearance in
+                    Text(appearance.title)
+                        .tag(appearance)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            Text("Match your iPhone by default, or keep Yemma in light or dark mode.")
                 .font(.system(size: 14, weight: .medium, design: .rounded))
                 .foregroundStyle(AppTheme.textSecondary)
         }
@@ -327,6 +360,7 @@ public struct SettingsView: View {
     private var separator: some View {
         Divider()
             .padding(.leading, 52)
+            .overlay(AppTheme.separator)
     }
 
     private var modelSizeText: String {
@@ -347,6 +381,17 @@ public struct SettingsView: View {
 
     private var temperatureText: String {
         String(format: "%.1f", llmService.temperature)
+    }
+
+    private var selectedAppearancePreference: AppearancePreference {
+        AppearancePreference.from(appearancePreferenceRaw)
+    }
+
+    private var appearancePreferenceBinding: Binding<AppearancePreference> {
+        Binding(
+            get: { selectedAppearancePreference },
+            set: { appearancePreferenceRaw = $0.rawValue }
+        )
     }
 
     private var appVersionText: String {

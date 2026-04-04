@@ -32,6 +32,7 @@ final class Yemma4AppDelegate: NSObject, UIApplicationDelegate {
 @main
 public struct Yemma4App: App {
     @UIApplicationDelegateAdaptor(Yemma4AppDelegate.self) private var appDelegate
+    @AppStorage(AppearancePreference.storageKey) private var appearancePreferenceRaw = AppearancePreference.system.rawValue
     @State private var diagnostics = AppDiagnostics.shared
     @State private var modelDownloader = ModelDownloader()
     @State private var llmService = LLMService()
@@ -46,6 +47,8 @@ public struct Yemma4App: App {
                 .environment(diagnostics)
                 .environment(modelDownloader)
                 .environment(llmService)
+                .preferredColorScheme(AppearancePreference.from(appearancePreferenceRaw).colorScheme)
+                .tint(AppTheme.accent)
         }
     }
 }
