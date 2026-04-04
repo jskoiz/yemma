@@ -100,6 +100,13 @@ public struct ChatView: View {
                     onShowOnboarding: {
                         showSettings = false
                         onShowOnboarding()
+                    },
+                    onRunDebugScenario: { scenario in
+                        showSettings = false
+                        Task { @MainActor in
+                            try? await Task.sleep(for: .milliseconds(150))
+                            await runDebugScenario(scenario)
+                        }
                     }
                 )
                     .presentationDetents([.large])
@@ -750,6 +757,52 @@ public struct ChatView: View {
     }
 
     @MainActor
+    private func runDebugScenario(_ scenario: DebugInferenceScenario) async {
+        AppDiagnostics.shared.record(
+            "Debug scenario triggered",
+            category: "debug",
+            metadata: ["scenario": scenario.rawValue]
+        )
+        await clearConversation()
+
+        if let sampleTranscript = scenario.sampleTranscript {
+            messages = [
+                .previewMessage(user: .user, text: sampleTranscript.user),
+                .previewMessage(user: .yemma, text: sampleTranscript.assistant)
+            ]
+            return
+        }
+
+        guard let prompt = scenario.prompt else {
+            return
+        }
+
+        if !supportsLocalModelRuntime {
+            messages = [
+                .previewMessage(user: .user, text: prompt),
+                .previewMessage(
+                    user: .yemma,
+                    text: "Simulator mode uses mocked replies. Run this debug scenario on a physical iPhone to judge real inference quality."
+                )
+            ]
+            return
+        }
+
+        guard llmService.isModelLoaded else {
+            messages = [
+                .previewMessage(user: .user, text: prompt),
+                .previewMessage(
+                    user: .yemma,
+                    text: "Load the local model first, then rerun this debug scenario."
+                )
+            ]
+            return
+        }
+
+        await handlePrompt(prompt)
+    }
+
+    @MainActor
     private func showToast(_ message: String) {
         toastTask?.cancel()
         toastMessage = message
@@ -787,7 +840,6 @@ public struct ChatView: View {
     }
 }
 
-#if DEBUG
 private extension ChatMessage {
     static func previewMessage(user: ExyteChat.User, text: String) -> ChatMessage {
         ChatMessage(
@@ -800,6 +852,7 @@ private extension ChatMessage {
     }
 }
 
+#if DEBUG
 private extension LLMService {
     static func previewLoaded() -> LLMService {
         let service = LLMService()
