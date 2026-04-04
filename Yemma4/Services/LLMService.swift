@@ -675,15 +675,18 @@ private extension LLMService {
             return templatedPrompt
         }
 
-        var pieces: [String] = []
-        pieces.reserveCapacity(conversation.count + 1)
+        var pieces = ["<bos>"]
+        pieces.reserveCapacity((conversation.count * 2) + 2)
 
-        for message in history {
-            let role = normalizedRole(message.role)
-            pieces.append("<start_of_turn>\(role)\n\(message.content)<end_of_turn>\n")
+        for message in conversation {
+            let role = serializedRole(message.role)
+            let content = role == "model"
+                ? stripThinkingBlocks(from: message.content)
+                : message.content.trimmingCharacters(in: .whitespacesAndNewlines)
+            pieces.append("<|turn>\(role)\n\(content)<turn|>\n")
         }
 
-        pieces.append("<start_of_turn>user\n\(prompt)<end_of_turn>\n<start_of_turn>model\n")
+        pieces.append("<|turn>model\n")
         return pieces.joined()
     }
 
@@ -707,7 +710,7 @@ private extension LLMService {
         messages.reserveCapacity(conversation.count)
 
         for message in conversation {
-            let role = strdup(normalizedRole(message.role))
+            let role = strdup(templateRole(message.role))
             let content = strdup(message.content)
 
             rolePointers.append(role)
@@ -774,14 +777,47 @@ private extension LLMService {
         llama_memory_clear(memory, true)
     }
 
-    static func normalizedRole(_ role: String) -> String {
+    static func templateRole(_ role: String) -> String {
+        let lowercased = role.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        switch lowercased {
+        case "assistant", "model":
+            return "assistant"
+        case "system", "developer":
+            return "system"
+        default:
+            return "user"
+        }
+    }
+
+    static func serializedRole(_ role: String) -> String {
         let lowercased = role.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         switch lowercased {
         case "assistant", "model":
             return "model"
+        case "system", "developer":
+            return "system"
         default:
             return "user"
         }
+    }
+
+    static func stripThinkingBlocks(from text: String) -> String {
+        guard text.contains("<|channel>") else {
+            return text.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        var cleaned = text
+
+        while let startRange = cleaned.range(of: "<|channel>") {
+            if let endRange = cleaned.range(of: "<channel|>", range: startRange.upperBound..<cleaned.endIndex) {
+                cleaned.removeSubrange(startRange.lowerBound..<endRange.upperBound)
+            } else {
+                cleaned.removeSubrange(startRange.lowerBound..<cleaned.endIndex)
+                break
+            }
+        }
+
+        return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     static func makeSampler(config: SamplerConfig) throws -> UnsafeMutablePointer<llama_sampler> {
