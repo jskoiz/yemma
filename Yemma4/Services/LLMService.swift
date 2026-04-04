@@ -905,6 +905,19 @@ private extension LLMService {
         }
     }
 
+    /// Unloads the model from memory and resets load state.
+    /// Safe to call even when no model is loaded.
+    func unloadModel() async {
+        await stopGeneration()
+        freeLoadedModel()
+        await MainActor.run {
+            isModelLoading = false
+            modelLoadStage = .idle
+            lastError = nil
+        }
+        AppDiagnostics.shared.record("Model unloaded", category: "model")
+    }
+
     func freeLoadedModel() {
         let resources = withLock {
             let current = (model: model, context: context, multimodalRuntime: multimodalRuntime)

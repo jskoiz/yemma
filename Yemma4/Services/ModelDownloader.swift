@@ -214,13 +214,17 @@ public final class ModelDownloader {
     }
 
     private func refreshLocalState() {
+        let modelAsset = asset(.model)
+        let mmprojAsset = asset(.mmproj)
         let modelResult = ModelDownloaderIO.validateLocalFile(
             fileManager: fileManager,
-            fileURL: localFileURL(for: asset(.model))
+            fileURL: localFileURL(for: modelAsset),
+            expectedBytes: modelAsset.expectedBytes
         )
         let mmprojResult = ModelDownloaderIO.validateLocalFile(
             fileManager: fileManager,
-            fileURL: localFileURL(for: asset(.mmproj))
+            fileURL: localFileURL(for: mmprojAsset),
+            expectedBytes: mmprojAsset.expectedBytes
         )
 
         modelPath = modelResult.localPath
@@ -500,9 +504,13 @@ private enum ModelDownloaderIO {
         try? fileManager.removeItem(at: resumeDataURL)
     }
 
+    /// GGUF magic bytes: "GGUF" in little-endian (0x46475547).
+    private static let ggufMagic: [UInt8] = [0x47, 0x47, 0x55, 0x46]
+
     static func validateLocalFile(
         fileManager: FileManager,
-        fileURL: URL
+        fileURL: URL,
+        expectedBytes: Int64? = nil
     ) -> ValidationResult {
         guard fileManager.fileExists(atPath: fileURL.path) else {
             clearInvalidFile(fileManager: fileManager, fileURL: fileURL)
@@ -514,6 +522,39 @@ private enum ModelDownloaderIO {
             let size = attributes[.size] as? NSNumber,
             size.int64Value > 0
         else {
+            clearInvalidFile(fileManager: fileManager, fileURL: fileURL)
+            return ValidationResult(isDownloaded: false, localPath: nil)
+        }
+
+        // Validate expected file size when known (catches truncated downloads).
+        if let expectedBytes, size.int64Value != expectedBytes {
+            AppDiagnostics.shared.record(
+                "Model file size mismatch",
+                category: "download",
+                metadata: [
+                    "path": fileURL.lastPathComponent,
+                    "expected": expectedBytes,
+                    "actual": size.int64Value
+                ]
+            )
+            clearInvalidFile(fileManager: fileManager, fileURL: fileURL)
+            return ValidationResult(isDownloaded: false, localPath: nil)
+        }
+
+        // Validate GGUF magic header.
+        guard let handle = try? FileHandle(forReadingFrom: fileURL) else {
+            clearInvalidFile(fileManager: fileManager, fileURL: fileURL)
+            return ValidationResult(isDownloaded: false, localPath: nil)
+        }
+        let headerData = handle.readData(ofLength: 4)
+        try? handle.close()
+
+        guard headerData.count == 4, Array(headerData) == ggufMagic else {
+            AppDiagnostics.shared.record(
+                "Invalid GGUF header",
+                category: "download",
+                metadata: ["path": fileURL.lastPathComponent]
+            )
             clearInvalidFile(fileManager: fileManager, fileURL: fileURL)
             return ValidationResult(isDownloaded: false, localPath: nil)
         }
