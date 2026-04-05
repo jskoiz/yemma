@@ -3,12 +3,17 @@ import PhotosUI
 import SwiftUI
 import ExyteChat
 
+#if canImport(AVFoundation)
+import AVFoundation
+#endif
+
 #if canImport(UIKit)
 import UIKit
 #endif
 
 public struct ChatView: View {
     @Environment(LLMService.self) private var llmService
+    @Environment(ConversationStore.self) private var conversationStore
 
     private let supportsLocalModelRuntime = Yemma4AppConfiguration.supportsLocalModelRuntime
     @State private var messages: [ChatMessage] = []
@@ -23,7 +28,14 @@ public struct ChatView: View {
     @State private var toastTask: Task<Void, Never>?
     @State private var showSettings = false
     @State private var showConversations = false
+    @State private var loadedConversationID: UUID?
+    @State private var isRestoringConversation = false
+    @State private var conversationSaveTask: Task<Void, Never>?
+    @State private var sharePayload: SharePayload?
     @FocusState private var isComposerFocused: Bool
+#if canImport(AVFoundation)
+    @State private var speechSynthesizer = AVSpeechSynthesizer()
+#endif
 
     // MARK: - Streaming state
     /// The ID of the assistant message currently being streamed.
@@ -40,6 +52,38 @@ public struct ChatView: View {
     private let releasePinnedThreshold: CGFloat = 120
 
     private let taskStarters = ChatStarter.defaults
+
+    private enum AssistantRefinement: String {
+        case shorter
+        case moreDetail
+
+        var title: String {
+            switch self {
+            case .shorter:
+                return "Shorter"
+            case .moreDetail:
+                return "More detail"
+            }
+        }
+
+        var systemImage: String {
+            switch self {
+            case .shorter:
+                return "text.alignleft"
+            case .moreDetail:
+                return "plus.bubble"
+            }
+        }
+
+        var prompt: String {
+            switch self {
+            case .shorter:
+                return "Make that shorter and more direct."
+            case .moreDetail:
+                return "Expand that with a bit more detail and one concrete example."
+            }
+        }
+    }
 
     private let onShowOnboarding: () -> Void
 
@@ -76,11 +120,6 @@ public struct ChatView: View {
             }
             .sheet(isPresented: $showSettings) {
                 SettingsView(
-                    onClearConversation: {
-                        Task { @MainActor in
-                            await clearConversation()
-                        }
-                    },
                     onShowOnboarding: {
                         showSettings = false
                         onShowOnboarding()
@@ -98,11 +137,17 @@ public struct ChatView: View {
                     .presentationBackground(.clear)
             }
             .sheet(isPresented: $showConversations) {
-                ConversationsView(
-                    messages: messages,
+                ConversationBrowserSheet(
+                    currentConversationID: loadedConversationID,
+                    onSelectConversation: { conversationID in
+                        Task { @MainActor in
+                            await switchConversation(to: conversationID)
+                            showConversations = false
+                        }
+                    },
                     onStartFresh: {
                         Task { @MainActor in
-                            await clearConversation()
+                            await startFreshConversation()
                             showConversations = false
                         }
                     }
@@ -118,9 +163,18 @@ public struct ChatView: View {
                     metadata: ["view": "ChatView", "elapsedMs": StartupTiming.elapsedMs()]
                 )
             }
+            .task {
+                await restoreConversationIfNeeded(force: true)
+            }
             .onDisappear {
                 Task { @MainActor in
+                    persistConversationNow()
                     await stopGeneration()
+                }
+            }
+            .onChange(of: conversationStore.currentConversationID) { _, _ in
+                Task { @MainActor in
+                    await restoreConversationIfNeeded(force: true)
                 }
             }
             .onChange(of: selectedPhotoItems) { _, newItems in
@@ -128,6 +182,12 @@ public struct ChatView: View {
                 Task { @MainActor in
                     await importSelectedPhotos(from: newItems)
                 }
+            }
+            .onChange(of: draft) { _, _ in
+                scheduleConversationSave()
+            }
+            .onChange(of: pendingAttachments.map(\.id)) { _, _ in
+                scheduleConversationSave()
             }
             .animation(.easeInOut(duration: 0.2), value: toastMessage)
             .alert(
@@ -156,6 +216,9 @@ public struct ChatView: View {
             } message: {
                 Text(memoryAlertMessage ?? "Your device ran low on memory. Try a shorter conversation.")
             }
+            .sheet(item: $sharePayload) { payload in
+                ActivityShareSheet(activityItems: [payload.text])
+            }
         }
     }
 
@@ -177,7 +240,7 @@ public struct ChatView: View {
 
             CircleIconButton(systemName: "square.and.pencil") {
                 Task { @MainActor in
-                    await clearConversation()
+                    await startFreshConversation()
                 }
             }
         }
@@ -357,7 +420,7 @@ public struct ChatView: View {
                 Spacer(minLength: 54)
             }
 
-            VStack(alignment: message.user.isCurrentUser ? .trailing : .leading, spacing: 4) {
+            VStack(alignment: message.user.isCurrentUser ? .trailing : .leading, spacing: 6) {
                 if shouldShowAssistantLabel(at: index) {
                     Text("Yemma 4")
                         .font(AppTheme.Typography.chatLabel)
@@ -366,6 +429,10 @@ public struct ChatView: View {
                 }
 
                 messageBubble(message)
+
+                if shouldShowMessageActionStrip(for: message, index: index) {
+                    messageActionStrip(for: message, index: index)
+                }
             }
             .frame(
                 maxWidth: message.user.isCurrentUser ? 420 : .infinity,
@@ -439,6 +506,9 @@ public struct ChatView: View {
             RoundedRectangle(cornerRadius: AppTheme.Radius.medium, style: .continuous)
                 .stroke(messageBubbleBorder(for: message), lineWidth: 1)
         )
+        .contextMenu {
+            messageContextMenu(for: message, index: indexForMessage(message))
+        }
         .animation(.easeInOut(duration: 0.25), value: isStreaming)
     }
 
@@ -595,6 +665,321 @@ public struct ChatView: View {
                 "textReady": llmService.isTextModelReady
             ]
         )
+        scheduleConversationSave()
+    }
+
+    private func indexForMessage(_ message: ChatMessage) -> Int {
+        messages.firstIndex(where: { $0.id == message.id }) ?? -1
+    }
+
+    private func lastUserMessageIndex() -> Int? {
+        messages.lastIndex(where: \.user.isCurrentUser)
+    }
+
+    private func latestAssistantMessageIndex() -> Int? {
+        messages.lastIndex(where: { !$0.user.isCurrentUser })
+    }
+
+    private func canEditAndResend(_ message: ChatMessage) -> Bool {
+        guard !llmService.isGenerating, message.user.isCurrentUser else { return false }
+        guard let lastUserMessageIndex else { return false }
+        return message.id == messages[lastUserMessageIndex].id
+    }
+
+    private func canRetryAssistantResponse(_ message: ChatMessage, index: Int) -> Bool {
+        guard !llmService.isGenerating, !message.user.isCurrentUser else { return false }
+        guard index >= 0, index == latestAssistantMessageIndex(), index == messages.indices.last else { return false }
+        return userPromptIndex(forAssistantAt: index) != nil
+    }
+
+    private func shouldShowMessageActionStrip(for message: ChatMessage, index: Int) -> Bool {
+        canRetryAssistantResponse(message, index: index)
+    }
+
+    private func messageActionStrip(for message: ChatMessage, index: Int) -> some View {
+        HStack(spacing: 8) {
+            messageActionButton(title: "Retry", systemImage: "arrow.clockwise") {
+                Task { @MainActor in
+                    await retryAssistantResponse(message, index: index)
+                }
+            }
+
+            ForEach([AssistantRefinement.shorter, .moreDetail], id: \.rawValue) { refinement in
+                messageActionButton(title: refinement.title, systemImage: refinement.systemImage) {
+                    Task { @MainActor in
+                        await refineAssistantResponse(message, refinement: refinement)
+                    }
+                }
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 2)
+    }
+
+    private func messageActionButton(title: String, systemImage: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: systemImage)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(AppTheme.textSecondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(AppTheme.controlFill)
+                .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func messageContextMenu(for message: ChatMessage, index: Int) -> some View {
+        let trimmedText = message.text.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if !trimmedText.isEmpty {
+            Button {
+                copyMessageText(trimmedText)
+            } label: {
+                Label("Copy", systemImage: "doc.on.doc")
+            }
+
+            Button {
+                shareMessageText(trimmedText)
+            } label: {
+                Label("Share", systemImage: "square.and.arrow.up")
+            }
+
+            Button {
+                speakMessageText(trimmedText, messageID: message.id)
+            } label: {
+                Label("Speak", systemImage: "speaker.wave.2")
+            }
+        }
+
+        if canEditAndResend(message) {
+            Button {
+                editAndResendLastUserTurn(message)
+            } label: {
+                Label("Edit & Resend", systemImage: "square.and.pencil")
+            }
+        }
+
+        if canRetryAssistantResponse(message, index: index) {
+            Button {
+                Task { @MainActor in
+                    await retryAssistantResponse(message, index: index)
+                }
+            } label: {
+                Label("Retry", systemImage: "arrow.clockwise")
+            }
+
+            ForEach([AssistantRefinement.shorter, .moreDetail], id: \.rawValue) { refinement in
+                Button {
+                    Task { @MainActor in
+                        await refineAssistantResponse(message, refinement: refinement)
+                    }
+                } label: {
+                    Label(refinement.title, systemImage: refinement.systemImage)
+                }
+            }
+        }
+    }
+
+    private func copyMessageText(_ text: String) {
+#if canImport(UIKit)
+        UIPasteboard.general.string = text
+#endif
+        AppDiagnostics.shared.record(
+            "Message copied",
+            category: "ui",
+            metadata: ["chars": text.count]
+        )
+        showToast("Copied")
+    }
+
+    private func shareMessageText(_ text: String) {
+        AppDiagnostics.shared.record(
+            "Message shared",
+            category: "ui",
+            metadata: ["chars": text.count]
+        )
+        sharePayload = SharePayload(text: text)
+    }
+
+    private func speakMessageText(_ text: String, messageID: String) {
+#if canImport(AVFoundation)
+        speechSynthesizer.stopSpeaking(at: .immediate)
+        let utterance = AVSpeechUtterance(string: text)
+        utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
+        speechSynthesizer.speak(utterance)
+#endif
+        AppDiagnostics.shared.record(
+            "Message spoken",
+            category: "ui",
+            metadata: [
+                "messageID": messageID,
+                "chars": text.count
+            ]
+        )
+    }
+
+    private func editAndResendLastUserTurn(_ message: ChatMessage) {
+        guard canEditAndResend(message) else { return }
+        guard let messageIndex = messages.firstIndex(where: { $0.id == message.id }) else { return }
+
+        AppDiagnostics.shared.record(
+            "Last user turn edited",
+            category: "ui",
+            metadata: [
+                "chars": message.text.count,
+                "images": message.attachments.count
+            ]
+        )
+
+        draft = message.text
+        pendingAttachments = message.attachments
+        selectedPhotoItems = []
+        messages.removeSubrange(messageIndex..<messages.endIndex)
+        isComposerFocused = true
+        scheduleConversationSave(delayMs: 0)
+    }
+
+    private func userPromptIndex(forAssistantAt index: Int) -> Int? {
+        guard index > 0 else { return nil }
+        return messages[..<index].lastIndex(where: \.user.isCurrentUser)
+    }
+
+    private func retryAssistantResponse(_ message: ChatMessage, index: Int) async {
+        guard canRetryAssistantResponse(message, index: index) else { return }
+        guard let userIndex = userPromptIndex(forAssistantAt: index) else { return }
+
+        let prompt = promptInput(from: messages[userIndex])
+        let history = conversationHistory(from: Array(messages.prefix(userIndex)))
+
+        AppDiagnostics.shared.record(
+            "Assistant response retried",
+            category: "ui",
+            metadata: [
+                "assistantID": message.id,
+                "historyCount": history.count
+            ]
+        )
+
+        await stopGeneration()
+        updateMessageText(id: message.id, text: "")
+        generationError = nil
+        memoryAlertMessage = nil
+        isPinnedToBottom = true
+        generationTask = Task {
+            await streamReply(prompt: prompt, history: history, assistantID: message.id)
+        }
+        scheduleConversationSave(delayMs: 0)
+    }
+
+    private func refineAssistantResponse(_ message: ChatMessage, refinement: AssistantRefinement) async {
+        guard !llmService.isGenerating, !message.user.isCurrentUser else { return }
+        guard let latestAssistantMessageIndex else { return }
+        guard message.id == messages[latestAssistantMessageIndex].id else { return }
+
+        AppDiagnostics.shared.record(
+            "Assistant refinement requested",
+            category: "ui",
+            metadata: [
+                "assistantID": message.id,
+                "refinement": refinement.rawValue
+            ]
+        )
+
+        draft = ""
+        pendingAttachments.removeAll()
+        selectedPhotoItems = []
+        await handlePrompt(refinement.prompt, attachments: [])
+    }
+
+    @MainActor
+    private func restoreConversationIfNeeded(force: Bool = false) async {
+        let targetConversationID = conversationStore.currentConversationID ?? conversationStore.ensureCurrentConversation()
+        guard force || loadedConversationID != targetConversationID else { return }
+
+        conversationSaveTask?.cancel()
+        isRestoringConversation = true
+        await stopGeneration()
+
+        guard let snapshot = conversationStore.loadConversation(id: targetConversationID) else {
+            let newConversationID = conversationStore.startFreshConversation()
+            guard let fallbackSnapshot = conversationStore.loadConversation(id: newConversationID) else {
+                isRestoringConversation = false
+                return
+            }
+            applyConversationSnapshot(fallbackSnapshot)
+            return
+        }
+
+        applyConversationSnapshot(snapshot)
+    }
+
+    private func applyConversationSnapshot(_ snapshot: ConversationSnapshot) {
+        loadedConversationID = snapshot.id
+        messages = snapshot.messages
+        draft = snapshot.draftText
+        pendingAttachments = snapshot.draftAttachments
+        selectedPhotoItems = []
+        generationError = nil
+        memoryAlertMessage = nil
+        toastMessage = nil
+        streamingMessageID = nil
+        isPinnedToBottom = true
+        isRestoringConversation = false
+    }
+
+    @MainActor
+    private func switchConversation(to conversationID: UUID) async {
+        persistConversationNow()
+        guard conversationStore.currentConversationID != conversationID else { return }
+        conversationStore.setCurrentConversation(id: conversationID)
+    }
+
+    @MainActor
+    private func startFreshConversation() async {
+        persistConversationNow()
+        let conversationID = conversationStore.startFreshConversation()
+        AppDiagnostics.shared.record(
+            "Fresh conversation started",
+            category: "ui",
+            metadata: ["conversationID": conversationID.uuidString]
+        )
+    }
+
+    private func scheduleConversationSave(delayMs: Int = 280) {
+        guard !isRestoringConversation else { return }
+
+        conversationSaveTask?.cancel()
+        conversationSaveTask = Task {
+            if delayMs > 0 {
+                do {
+                    try await Task.sleep(for: .milliseconds(delayMs))
+                } catch {
+                    return
+                }
+            }
+
+            await MainActor.run {
+                persistConversationNow()
+            }
+        }
+    }
+
+    private func persistConversationNow() {
+        guard !isRestoringConversation else { return }
+
+        let conversationID = conversationStore.saveConversation(
+            id: loadedConversationID,
+            messages: messages,
+            draftText: draft,
+            draftAttachments: pendingAttachments
+        )
+        loadedConversationID = conversationID
+        if conversationStore.currentConversationID == nil {
+            conversationStore.setCurrentConversation(id: conversationID)
+        }
     }
 
     private func toastView(message: String) -> some View {
@@ -681,6 +1066,7 @@ public struct ChatView: View {
 
             Button {
                 pendingAttachments.removeAll { $0.id == attachment.id }
+                scheduleConversationSave()
             } label: {
                 Image(systemName: "xmark.circle.fill")
                     .font(.system(size: 18, weight: .bold))
@@ -737,6 +1123,7 @@ public struct ChatView: View {
 
         if !importedAttachments.isEmpty {
             pendingAttachments.append(contentsOf: importedAttachments)
+            scheduleConversationSave()
         }
 
         if failedCount > 0 {
@@ -863,6 +1250,7 @@ public struct ChatView: View {
         generationTask = Task {
             await streamReply(prompt: prompt, history: history, assistantID: assistantID)
         }
+        scheduleConversationSave(delayMs: 0)
     }
 
     private func conversationHistory(from messages: [ChatMessage]) -> [PromptMessageInput] {
@@ -912,6 +1300,7 @@ public struct ChatView: View {
         await MainActor.run {
             finalizeAssistantMessage(id: assistantID, text: finalText)
             streamFlushTick &+= 1
+            persistConversationNow()
         }
 
         if let lastError = llmService.lastError {
@@ -941,6 +1330,7 @@ public struct ChatView: View {
         }
 
         messages[index].text = text
+        persistConversationNow()
     }
 
     // MARK: - Conversation management
@@ -958,6 +1348,7 @@ public struct ChatView: View {
         memoryAlertMessage = nil
         toastMessage = nil
         streamingMessageID = nil
+        persistConversationNow()
     }
 
     @MainActor
@@ -974,6 +1365,7 @@ public struct ChatView: View {
                 .previewMessage(user: .user, text: sampleTranscript.user),
                 .previewMessage(user: .yemma, text: sampleTranscript.assistant)
             ]
+            persistConversationNow()
             return
         }
 
@@ -989,6 +1381,7 @@ public struct ChatView: View {
                     text: "Simulator mode uses mocked replies. Run this debug scenario on a physical iPhone to judge real inference quality."
                 )
             ]
+            persistConversationNow()
             return
         }
 
@@ -1000,6 +1393,7 @@ public struct ChatView: View {
                     text: "Load the local model first, then rerun this debug scenario."
                 )
             ]
+            persistConversationNow()
             return
         }
 
@@ -1042,6 +1436,7 @@ public struct ChatView: View {
         generationTask = nil
         streamingMessageID = nil
         await llmService.stopGeneration()
+        persistConversationNow()
     }
 }
 
@@ -1104,6 +1499,23 @@ private struct ConversationBottomOffsetPreferenceKey: PreferenceKey {
     }
 }
 
+private struct SharePayload: Identifiable {
+    let id = UUID()
+    let text: String
+}
+
+#if canImport(UIKit)
+private struct ActivityShareSheet: UIViewControllerRepresentable {
+    let activityItems: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+}
+#endif
+
 // MARK: - Preview helpers
 
 private extension ChatMessage {
@@ -1120,6 +1532,8 @@ private extension ChatMessage {
 }
 
 #if DEBUG
+private let previewConversationID = UUID()
+
 private extension LLMService {
     static func previewLoaded() -> LLMService {
         let service = LLMService()
@@ -1136,136 +1550,55 @@ private extension LLMService {
 }
 
 #Preview("Chat") {
-    ChatView(
-        initialMessages: [
-            .previewMessage(
-                user: .user,
-                text: "Plan me a focused three-day workout split for strength and cardio."
-            ),
-            .previewMessage(
+    ChatView()
+        .environment(LLMService.previewLoaded())
+        .environment(ModelDownloader())
+        .environment(
+            ConversationStore.preview(
+                currentConversationID: previewConversationID,
+                conversations: [
+                    ConversationSnapshot(
+                        id: previewConversationID,
+                        title: "Workout split",
+                        messages: [
+                            .previewMessage(
+                                user: .user,
+                                text: "Plan me a focused three-day workout split for strength and cardio."
+                            ),
+                            .previewMessage(
                 user: .yemma,
                 text: "Here is a simple split: Day 1 push and intervals, Day 2 lower body and incline walking, Day 3 pull and steady-state cardio. Keep each session around 45 minutes."
             ),
-            .previewMessage(
-                user: .user,
-                text: "Keep it beginner friendly and make the gym version optional."
+                            .previewMessage(
+                                user: .user,
+                                text: "Keep it beginner friendly and make the gym version optional."
+                            )
+                        ],
+                        draftText: "",
+                        draftAttachments: []
+                    )
+                ]
             )
-        ]
-    )
-    .environment(LLMService.previewLoaded())
-    .environment(ModelDownloader())
+        )
 }
 
 #Preview("Warm Shell") {
     ChatView()
         .environment(LLMService.previewWarmShell())
         .environment(ModelDownloader())
+        .environment(
+            ConversationStore.preview(
+                currentConversationID: previewConversationID,
+                conversations: [
+                    ConversationSnapshot(
+                        id: previewConversationID,
+                        title: "New chat",
+                        messages: [],
+                        draftText: "Draft a short thank-you note after an interview.",
+                        draftAttachments: []
+                    )
+                ]
+            )
+        )
 }
 #endif
-
-private struct ConversationsView: View {
-    @Environment(\.dismiss) private var dismiss
-
-    let messages: [ChatMessage]
-    let onStartFresh: () -> Void
-
-    private var conversationPreview: String {
-        let firstUserMessage = messages.first(where: \.user.isCurrentUser)
-        let firstUserText = firstUserMessage?.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let firstUserText, !firstUserText.isEmpty {
-            return firstUserText
-        }
-
-        if let firstUserMessage, !firstUserMessage.attachments.isEmpty {
-            return "Image prompt"
-        }
-
-        return "Hello"
-    }
-
-    var body: some View {
-        ZStack {
-            UtilityBackground()
-
-            ScrollView(showsIndicators: false) {
-                VStack(spacing: AppTheme.Layout.sectionSpacing) {
-                    HStack {
-                        Spacer()
-                        Text("Conversations")
-                            .font(AppTheme.Typography.utilityTitle)
-                            .foregroundStyle(AppTheme.textPrimary)
-                        Spacer()
-                        CircleIconButton(systemName: "xmark", action: { dismiss() })
-                    }
-                    .padding(.horizontal, AppTheme.Layout.screenHeaderHorizontalPadding)
-                    .padding(.top, 18)
-
-                    VStack(alignment: .leading, spacing: 8) {
-                        Label("Stored only on this iPhone", systemImage: "iphone")
-                            .font(AppTheme.Typography.utilityCaption)
-                            .foregroundStyle(AppTheme.accent)
-
-                        Text("Start a fresh chat when you want a clean context. Your current local thread stays available here so you can return without losing place.")
-                            .font(AppTheme.Typography.utilityRowDetail)
-                            .foregroundStyle(AppTheme.textSecondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(AppTheme.Layout.rowHorizontalPadding)
-                    .groupedCard(cornerRadius: AppTheme.Radius.medium)
-
-                    UtilitySection("Current") {
-                        Button {
-                            dismiss()
-                        } label: {
-                            conversationRow(
-                                title: conversationPreview,
-                                subtitle: messages.isEmpty ? "Start chatting" : "Current conversation"
-                            )
-                        }
-                        .buttonStyle(.plain)
-
-                        UtilitySectionSeparator(leadingInset: AppTheme.Layout.rowHorizontalPadding)
-
-                        Button {
-                            onStartFresh()
-                        } label: {
-                            conversationRow(title: "Fresh chat", subtitle: "Clear current thread")
-                        }
-                        .buttonStyle(.plain)
-                    }
-
-                    UtilitySection("Search") {
-                        HStack(spacing: 12) {
-                            Image(systemName: "magnifyingglass")
-                                .font(.body.weight(.semibold))
-                                .foregroundStyle(AppTheme.textSecondary)
-                            Text("Conversation search is coming soon")
-                                .font(AppTheme.Typography.utilityRowTitle)
-                                .foregroundStyle(AppTheme.textSecondary)
-                            Spacer()
-                        }
-                        .utilityRowPadding()
-                    }
-                }
-                .padding(.horizontal, AppTheme.Layout.screenPadding)
-                .padding(.bottom, 28)
-            }
-        }
-    }
-
-    private func conversationRow(title: String, subtitle: String) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title)
-                .font(AppTheme.Typography.utilityRowTitle.weight(.semibold))
-                .foregroundStyle(AppTheme.textPrimary)
-                .lineLimit(1)
-            Text(subtitle)
-                .font(AppTheme.Typography.utilityRowDetail)
-                .foregroundStyle(AppTheme.textSecondary)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .utilityRowPadding()
-        .contentShape(Rectangle())
-    }
-}
