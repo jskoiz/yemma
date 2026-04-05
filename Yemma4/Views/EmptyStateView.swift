@@ -48,7 +48,7 @@ struct EmptyStateView: View {
                         .font(AppTheme.Typography.brandSection)
                         .foregroundStyle(AppTheme.textPrimary)
 
-                    Text("Private, on-device chat with no account.")
+                    Text("Private, on-device, no account.")
                         .font(.system(size: 15, weight: .medium))
                         .foregroundStyle(AppTheme.textSecondary)
                 }
@@ -185,5 +185,21 @@ struct EmptyStateView: View {
         )
         .padding(.horizontal, 16)
     }
+}
+
+#Preview("Warm Shell Dark Compact") {
+    ZStack {
+        AppBackground()
+        EmptyStateView(
+            isModelLoaded: false,
+            isModelLoading: true,
+            supportsLocalModelRuntime: true,
+            modelLoadStageText: ModelLoadStage.loadingModel.statusText,
+            starters: ChatStarter.defaults
+        )
+        .padding(.horizontal, 16)
+    }
+    .preferredColorScheme(.dark)
+    .previewDevice("iPhone SE (3rd generation)")
 }
 #endif

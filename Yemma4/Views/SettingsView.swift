@@ -289,8 +289,8 @@ public struct SettingsView: View {
             } label: {
                 utilityActionRow(
                     icon: "sparkles.rectangle.stack",
-                    title: "View onboarding",
-                    detail: "See download, setup, and local model status again."
+                    title: "Setup and status",
+                    detail: "Review download, setup, and local model status."
                 )
             }
             .buttonStyle(.plain)
@@ -361,11 +361,11 @@ public struct SettingsView: View {
 
     private var trustRow: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Label("Private after download", systemImage: "lock.shield.fill")
+            Label("Private on your iPhone", systemImage: "lock.shield.fill")
                 .font(AppTheme.Typography.utilityRowTitle)
                 .foregroundStyle(AppTheme.textPrimary)
 
-            Text("Yemma runs on-device on your iPhone, keeps chats local, and does not ask for an account.")
+            Text("Runs on-device, keeps chats local, and never asks for an account.")
                 .font(AppTheme.Typography.utilityRowDetail)
                 .foregroundStyle(AppTheme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -740,5 +740,14 @@ public struct SettingsView: View {
         .environment(ConversationStore.preview())
         .dynamicTypeSize(.accessibility3)
         .preferredColorScheme(.dark)
+}
+
+#Preview("Settings Compact") {
+    SettingsView(onShowOnboarding: {})
+        .environment(ModelDownloader())
+        .environment(LLMService())
+        .environment(ConversationStore.preview())
+        .preferredColorScheme(.dark)
+        .previewDevice("iPhone SE (3rd generation)")
 }
 #endif

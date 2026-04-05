@@ -22,15 +22,15 @@ struct ConversationBrowserSheet: View {
 
                     UtilitySection("Chats") {
                         Button {
-                            AppDiagnostics.shared.record("Fresh conversation requested", category: "ui")
+                            AppDiagnostics.shared.record("New conversation requested", category: "ui")
                             AppHaptics.selection()
                             onStartFresh()
                             dismiss()
                         } label: {
                             actionRow(
                                 icon: "square.and.pencil",
-                                title: "Fresh chat",
-                                subtitle: "Start a new thread and keep the old ones"
+                                title: "New chat",
+                                subtitle: "Start another thread and keep the rest"
                             )
                         }
                         .buttonStyle(.plain)
@@ -76,13 +76,13 @@ struct ConversationBrowserSheet: View {
             }
         }
         .alert(
-            "Rename Conversation",
+            "Rename Chat",
             isPresented: Binding(
                 get: { renameConversation != nil },
                 set: { if !$0 { renameConversation = nil } }
             )
         ) {
-            TextField("Title", text: $renameTitle)
+            TextField("Chat name", text: $renameTitle)
             Button("Save") {
                 guard let renameConversation else { return }
                 let trimmedTitle = renameTitle.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -105,12 +105,12 @@ struct ConversationBrowserSheet: View {
     private var header: some View {
         HStack {
             Spacer()
-            Text("Conversations")
+            Text("Saved Chats")
                 .font(AppTheme.Typography.utilityTitle)
                 .foregroundStyle(AppTheme.textPrimary)
             Spacer()
             CircleIconButton(systemName: "xmark", action: { dismiss() })
-                .accessibilityLabel("Close conversations")
+                .accessibilityLabel("Close saved chats")
         }
         .padding(.horizontal, AppTheme.Layout.screenHeaderHorizontalPadding)
         .padding(.top, 18)
@@ -118,11 +118,11 @@ struct ConversationBrowserSheet: View {
 
     private var introCard: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Label("Stored only on this iPhone", systemImage: "iphone")
+            Label("Saved on this iPhone", systemImage: "iphone")
                 .font(AppTheme.Typography.utilityCaption)
                 .foregroundStyle(AppTheme.accent)
 
-            Text("Switch between saved chats, keep drafts in place, and rename threads when they need a better label.")
+            Text("Switch between chats, keep drafts in place, and rename threads when they need a clearer label.")
                 .font(AppTheme.Typography.utilityRowDetail)
                 .foregroundStyle(AppTheme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -217,58 +217,71 @@ struct ConversationBrowserSheet: View {
 private let browserPreviewCurrentID = UUID()
 private let browserPreviewDraftID = UUID()
 
-#Preview("Conversation Browser") {
+private func previewBrowserStore() -> ConversationStore {
+    ConversationStore.preview(
+        currentConversationID: browserPreviewCurrentID,
+        conversations: [
+            ConversationSnapshot(
+                id: browserPreviewCurrentID,
+                title: "Interview follow-up",
+                messages: [
+                    ChatMessage(
+                        id: UUID().uuidString,
+                        user: .user,
+                        status: .sent,
+                        createdAt: .now.addingTimeInterval(-1800),
+                        text: "Help me tighten a thank-you note after a product interview.",
+                        attachments: []
+                    ),
+                    ChatMessage(
+                        id: UUID().uuidString,
+                        user: .yemma,
+                        status: .sent,
+                        createdAt: .now.addingTimeInterval(-1700),
+                        text: "Keep it brief, specific to one conversation point, and close with clear interest in next steps.",
+                        attachments: []
+                    )
+                ],
+                draftText: "",
+                draftAttachments: []
+            ),
+            ConversationSnapshot(
+                id: browserPreviewDraftID,
+                title: "Meal prep ideas",
+                messages: [
+                    ChatMessage(
+                        id: UUID().uuidString,
+                        user: .user,
+                        status: .sent,
+                        createdAt: .now.addingTimeInterval(-7200),
+                        text: "Give me five high-protein lunches I can prep on Sunday.",
+                        attachments: []
+                    )
+                ],
+                draftText: "Make them cheap and grocery-store simple.",
+                draftAttachments: []
+            )
+        ]
+    )
+}
+
+#Preview("Saved Chats") {
     ConversationBrowserSheet(
         currentConversationID: browserPreviewCurrentID,
         onSelectConversation: { _ in },
         onStartFresh: {}
     )
-    .environment(
-        ConversationStore.preview(
-            currentConversationID: browserPreviewCurrentID,
-            conversations: [
-                ConversationSnapshot(
-                    id: browserPreviewCurrentID,
-                    title: "Interview follow-up",
-                    messages: [
-                        ChatMessage(
-                            id: UUID().uuidString,
-                            user: .user,
-                            status: .sent,
-                            createdAt: .now.addingTimeInterval(-1800),
-                            text: "Help me tighten a thank-you note after a product interview.",
-                            attachments: []
-                        ),
-                        ChatMessage(
-                            id: UUID().uuidString,
-                            user: .yemma,
-                            status: .sent,
-                            createdAt: .now.addingTimeInterval(-1700),
-                            text: "Keep it brief, specific to one conversation point, and close with clear interest in next steps.",
-                            attachments: []
-                        )
-                    ],
-                    draftText: "",
-                    draftAttachments: []
-                ),
-                ConversationSnapshot(
-                    id: browserPreviewDraftID,
-                    title: "Meal prep ideas",
-                    messages: [
-                        ChatMessage(
-                            id: UUID().uuidString,
-                            user: .user,
-                            status: .sent,
-                            createdAt: .now.addingTimeInterval(-7200),
-                            text: "Give me five high-protein lunches I can prep on Sunday.",
-                            attachments: []
-                        )
-                    ],
-                    draftText: "Make them cheap and grocery-store simple.",
-                    draftAttachments: []
-                )
-            ]
-        )
+    .environment(previewBrowserStore())
+}
+
+#Preview("Saved Chats Dark Compact") {
+    ConversationBrowserSheet(
+        currentConversationID: browserPreviewCurrentID,
+        onSelectConversation: { _ in },
+        onStartFresh: {}
     )
+    .environment(previewBrowserStore())
+    .preferredColorScheme(.dark)
+    .previewDevice("iPhone SE (3rd generation)")
 }
 #endif

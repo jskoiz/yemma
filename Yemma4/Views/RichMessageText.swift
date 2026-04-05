@@ -206,4 +206,27 @@ private struct ChatCodeBlock: View {
         .padding(20)
     }
 }
+
+#Preview("Markdown Chat Dark") {
+    ZStack {
+        AppBackground()
+        RichMessageText(
+            text: """
+            ## Compact Markdown
+
+            A short answer with `inline code`, a quote, and a tighter code sample.
+
+            > Keep spacing compact and easy to scan.
+
+            ```swift
+            func greet(_ name: String) -> String {
+                "Hello, \\(name)"
+            }
+            ```
+            """
+        )
+        .padding(20)
+    }
+    .preferredColorScheme(.dark)
+}
 #endif
