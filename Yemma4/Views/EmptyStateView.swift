@@ -200,6 +200,5 @@ struct EmptyStateView: View {
         .padding(.horizontal, 16)
     }
     .preferredColorScheme(.dark)
-    .previewDevice("iPhone SE (3rd generation)")
 }
 #endif

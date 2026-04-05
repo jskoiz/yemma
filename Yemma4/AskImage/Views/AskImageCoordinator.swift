@@ -65,10 +65,10 @@ final class AskImageCoordinatorViewModel {
     private var pendingPrompt: String?
 
     /// Throttle interval for streaming UI updates.
-    private static let streamFlushInterval: TimeInterval = 0.05 // 50ms
+    nonisolated private static let streamFlushInterval: TimeInterval = 0.05 // 50ms
 
     /// Maximum image dimension (longest edge) before downscaling.
-    private static let maxImageDimension: CGFloat = 1024
+    nonisolated private static let maxImageDimension: CGFloat = 1024
 
     init(
         runtime: (any AskImageRuntime)? = nil,
@@ -295,7 +295,7 @@ final class AskImageCoordinatorViewModel {
 
     /// Downscale a UIImage if its longest edge exceeds `maxDimension`.
     /// Returns the original image if no downscaling is needed.
-    private static func downscaleIfNeeded(_ image: UIImage, maxDimension: CGFloat) -> UIImage {
+    nonisolated private static func downscaleIfNeeded(_ image: UIImage, maxDimension: CGFloat) -> UIImage {
         let longestEdge = max(image.size.width, image.size.height)
         guard longestEdge > maxDimension else { return image }
 
@@ -311,7 +311,7 @@ final class AskImageCoordinatorViewModel {
         }
     }
 
-    private static func generateThumbnail(from image: UIImage, maxSize: CGFloat) -> Data? {
+    nonisolated private static func generateThumbnail(from image: UIImage, maxSize: CGFloat) -> Data? {
         let scale = min(maxSize / image.size.width, maxSize / image.size.height, 1.0)
         let newSize = CGSize(
             width: image.size.width * scale,

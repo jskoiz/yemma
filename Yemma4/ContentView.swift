@@ -244,7 +244,7 @@ public struct ContentView: View {
         do {
             // Signal loading state immediately so OnboardingView shows "Preparing model"
             // before the heavy work begins — prevents the "Download model" flash.
-            await llmService.signalLoadingIntent()
+            llmService.signalLoadingIntent()
             await Task.yield()
             try await llmService.loadModel(from: modelPath, mmprojPath: mmprojPath)
 

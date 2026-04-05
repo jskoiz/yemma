@@ -748,6 +748,5 @@ public struct SettingsView: View {
         .environment(LLMService())
         .environment(ConversationStore.preview())
         .preferredColorScheme(.dark)
-        .previewDevice("iPhone SE (3rd generation)")
 }
 #endif
