@@ -175,21 +175,19 @@ public struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(ModelDownloader.self) private var modelDownloader
     @Environment(LLMService.self) private var llmService
+    @Environment(ConversationStore.self) private var conversationStore
     @AppStorage(AppearancePreference.storageKey) private var appearancePreferenceRaw = AppearancePreference.system.rawValue
 
     @State private var showDeleteModelConfirmation = false
     @State private var showClearConversationConfirmation = false
 
-    private let onClearConversation: () -> Void
     private let onShowOnboarding: () -> Void
     private let onRunDebugScenario: ((DebugInferenceScenario) -> Void)?
 
     public init(
-        onClearConversation: @escaping () -> Void,
         onShowOnboarding: @escaping () -> Void,
         onRunDebugScenario: ((DebugInferenceScenario) -> Void)? = nil
     ) {
-        self.onClearConversation = onClearConversation
         self.onShowOnboarding = onShowOnboarding
         self.onRunDebugScenario = onRunDebugScenario
     }
@@ -230,17 +228,18 @@ public struct SettingsView: View {
             Text("Yemma 4 will return to the download screen until the model is downloaded again.")
         }
         .confirmationDialog(
-            "Clear the current conversation?",
+            "Delete conversation history?",
             isPresented: $showClearConversationConfirmation,
             titleVisibility: .visible
         ) {
-            Button("Clear Conversation", role: .destructive) {
-                onClearConversation()
+            Button("Delete History", role: .destructive) {
+                AppDiagnostics.shared.record("Conversation history cleared", category: "ui")
+                conversationStore.deleteAllConversations()
                 dismiss()
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This removes the current local chat history.")
+            Text("This removes saved local chats and drafts on this iPhone.")
         }
     }
 
@@ -440,8 +439,9 @@ public struct SettingsView: View {
 
 #if DEBUG
 #Preview("Settings") {
-    SettingsView(onClearConversation: {}, onShowOnboarding: {})
+    SettingsView(onShowOnboarding: {})
         .environment(ModelDownloader())
         .environment(LLMService())
+        .environment(ConversationStore.preview())
 }
 #endif
