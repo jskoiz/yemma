@@ -33,6 +33,7 @@ public struct ChatView: View {
     @State private var isRestoringConversation = false
     @State private var conversationSaveTask: Task<Void, Never>?
     @State private var sharePayload: SharePayload?
+    @State private var showAskImage = false
     @FocusState private var isComposerFocused: Bool
 #if canImport(AVFoundation)
     @State private var speechSynthesizer = AVSpeechSynthesizer()
@@ -141,6 +142,9 @@ public struct ChatView: View {
                     .presentationDragIndicator(.hidden)
                     .presentationBackground(.clear)
             }
+            .fullScreenCover(isPresented: $showAskImage) {
+                AskImageCoordinator(onDismiss: { showAskImage = false })
+            }
             .sheet(isPresented: $showConversations) {
                 ConversationBrowserSheet(
                     currentConversationID: loadedConversationID,
@@ -244,6 +248,12 @@ public struct ChatView: View {
                     .overlay(Capsule().stroke(AppTheme.inputBorder, lineWidth: 1))
             )
             .floatingShadow()
+
+            if AskImageFeature.isEnabled {
+                CircleIconButton(systemName: "eye.circle") {
+                    showAskImage = true
+                }
+            }
 
             Spacer(minLength: 0)
 
