@@ -6,19 +6,42 @@ public struct OnboardingView: View {
     @Environment(LLMService.self) private var llmService
     @State private var isStartingDownload = false
 
-    private let supportsLocalModelRuntime = Yemma4AppConfiguration.supportsLocalModelRuntime
+    private enum SetupState: String {
+        case simulator
+        case download
+        case downloading
+        case preparing
+        case ready
+        case failed
+
+        var systemImage: String {
+            switch self {
+            case .simulator:
+                return "desktopcomputer"
+            case .download:
+                return "arrow.down.circle"
+            case .downloading:
+                return "arrow.down.circle.fill"
+            case .preparing:
+                return "bolt.circle.fill"
+            case .ready:
+                return "checkmark.circle.fill"
+            case .failed:
+                return "exclamationmark.triangle.fill"
+            }
+        }
+    }
+
+    private let supportsLocalModelRuntime: Bool
     private let onContinue: (() -> Void)?
     private let onRetryModelLoad: (() -> Void)?
-    private let setupFacts = [
-        "100% on-device",
-        "Wi-Fi recommended",
-        "Works offline"
-    ]
 
     public init(
+        supportsLocalModelRuntime: Bool = Yemma4AppConfiguration.supportsLocalModelRuntime,
         onContinue: (() -> Void)? = nil,
         onRetryModelLoad: (() -> Void)? = nil
     ) {
+        self.supportsLocalModelRuntime = supportsLocalModelRuntime
         self.onContinue = onContinue
         self.onRetryModelLoad = onRetryModelLoad
     }
@@ -28,14 +51,14 @@ public struct OnboardingView: View {
             AppBackground()
 
             ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 22) {
-                    hero
-                    statusCard
+                VStack(alignment: .leading, spacing: 24) {
+                    header
+                    setupCard
                 }
-                .frame(maxWidth: 560)
+                .frame(maxWidth: 520)
                 .padding(.horizontal, 20)
-                .padding(.top, 36)
-                .padding(.bottom, 28)
+                .padding(.top, 28)
+                .padding(.bottom, 24)
                 .frame(maxWidth: .infinity)
             }
             .scrollBounceBehavior(.basedOnSize)
@@ -49,19 +72,8 @@ public struct OnboardingView: View {
         }
     }
 
-    private var hero: some View {
+    private var header: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 8) {
-                Circle()
-                    .fill(AppTheme.accent)
-                    .frame(width: 8, height: 8)
-
-                Text("Available now on iPhone")
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
-                    .foregroundStyle(AppTheme.accent)
-                    .textCase(.uppercase)
-            }
-
             HStack(spacing: 14) {
                 Image("BrandMark")
                     .resizable()
@@ -81,67 +93,69 @@ public struct OnboardingView: View {
                     .accessibilityLabel("Yemma 4")
             }
 
-            Text("No account. No cloud. Just chat.")
+            Text("Private chat, on your iPhone.")
                 .font(AppTheme.Typography.brandHero)
                 .foregroundStyle(AppTheme.textPrimary)
+                .fixedSize(horizontal: false, vertical: true)
 
-            Text("Yemma runs Gemma 4 entirely on your iPhone. Download the model and vision projector once, then every conversation stays on-device.")
+            Text("Download once. Then use Yemma on-device with no account.")
                 .font(.system(size: 16, weight: .medium))
                 .foregroundStyle(AppTheme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            ViewThatFits {
-                HStack(spacing: 10) {
-                    ForEach(setupFacts, id: \.self, content: factChip)
-                }
-
-                VStack(alignment: .leading, spacing: 10) {
-                    ForEach(setupFacts, id: \.self, content: factChip)
-                }
-            }
-
-            if !supportsLocalModelRuntime {
-                Text("You’re running in the iOS Simulator. Download is skipped here and chat uses mocked replies so you can test the UI. Use a physical iPhone for real on-device inference.")
-                    .font(AppTheme.Typography.utilityCaption)
-                    .foregroundStyle(AppTheme.textSecondary)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .brandCard(cornerRadius: AppTheme.Radius.small)
-            }
+            Label("Private, on-device, no account.", systemImage: "lock.fill")
+                .font(AppTheme.Typography.utilityCaption)
+                .foregroundStyle(AppTheme.textSecondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private var statusCard: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Setup")
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
-                .foregroundStyle(AppTheme.accent)
-                .textCase(.uppercase)
+    private var setupCard: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            stateBadge
 
-            HStack(alignment: .top, spacing: 16) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(statusTitle)
-                        .font(AppTheme.Typography.brandSection)
-                        .foregroundStyle(AppTheme.textPrimary)
+            Text(statusTitle)
+                .font(AppTheme.Typography.brandSection)
+                .foregroundStyle(AppTheme.textPrimary)
 
-                    Text(statusDescription)
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundStyle(AppTheme.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer()
+            Text(statusDescription)
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(AppTheme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
 
-                Text(progressString)
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
-                    .foregroundStyle(AppTheme.textSecondary)
-            }
+            stateDetail
 
-            if modelDownloader.isDownloading {
+            primaryAction
+        }
+        .padding(20)
+        .brandCard(cornerRadius: AppTheme.Radius.large)
+    }
+
+    private var stateBadge: some View {
+        Label(statusBadgeText, systemImage: setupState.systemImage)
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(stateBadgeForeground)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(stateBadgeBackground)
+            .clipShape(Capsule())
+    }
+
+    @ViewBuilder
+    private var stateDetail: some View {
+        switch setupState {
+        case .download:
+            infoRow(
+                systemImage: "iphone",
+                title: "One-time download on this iPhone",
+                trailing: ByteCountFormatter.string(fromByteCount: modelDownloader.estimatedDownloadBytes, countStyle: .file)
+            )
+        case .downloading:
+            VStack(alignment: .leading, spacing: 10) {
                 AnimatedProgressBar(progress: modelDownloader.downloadProgress)
 
-                HStack {
-                    Text("Downloading model")
+                HStack(alignment: .top, spacing: 12) {
+                    Label("Downloading model files", systemImage: "arrow.down.circle")
                     Spacer()
                     if let eta = modelDownloader.estimatedSecondsRemaining {
                         Text(Self.formatETA(eta))
@@ -149,36 +163,62 @@ public struct OnboardingView: View {
                 }
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(AppTheme.textSecondary)
-            } else if isPreparingModel {
+            }
+        case .preparing:
+            HStack(alignment: .top, spacing: 12) {
                 ProgressView()
                     .tint(AppTheme.accent)
 
-                HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
                     Text(llmService.modelLoadStage.statusText)
-                    Spacer()
-                    Text("Usually a few seconds")
+                    Text("Usually a few seconds.")
+                        .foregroundStyle(AppTheme.textTertiary)
                 }
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(AppTheme.textSecondary)
-            } else if let error = visibleErrorMessage {
+
+                Spacer(minLength: 0)
+            }
+            .font(.system(size: 13, weight: .medium))
+            .foregroundStyle(AppTheme.textSecondary)
+        case .ready:
+            infoRow(
+                systemImage: "checkmark.circle.fill",
+                title: "Saved on this iPhone",
+                trailing: "Ready offline"
+            )
+        case .failed:
+            if let error = visibleErrorMessage {
                 Text(error)
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(AppTheme.destructive)
             }
-            primaryAction
+        case .simulator:
+            infoRow(
+                systemImage: "desktopcomputer",
+                title: "Mock replies for UI testing",
+                trailing: "Simulator"
+            )
         }
-        .padding(20)
-        .brandCard(cornerRadius: AppTheme.Radius.large)
     }
 
-    private func factChip(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: 13, weight: .medium))
-            .foregroundStyle(AppTheme.textPrimary)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .background(AppTheme.chipFill)
-            .clipShape(Capsule())
+    private func infoRow(systemImage: String, title: String, trailing: String? = nil) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: systemImage)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(AppTheme.accent)
+                .frame(width: 18)
+
+            Text(title)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(AppTheme.textSecondary)
+
+            Spacer(minLength: 0)
+
+            if let trailing {
+                Text(trailing)
+                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(AppTheme.textTertiary)
+            }
+        }
     }
 
     @ViewBuilder
@@ -186,21 +226,21 @@ public struct OnboardingView: View {
         if let onContinue {
             actionButton(
                 title: supportsLocalModelRuntime ? "Open chat" : "Continue in simulator",
-                subtitle: supportsLocalModelRuntime ? "The model is ready on this iPhone" : "Mock replies are enabled for UI testing",
+                subtitle: supportsLocalModelRuntime ? "Model is ready on this iPhone" : "Mock replies for UI testing",
                 isEnabled: true,
                 action: onContinue
             )
         } else if hasModelPreparationError, let onRetryModelLoad {
             actionButton(
-                title: "Retry model load",
-                subtitle: "Run the local setup again",
+                title: "Try again",
+                subtitle: "Prepare the local model again",
                 isEnabled: true,
                 action: onRetryModelLoad
             )
         } else if isPreparingModel {
             actionButton(
-                title: "Preparing model...",
-                subtitle: "Finishing first-time setup",
+                title: "Preparing model",
+                subtitle: "This usually takes a few seconds",
                 isEnabled: false,
                 action: {}
             )
@@ -222,7 +262,17 @@ public struct OnboardingView: View {
         isEnabled: Bool,
         action: @escaping () -> Void
     ) -> some View {
-        Button(action: action) {
+        Button {
+            AppDiagnostics.shared.record(
+                "Onboarding primary action tapped",
+                category: "ui",
+                metadata: [
+                    "state": setupState.rawValue,
+                    "title": title
+                ]
+            )
+            action()
+        } label: {
             HStack(spacing: 14) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(title)
@@ -250,37 +300,54 @@ public struct OnboardingView: View {
         .opacity(isEnabled ? 1 : 0.5)
     }
 
-    private var progressString: String {
+    private var setupState: SetupState {
         if !supportsLocalModelRuntime {
-            return "Sim"
+            return .simulator
         }
 
-        if hasModelPreparationError {
-            return "Retry"
-        }
-
-        if isPreparingModel {
-            return "Prep"
+        if hasModelPreparationError || modelDownloader.error != nil {
+            return .failed
         }
 
         if modelDownloader.isDownloaded {
-            return "Ready"
-        }
-
-        return "\(Int(modelDownloader.downloadProgress * 100))%"
-    }
-
-    private var downloadActionTitle: String {
-        if !supportsLocalModelRuntime {
-            return "Unavailable in Simulator"
-        }
-
-        if isPreparingModel {
-            return "Preparing model..."
+            return llmService.isTextModelReady ? .ready : .preparing
         }
 
         if modelDownloader.isDownloading || isStartingDownload {
-            return "Downloading..."
+            return .downloading
+        }
+
+        return .download
+    }
+
+    private var statusBadgeText: String {
+        switch setupState {
+        case .simulator:
+            return "Simulator"
+        case .download:
+            return "Set Up"
+        case .downloading:
+            return "\(Int(modelDownloader.downloadProgress * 100))%"
+        case .preparing:
+            return "Preparing"
+        case .ready:
+            return "Ready"
+        case .failed:
+            return "Failed"
+        }
+    }
+
+    private var stateBadgeForeground: Color {
+        setupState == .failed ? AppTheme.destructive : AppTheme.accent
+    }
+
+    private var stateBadgeBackground: Color {
+        setupState == .failed ? AppTheme.destructive.opacity(0.14) : AppTheme.accentSoft
+    }
+
+    private var downloadActionTitle: String {
+        if modelDownloader.isDownloading || isStartingDownload {
+            return "Downloading model"
         }
 
         if modelDownloader.canResumeDownload {
@@ -295,15 +362,19 @@ public struct OnboardingView: View {
     }
 
     private var downloadActionSubtitle: String {
-        if isPreparingModel {
-            return "Finishing first-time setup"
+        if modelDownloader.isDownloading || isStartingDownload {
+            return "First-time setup in progress"
         }
 
         if modelDownloader.canResumeDownload {
-            return "Continue where it left off"
+            return "Continue setup on this iPhone"
         }
 
-        return "One-time setup, saved on this iPhone"
+        if modelDownloader.error != nil {
+            return "Start the one-time setup again"
+        }
+
+        return "One-time setup on this iPhone"
     }
 
     private var downloadActionEnabled: Bool {
@@ -314,43 +385,40 @@ public struct OnboardingView: View {
     }
 
     private var statusTitle: String {
-        if hasModelPreparationError {
-            return "Preparation failed"
-        }
-
-        if isPreparingModel {
-            return "Preparing model"
-        }
-
-        if modelDownloader.isDownloaded {
-            return "Ready to chat"
-        }
-
-        if !supportsLocalModelRuntime {
+        switch setupState {
+        case .simulator:
             return "Simulator mode"
+        case .download:
+            return "Download the local model"
+        case .downloading:
+            return "Downloading setup files"
+        case .preparing:
+            return "Preparing Yemma"
+        case .ready:
+            return "Ready to chat"
+        case .failed:
+            return "Setup needs attention"
         }
-
-        return "Download model"
     }
 
     private var statusDescription: String {
-        if hasModelPreparationError {
-            return "The model file is already downloaded, but the local runtime did not finish preparing."
+        switch setupState {
+        case .simulator:
+            return "Use mock replies here. Run on a physical iPhone for real on-device inference."
+        case .download:
+            return "First launch downloads Gemma 4 once, then it stays on this iPhone."
+        case .downloading:
+            return "Yemma is saving the model and vision files locally."
+        case .preparing:
+            return "The files are here. Yemma is finishing local setup in the background."
+        case .ready:
+            return "Everything is local and ready whenever you open Yemma."
+        case .failed:
+            if hasModelPreparationError {
+                return "The download finished, but local preparation did not."
+            }
+            return "The local model did not finish downloading."
         }
-
-        if isPreparingModel {
-            return "The files are already on this iPhone. Yemma is warming the text runtime in the background so the chat shell can stay responsive."
-        }
-
-        if modelDownloader.isDownloaded {
-            return "Setup is done. The model is local and ready whenever you open Yemma."
-        }
-
-        if !supportsLocalModelRuntime {
-            return "Use the simulator to check the UI flow. Run on a physical iPhone for real on-device inference."
-        }
-
-        return "First launch downloads Gemma 4 and its vision projector once, then both stay on this iPhone."
     }
 
     private var isModelDownloadedNotReady: Bool {
@@ -449,9 +517,122 @@ private struct AnimatedProgressBar: View {
 }
 
 #if DEBUG
-#Preview("Onboarding") {
-    OnboardingView()
-        .environment(LLMService())
-        .environment(ModelDownloader())
+private extension ModelDownloader {
+    static func preview(
+        isDownloading: Bool = false,
+        isDownloaded: Bool = false,
+        canResumeDownload: Bool = false,
+        progress: Double = 0,
+        estimatedSecondsRemaining: Double? = nil,
+        error: String? = nil
+    ) -> ModelDownloader {
+        let downloader = ModelDownloader()
+        downloader.isDownloading = isDownloading
+        downloader.isDownloaded = isDownloaded
+        downloader.canResumeDownload = canResumeDownload
+        downloader.downloadProgress = progress
+        downloader.estimatedSecondsRemaining = estimatedSecondsRemaining
+        downloader.error = error
+
+        if isDownloaded {
+            downloader.modelPath = "/tmp/gemma-4-e4b-it-q4km.gguf"
+            downloader.mmprojPath = "/tmp/gemma-4-e4b-it-mmproj-f16.gguf"
+        }
+
+        return downloader
+    }
+}
+
+private extension LLMService {
+    static func onboardingPreview(
+        isModelLoaded: Bool = false,
+        isModelLoading: Bool = false,
+        stage: ModelLoadStage = .idle,
+        lastError: String? = nil
+    ) -> LLMService {
+        let service = LLMService()
+        service.isModelLoaded = isModelLoaded
+        service.isModelLoading = isModelLoading
+        service.modelLoadStage = stage
+        service.lastError = lastError
+        return service
+    }
+}
+
+private struct OnboardingPreviewScreen: View {
+    let supportsLocalModelRuntime: Bool
+    let downloader: ModelDownloader
+    let llmService: LLMService
+
+    var body: some View {
+        OnboardingView(
+            supportsLocalModelRuntime: supportsLocalModelRuntime,
+            onContinue: downloader.isDownloaded || !supportsLocalModelRuntime ? {} : nil,
+            onRetryModelLoad: downloader.isDownloaded ? {} : nil
+        )
+        .environment(llmService)
+        .environment(downloader)
+    }
+}
+
+#Preview("Setup") {
+    OnboardingPreviewScreen(
+        supportsLocalModelRuntime: true,
+        downloader: .preview(),
+        llmService: .onboardingPreview()
+    )
+}
+
+#Preview("Downloading") {
+    OnboardingPreviewScreen(
+        supportsLocalModelRuntime: true,
+        downloader: .preview(
+            isDownloading: true,
+            progress: 0.42,
+            estimatedSecondsRemaining: 840
+        ),
+        llmService: .onboardingPreview()
+    )
+}
+
+#Preview("Preparing") {
+    OnboardingPreviewScreen(
+        supportsLocalModelRuntime: true,
+        downloader: .preview(isDownloaded: true),
+        llmService: .onboardingPreview(
+            isModelLoading: true,
+            stage: .loadingModel
+        )
+    )
+}
+
+#Preview("Ready") {
+    OnboardingPreviewScreen(
+        supportsLocalModelRuntime: true,
+        downloader: .preview(isDownloaded: true),
+        llmService: .onboardingPreview(
+            isModelLoaded: true,
+            stage: .ready
+        )
+    )
+}
+
+#Preview("Failed") {
+    OnboardingPreviewScreen(
+        supportsLocalModelRuntime: true,
+        downloader: .preview(isDownloaded: true),
+        llmService: .onboardingPreview(
+            stage: .failed,
+            lastError: "The local runtime ran out of memory while preparing the model."
+        )
+    )
+}
+
+#Preview("Simulator") {
+    OnboardingPreviewScreen(
+        supportsLocalModelRuntime: false,
+        downloader: .preview(),
+        llmService: .onboardingPreview()
+    )
 }
 #endif
