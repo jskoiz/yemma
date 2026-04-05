@@ -28,7 +28,6 @@
 		D3000005 /* StreamingRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3000006 /* StreamingRenderer.swift */; };
 		D3000007 /* ConversationBrowserSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3000008 /* ConversationBrowserSheet.swift */; };
 		D3000009 /* EmptyStateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D300000A /* EmptyStateView.swift */; };
-		D300000B /* ComposerBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = D300000C /* ComposerBar.swift */; };
 		D300000D /* ChatSessionController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D300000E /* ChatSessionController.swift */; };
 
 /* End PBXBuildFile section */
@@ -55,7 +54,6 @@
 		D3000006 /* StreamingRenderer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StreamingRenderer.swift; sourceTree = "<group>"; };
 		D3000008 /* ConversationBrowserSheet.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ConversationBrowserSheet.swift; sourceTree = "<group>"; };
 		D300000A /* EmptyStateView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = EmptyStateView.swift; sourceTree = "<group>"; };
-		D300000C /* ComposerBar.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ComposerBar.swift; sourceTree = "<group>"; };
 		D300000E /* ChatSessionController.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ChatSessionController.swift; sourceTree = "<group>"; };
 
 /* End PBXFileReference section */
@@ -79,7 +77,6 @@
 			children = (
 				A2000002 /* AdvancedSettingsView.swift */,
 				FE484C3E95FF6F044B7B7BC4 /* ChatView.swift */,
-				D300000C /* ComposerBar.swift */,
 				D3000008 /* ConversationBrowserSheet.swift */,
 				D300000A /* EmptyStateView.swift */,
 				A1000002 /* RichMessageText.swift */,
@@ -246,7 +243,6 @@
 				B3034772627DBF9FD8624142 /* SettingsView.swift in Sources */,
 				D3000005 /* StreamingRenderer.swift in Sources */,
 				D300000D /* ChatSessionController.swift in Sources */,
-				D300000B /* ComposerBar.swift in Sources */,
 				D3000007 /* ConversationBrowserSheet.swift in Sources */,
 				D3000009 /* EmptyStateView.swift in Sources */,
 			);

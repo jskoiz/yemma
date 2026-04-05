@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import CryptoKit
 
 public struct LocalModelResources: Sendable {
     public let modelPath: String
@@ -182,6 +183,7 @@ public final class ModelDownloader {
                     lastError = error
                 }
             }
+            ModelIntegrityCache.clearCachedDigest(for: localFileURL(for: asset))
         }
 
         activeAssetKind = nil
@@ -430,6 +432,23 @@ public final class ModelDownloader {
         canResumeDownload = false
         downloadProgress = 1
         resetETA()
+        cacheIntegrityMetadataForDownloadedAssets()
+    }
+
+    private func cacheIntegrityMetadataForDownloadedAssets() {
+        let assetsToCache = Self.downloadAssets.map { asset in
+            (asset, localFileURL(for: asset))
+        }
+
+        Task.detached(priority: .utility) {
+            for (asset, fileURL) in assetsToCache {
+                try? ModelIntegrityCache.cacheDigestIfNeeded(
+                    for: fileURL,
+                    expectedBytes: asset.expectedBytes,
+                    assetName: asset.kind.rawValue
+                )
+            }
+        }
     }
 
     private func handleBackgroundDownloadCompletion(
@@ -537,6 +556,7 @@ private enum ModelDownloaderIO {
                     "actual": size.int64Value
                 ]
             )
+            ModelIntegrityCache.clearCachedDigest(for: fileURL)
             clearInvalidFile(fileManager: fileManager, fileURL: fileURL)
             return ValidationResult(isDownloaded: false, localPath: nil)
         }
@@ -555,6 +575,7 @@ private enum ModelDownloaderIO {
                 category: "download",
                 metadata: ["path": fileURL.lastPathComponent]
             )
+            ModelIntegrityCache.clearCachedDigest(for: fileURL)
             clearInvalidFile(fileManager: fileManager, fileURL: fileURL)
             return ValidationResult(isDownloaded: false, localPath: nil)
         }
@@ -563,6 +584,7 @@ private enum ModelDownloaderIO {
     }
 
     static func clearInvalidFile(fileManager: FileManager, fileURL: URL) {
+        ModelIntegrityCache.clearCachedDigest(for: fileURL)
         if fileManager.fileExists(atPath: fileURL.path) {
             try? fileManager.removeItem(at: fileURL)
         }
@@ -574,6 +596,150 @@ private enum ModelDownloaderIO {
         }
 
         try fileManager.moveItem(at: tempURL, to: destinationURL)
+    }
+}
+
+struct ModelIntegrityCacheEntry: Codable, Sendable {
+    let fileSizeBytes: Int64
+    let modifiedAt: TimeInterval
+    let sha256: String
+}
+
+enum ModelIntegrityCache {
+    private static let storageKey = "com.avmillabs.yemma4.integrity-cache"
+    private static let lock = NSLock()
+
+    static func cachedSHA256(for fileURL: URL, fileManager: FileManager = .default) -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+
+        guard let fileMetadata = currentFileMetadata(for: fileURL, fileManager: fileManager),
+              let cache = readCache() else {
+            return nil
+        }
+
+        guard let entry = cacheEntry(for: fileURL, cache: cache),
+              entry.fileSizeBytes == fileMetadata.fileSizeBytes,
+              entry.modifiedAt == fileMetadata.modifiedAt else {
+            return nil
+        }
+
+        return entry.sha256
+    }
+
+    static func clearCachedDigest(for fileURL: URL) {
+        lock.lock()
+        defer { lock.unlock() }
+
+        var cache = readCache() ?? [:]
+        let didRemovePrimary = cache.removeValue(forKey: cacheKey(for: fileURL)) != nil
+        let didRemoveLegacy = cache.removeValue(forKey: fileURL.path) != nil
+        guard didRemovePrimary || didRemoveLegacy else { return }
+        writeCache(cache)
+    }
+
+    static func cacheDigestIfNeeded(
+        for fileURL: URL,
+        expectedBytes: Int64? = nil,
+        assetName: String
+    ) throws {
+        guard cachedSHA256(for: fileURL) == nil else { return }
+
+        let fileManager = FileManager.default
+        guard let fileMetadata = currentFileMetadata(for: fileURL, fileManager: fileManager) else {
+            return
+        }
+
+        if let expectedBytes, fileMetadata.fileSizeBytes != expectedBytes {
+            return
+        }
+
+        let sha256 = try computeSHA256(for: fileURL)
+
+        lock.lock()
+        defer { lock.unlock() }
+
+        var cache = readCache() ?? [:]
+        let entry = ModelIntegrityCacheEntry(
+            fileSizeBytes: fileMetadata.fileSizeBytes,
+            modifiedAt: fileMetadata.modifiedAt,
+            sha256: sha256
+        )
+        let didWriteCache: Bool
+        if cacheEntry(for: fileURL, cache: cache) == nil {
+            cache.removeValue(forKey: fileURL.path)
+            cache[cacheKey(for: fileURL)] = entry
+            writeCache(cache)
+            didWriteCache = true
+        } else {
+            didWriteCache = false
+        }
+
+        guard didWriteCache else { return }
+
+        AppDiagnostics.shared.record(
+            "Model asset integrity cached",
+            category: "download",
+            metadata: [
+                "asset": assetName,
+                "fileSizeMB": Int(fileMetadata.fileSizeBytes / (1024 * 1024)),
+                "sha256": sha256
+            ]
+        )
+    }
+
+    private static func computeSHA256(for fileURL: URL) throws -> String {
+        let handle = try FileHandle(forReadingFrom: fileURL)
+        defer { try? handle.close() }
+
+        var hasher = SHA256()
+        while autoreleasepool(invoking: {
+            let chunk = handle.readData(ofLength: 8 * 1024 * 1024)
+            guard !chunk.isEmpty else { return false }
+            hasher.update(data: chunk)
+            return true
+        }) {}
+
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
+    private static func cacheKey(for fileURL: URL) -> String {
+        fileURL.lastPathComponent
+    }
+
+    private static func cacheEntry(
+        for fileURL: URL,
+        cache: [String: ModelIntegrityCacheEntry]
+    ) -> ModelIntegrityCacheEntry? {
+        cache[cacheKey(for: fileURL)] ?? cache[fileURL.path]
+    }
+
+    private static func currentFileMetadata(
+        for fileURL: URL,
+        fileManager: FileManager
+    ) -> (fileSizeBytes: Int64, modifiedAt: TimeInterval)? {
+        guard
+            let fileAttributes = try? fileManager.attributesOfItem(atPath: fileURL.path),
+            let fileSize = fileAttributes[.size] as? NSNumber,
+            let modifiedAt = fileAttributes[.modificationDate] as? Date
+        else {
+            return nil
+        }
+
+        return (fileSize.int64Value, modifiedAt.timeIntervalSince1970)
+    }
+
+    private static func readCache() -> [String: ModelIntegrityCacheEntry]? {
+        guard let data = UserDefaults.standard.data(forKey: storageKey) else {
+            return nil
+        }
+
+        return try? JSONDecoder().decode([String: ModelIntegrityCacheEntry].self, from: data)
+    }
+
+    private static func writeCache(_ cache: [String: ModelIntegrityCacheEntry]) {
+        guard let data = try? JSONEncoder().encode(cache) else { return }
+        UserDefaults.standard.set(data, forKey: storageKey)
     }
 }
 
