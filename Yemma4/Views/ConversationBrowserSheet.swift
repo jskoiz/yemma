@@ -217,6 +217,7 @@ struct ConversationBrowserSheet: View {
 private let browserPreviewCurrentID = UUID()
 private let browserPreviewDraftID = UUID()
 
+@MainActor
 private func previewBrowserStore() -> ConversationStore {
     ConversationStore.preview(
         currentConversationID: browserPreviewCurrentID,
@@ -282,6 +283,5 @@ private func previewBrowserStore() -> ConversationStore {
     )
     .environment(previewBrowserStore())
     .preferredColorScheme(.dark)
-    .previewDevice("iPhone SE (3rd generation)")
 }
 #endif

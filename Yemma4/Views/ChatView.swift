@@ -709,7 +709,7 @@ public struct ChatView: View {
 
     private func canEditAndResend(_ message: ChatMessage) -> Bool {
         guard !llmService.isGenerating, message.user.isCurrentUser else { return false }
-        guard let lastUserMessageIndex else { return false }
+        guard let lastUserMessageIndex = lastUserMessageIndex() else { return false }
         return message.id == messages[lastUserMessageIndex].id
     }
 
@@ -924,7 +924,7 @@ public struct ChatView: View {
 
     private func refineAssistantResponse(_ message: ChatMessage, refinement: AssistantRefinement) async {
         guard !llmService.isGenerating, !message.user.isCurrentUser else { return }
-        guard let latestAssistantMessageIndex else { return }
+        guard let latestAssistantMessageIndex = latestAssistantMessageIndex() else { return }
         guard message.id == messages[latestAssistantMessageIndex].id else { return }
         AppHaptics.selection()
 
@@ -1588,6 +1588,7 @@ private extension ChatMessage {
 #if DEBUG
 private let previewConversationID = UUID()
 
+@MainActor
 private func previewChatStore(
     currentConversationID: UUID = previewConversationID,
     title: String,
@@ -1682,6 +1683,5 @@ private extension LLMService {
             )
         )
         .preferredColorScheme(.dark)
-        .previewDevice("iPhone SE (3rd generation)")
 }
 #endif

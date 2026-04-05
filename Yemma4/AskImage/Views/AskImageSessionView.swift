@@ -238,7 +238,7 @@ struct AskImageSessionView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     .overlay(
                         RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .stroke(AppTheme.messageBubbleBorder, lineWidth: 1)
+                            .stroke(AppTheme.separator, lineWidth: 1)
                     )
             } else {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -256,7 +256,7 @@ struct AskImageSessionView: View {
                     }
                     .overlay(
                         RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .stroke(AppTheme.messageBubbleBorder, lineWidth: 1)
+                            .stroke(AppTheme.separator, lineWidth: 1)
                     )
             }
         }
@@ -304,7 +304,7 @@ struct AskImageSessionView: View {
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(AppTheme.messageBubbleBorder, lineWidth: 1)
+                    .stroke(AppTheme.separator, lineWidth: 1)
             )
             .contextMenu {
                 if message.role == .assistant && !message.isStreaming && !message.text.isEmpty {
@@ -470,11 +470,11 @@ struct AskImageErrorBanner: View {
             }
         }
         .padding(12)
-        .background(AppTheme.card)
+        .background(AppTheme.brandCard)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(AppTheme.cardBorder, lineWidth: 1)
+                .stroke(AppTheme.brandCardBorder, lineWidth: 1)
         )
         .padding(.horizontal, 16)
     }

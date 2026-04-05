@@ -33,6 +33,62 @@ final class LiteRTLMRuntime: AskImageRuntime, @unchecked Sendable {
     /// Whether a cancel has been requested for the current generation.
     @ObservationIgnored private var isCancelled = false
 
+    private func withStateLock<T>(_ operation: () -> T) -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return operation()
+    }
+
+    private func markPrepared() {
+        withStateLock {
+            isModelReady = true
+            isCancelled = false
+            generationFence = 0
+        }
+    }
+
+    private func markUnloaded() {
+        withStateLock {
+            isModelReady = false
+            isCancelled = true
+            generationFence &+= 1
+        }
+    }
+
+    private func beginReset() {
+        withStateLock {
+            isCancelled = true
+            generationFence &+= 1
+        }
+    }
+
+    private func finishReset() {
+        withStateLock {
+            isCancelled = false
+        }
+    }
+
+    private func beginGeneration() -> UInt64 {
+        withStateLock {
+            isCancelled = false
+            generationFence &+= 1
+            return generationFence
+        }
+    }
+
+    private func generationState(for fence: UInt64) -> (fenceMatch: Bool, cancelled: Bool) {
+        withStateLock {
+            (generationFence == fence, isCancelled)
+        }
+    }
+
+    private func markCancelled() {
+        withStateLock {
+            isCancelled = true
+            generationFence &+= 1
+        }
+    }
+
     // MARK: - Engine lifecycle
 
     func prepareModel(at path: String) async throws {
@@ -47,19 +103,19 @@ final class LiteRTLMRuntime: AskImageRuntime, @unchecked Sendable {
         // expensive. Run on a utility thread to keep the main actor free.
         let bridge = self.bridge
         try await Task.detached(priority: .utility) {
-            var error: NSError?
-            let ok = bridge.createEngine(withModelPath: path, error: &error)
-            if !ok {
-                let message = error?.localizedDescription ?? "Unknown engine error"
+            do {
+                try bridge.createEngine(withModelPath: path)
+            } catch {
+                let message = (error as NSError).localizedDescription
                 throw AskImageRuntimeError.generationFailed(underlying: message)
             }
         }.value
 
         // Create the initial conversation.
-        var convError: NSError?
-        let convOk = bridge.createConversation(&convError)
-        if !convOk {
-            let message = convError?.localizedDescription ?? "Unknown conversation error"
+        do {
+            try bridge.createConversation()
+        } catch {
+            let message = (error as NSError).localizedDescription
             AppDiagnostics.shared.record(
                 "ask_image: conversation create failed",
                 category: "ask_image",
@@ -68,11 +124,7 @@ final class LiteRTLMRuntime: AskImageRuntime, @unchecked Sendable {
             throw AskImageRuntimeError.generationFailed(underlying: message)
         }
 
-        lock.lock()
-        isModelReady = true
-        isCancelled = false
-        generationFence = 0
-        lock.unlock()
+        markPrepared()
 
         let elapsed = CFAbsoluteTimeGetCurrent() - startTime
         AppDiagnostics.shared.record(
@@ -83,11 +135,7 @@ final class LiteRTLMRuntime: AskImageRuntime, @unchecked Sendable {
     }
 
     func unloadModel() async {
-        lock.lock()
-        isModelReady = false
-        isCancelled = true
-        generationFence &+= 1
-        lock.unlock()
+        markUnloaded()
 
         bridge.destroyEngine()
 
@@ -100,44 +148,34 @@ final class LiteRTLMRuntime: AskImageRuntime, @unchecked Sendable {
     // MARK: - Conversation management
 
     func resetConversation() {
-        lock.lock()
-        isCancelled = true
-        generationFence &+= 1
-        lock.unlock()
+        beginReset()
 
         bridge.resetConversation()
 
         // Re-create a fresh conversation if the engine is still loaded.
         if bridge.isEngineReady {
-            var error: NSError?
-            let ok = bridge.createConversation(&error)
-            if ok {
+            do {
+                try bridge.createConversation()
                 AppDiagnostics.shared.record(
                     "ask_image: conversation reset",
                     category: "ask_image"
                 )
-            } else {
+            } catch {
                 AppDiagnostics.shared.record(
                     "ask_image: conversation reset failed",
                     category: "ask_image",
-                    metadata: ["error": error?.localizedDescription ?? "unknown"]
+                    metadata: ["error": (error as NSError).localizedDescription]
                 )
             }
         }
 
-        lock.lock()
-        isCancelled = false
-        lock.unlock()
+        finishReset()
     }
 
     // MARK: - Generation
 
     func generate(prompt: String, imagePath: String) -> AsyncStream<String> {
-        lock.lock()
-        isCancelled = false
-        generationFence &+= 1
-        let currentFence = generationFence
-        lock.unlock()
+        let currentFence = beginGeneration()
 
         let requestStart = CFAbsoluteTimeGetCurrent()
         AppDiagnostics.shared.record(
@@ -163,10 +201,7 @@ final class LiteRTLMRuntime: AskImageRuntime, @unchecked Sendable {
 
                 // Fence check: if a newer generation or cancel has been
                 // initiated, stop delivering chunks from this stream.
-                self.lock.lock()
-                let fenceMatch = (self.generationFence == currentFence)
-                let cancelled = self.isCancelled
-                self.lock.unlock()
+                let (fenceMatch, cancelled) = self.generationState(for: currentFence)
 
                 if !fenceMatch || cancelled {
                     continuation.finish()
@@ -225,10 +260,7 @@ final class LiteRTLMRuntime: AskImageRuntime, @unchecked Sendable {
     // MARK: - Cancellation
 
     func cancelGeneration() {
-        lock.lock()
-        isCancelled = true
-        generationFence &+= 1
-        lock.unlock()
+        markCancelled()
 
         bridge.cancelGeneration()
 

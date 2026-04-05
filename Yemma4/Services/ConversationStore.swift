@@ -118,6 +118,18 @@ private struct PersistedMessage: Codable, Sendable {
     let text: String
     let attachments: [Attachment]
 
+    private var placeholderDraftMessage: DraftMessage {
+        DraftMessage(
+            id: id,
+            text: text,
+            medias: [],
+            giphyMedia: nil,
+            recording: nil,
+            replyMessage: nil,
+            createdAt: createdAt
+        )
+    }
+
     init(message: ChatMessage) {
         id = message.id
         user = message.user
@@ -151,7 +163,7 @@ private struct PersistedMessage: Codable, Sendable {
         case .read:
             .read
         case .error:
-            .error
+            .error(placeholderDraftMessage)
         case nil:
             nil
         }
@@ -512,9 +524,9 @@ final class ConversationStore {
     }
 
     private static func attachmentURLs(in conversation: PersistedConversation) -> [URL] {
-        let messageAttachments = conversation.messages.flatMap(\.attachments).map(\.url)
-        let draftAttachments = conversation.draftAttachments.map(\.url)
-        return messageAttachments + draftAttachments
+        let messageAttachments = conversation.messages.flatMap(\.attachments).flatMap { [$0.thumbnail, $0.full] }
+        let draftAttachments = conversation.draftAttachments.flatMap { [$0.thumbnail, $0.full] }
+        return Array(Set(messageAttachments + draftAttachments))
     }
 
     private static func suggestedTitle(for messages: [ChatMessage]) -> String {

@@ -2,6 +2,7 @@ import Foundation
 
 /// Protocol for managing LiteRT-LM model downloads and local state.
 /// Phase 1B will provide the real implementation.
+@MainActor
 protocol AskImageModelStore: AnyObject {
     /// All models in the catalog.
     var availableModels: [LiteRTModelDescriptor] { get }
