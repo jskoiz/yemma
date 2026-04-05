@@ -138,10 +138,7 @@ final class ChatSessionController {
         history: [PromptMessageInput],
         assistantID: String
     ) async {
-        var assistantText = ""
-        // Throttle UI updates to ~20Hz to avoid O(n^2) sanitization + markdown re-parsing
-        let updateInterval: Double = 0.05
-        var lastUpdateTime = CFAbsoluteTimeGetCurrent()
+        var streamingPolicy = StreamingUpdatePolicy()
 
         streamingMessageID = assistantID
 
@@ -153,25 +150,19 @@ final class ChatSessionController {
         }
 
         for await token in llmService.generate(prompt: prompt, history: history) {
-            assistantText.append(token)
+            let update = streamingPolicy.append(token)
 
-            if StreamingRenderer.shouldStopStreaming(tailOf: assistantText) {
-                // Final UI update before stopping
-                let visibleText = StreamingRenderer.sanitize(assistantText)
+            if let visibleText = update.visibleText {
                 updateMessageText(id: assistantID, text: visibleText)
+            }
+
+            if update.shouldStop {
                 await llmService.stopGeneration()
                 break
             }
-
-            let now = CFAbsoluteTimeGetCurrent()
-            if now - lastUpdateTime >= updateInterval {
-                let visibleText = StreamingRenderer.sanitize(assistantText)
-                updateMessageText(id: assistantID, text: visibleText)
-                lastUpdateTime = now
-            }
         }
 
-        let finalText = StreamingRenderer.finalize(assistantText)
+        let finalText = streamingPolicy.finalize()
         finalizeAssistantMessage(id: assistantID, text: finalText)
 
         if let lastError = llmService.lastError {

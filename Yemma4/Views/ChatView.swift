@@ -30,38 +30,14 @@ public struct ChatView: View {
     @State private var streamingMessageID: String?
     /// Monotonic counter bumped each time we flush visible text — drives auto-scroll.
     @State private var streamFlushTick: UInt64 = 0
-    /// Whether the user was scrolled to the bottom before the last content change.
+    /// Whether the transcript is currently close enough to the bottom to auto-scroll.
     @State private var isPinnedToBottom = true
+    @State private var scrollViewportHeight: CGFloat = 0
 
-    private let leakedControlMarkers = [
-        "<start_of_turn>",
-        "<end_of_turn>",
-        "<|start_of_turn|>",
-        "<|end_of_turn|>",
-        "<|turn>",
-        "<turn|>",
-        "<|channel>",
-        "<channel|>",
-        "<|think|>",
-        "<|tool>",
-        "<tool|>",
-        "<|tool_call>",
-        "<tool_call|>",
-        "<|tool_response>",
-        "<tool_response|>",
-        "<eos>",
-        "<bos>"
-    ]
-
-    private let responseBoundaryMarkers = [
-        "<end_of_turn>",
-        "<|end_of_turn|>",
-        "<turn|>",
-        "<start_of_turn>user",
-        "<|start_of_turn|>user",
-        "<|turn>user",
-        "<|turn>system"
-    ]
+    private let bottomAnchorID = "conversation-bottom-anchor"
+    private let scrollCoordinateSpaceName = "conversation-scroll"
+    private let pinnedThreshold: CGFloat = 48
+    private let releasePinnedThreshold: CGFloat = 120
 
     private let quickPrompts: [(title: String, subtitle: String, prompt: String)] = [
         ("Design", "a workout routine", "Design a simple workout routine I can do at home."),
@@ -217,42 +193,145 @@ public struct ChatView: View {
     // MARK: - Conversation content with auto-scroll
 
     private var conversationContent: some View {
-        ScrollViewReader { proxy in
-            ScrollView(showsIndicators: false) {
-                LazyVStack(spacing: messages.isEmpty ? 26 : 6) {
-                    if messages.isEmpty {
-                        emptyState
-                    } else {
-                        ForEach(Array(messages.enumerated()), id: \.element.id) { index, message in
-                            messageRow(message, index: index)
-                                .id(message.id)
+        GeometryReader { geometry in
+            ScrollViewReader { proxy in
+                ZStack(alignment: .bottomTrailing) {
+                    ScrollView(showsIndicators: false) {
+                        LazyVStack(spacing: 0) {
+                            if messages.isEmpty {
+                                emptyState
+                            } else {
+                                ForEach(Array(messages.enumerated()), id: \.element.id) { index, message in
+                                    messageRow(message, index: index)
+                                        .padding(.top, messageTopSpacing(at: index))
+                                        .id(message.id)
+                                }
+                            }
+
+                            Color.clear
+                                .frame(height: 1)
+                                .id(bottomAnchorID)
+                                .background(
+                                    GeometryReader { bottomProxy in
+                                        Color.clear.preference(
+                                            key: ConversationBottomOffsetPreferenceKey.self,
+                                            value: bottomProxy.frame(in: .named(scrollCoordinateSpaceName)).maxY
+                                        )
+                                    }
+                                )
                         }
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 18)
+                        .frame(maxWidth: .infinity, minHeight: 0)
+                    }
+                    .coordinateSpace(name: scrollCoordinateSpaceName)
+                    .scrollDismissesKeyboard(.interactively)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        isComposerFocused = false
+                    }
+                    .defaultScrollAnchor(.bottom)
+                    .onAppear {
+                        scrollViewportHeight = geometry.size.height
+                    }
+                    .onChange(of: geometry.size.height) { _, newHeight in
+                        scrollViewportHeight = newHeight
+                    }
+                    .onPreferenceChange(ConversationBottomOffsetPreferenceKey.self) { bottomMaxY in
+                        updatePinnedState(bottomMaxY: bottomMaxY)
+                    }
+                    .onChange(of: messages.count) { _, _ in
+                        scrollToBottomIfPinned(proxy: proxy, animated: true)
+                    }
+                    .onChange(of: streamFlushTick) { _, _ in
+                        scrollToBottomIfPinned(proxy: proxy, animated: false)
+                    }
+
+                    if shouldShowJumpToLatest {
+                        jumpToLatestButton(proxy: proxy)
+                            .padding(.trailing, 16)
+                            .padding(.bottom, 12)
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.bottom, 18)
-                .frame(maxWidth: .infinity, minHeight: 0)
-            }
-            .scrollDismissesKeyboard(.interactively)
-            .contentShape(Rectangle())
-            .onTapGesture {
-                isComposerFocused = false
-            }
-            .defaultScrollAnchor(.bottom)
-            .onChange(of: messages.count) { _, _ in
-                scrollToBottomIfPinned(proxy: proxy)
-            }
-            .onChange(of: streamFlushTick) { _, _ in
-                scrollToBottomIfPinned(proxy: proxy)
             }
         }
     }
 
-    private func scrollToBottomIfPinned(proxy: ScrollViewProxy) {
-        guard isPinnedToBottom, let lastID = messages.last?.id else { return }
-        withAnimation(.easeOut(duration: 0.15)) {
-            proxy.scrollTo(lastID, anchor: .bottom)
+    private var shouldShowJumpToLatest: Bool {
+        !messages.isEmpty && !isPinnedToBottom
+    }
+
+    private func messageTopSpacing(at index: Int) -> CGFloat {
+        guard index > 0 else { return 0 }
+        let previous = messages[index - 1]
+        let current = messages[index]
+        return previous.user.isCurrentUser == current.user.isCurrentUser ? 4 : 14
+    }
+
+    private func scrollToBottomIfPinned(proxy: ScrollViewProxy, animated: Bool) {
+        guard isPinnedToBottom else { return }
+        scrollToBottom(proxy: proxy, animated: animated)
+    }
+
+    private func scrollToBottom(proxy: ScrollViewProxy, animated: Bool) {
+        let action = {
+            proxy.scrollTo(bottomAnchorID, anchor: .bottom)
         }
+
+        if animated {
+            withAnimation(.easeOut(duration: 0.18)) {
+                action()
+            }
+        } else {
+            var transaction = Transaction(animation: nil)
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                action()
+            }
+        }
+    }
+
+    private func updatePinnedState(bottomMaxY: CGFloat) {
+        guard scrollViewportHeight > 0 else { return }
+
+        let distanceFromBottom = max(bottomMaxY - scrollViewportHeight, 0)
+        let nextPinnedState =
+            isPinnedToBottom
+            ? distanceFromBottom <= releasePinnedThreshold
+            : distanceFromBottom <= pinnedThreshold
+
+        guard nextPinnedState != isPinnedToBottom else { return }
+        isPinnedToBottom = nextPinnedState
+
+        guard llmService.isGenerating else { return }
+        AppDiagnostics.shared.record(
+            nextPinnedState ? "Transcript auto-scroll resumed" : "Transcript auto-scroll paused",
+            category: "ui",
+            metadata: [
+                "distanceFromBottom": Int(distanceFromBottom),
+                "messages": messages.count
+            ]
+        )
+    }
+
+    private func jumpToLatestButton(proxy: ScrollViewProxy) -> some View {
+        Button {
+            isPinnedToBottom = true
+            AppDiagnostics.shared.record(
+                "Transcript jumped to latest",
+                category: "ui",
+                metadata: ["messages": messages.count]
+            )
+            scrollToBottom(proxy: proxy, animated: true)
+        } label: {
+            Label("Latest", systemImage: "arrow.down.circle.fill")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(AppTheme.textPrimary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+        }
+        .buttonStyle(.plain)
+        .brandCard(cornerRadius: AppTheme.Radius.small)
     }
 
     private var emptyState: some View {
@@ -286,7 +365,6 @@ public struct ChatView: View {
                         .font(AppTheme.Typography.chatLabel)
                         .foregroundStyle(AppTheme.assistantLabel)
                         .padding(.horizontal, 2)
-                        .padding(.top, index == 0 ? 0 : 8)
                 }
 
                 messageBubble(message)
@@ -821,8 +899,7 @@ public struct ChatView: View {
         history: [PromptMessageInput],
         assistantID: String
     ) async {
-        var rawBuffer = ""
-        var lastFlush = ContinuousClock.now
+        var streamingPolicy = StreamingUpdatePolicy()
 
         defer {
             Task { @MainActor in
@@ -832,31 +909,23 @@ public struct ChatView: View {
         }
 
         for await token in llmService.generate(prompt: prompt, history: history) {
-            rawBuffer.append(token)
-            let shouldStop = shouldStopStreaming(for: rawBuffer)
+            let update = streamingPolicy.append(token)
 
-            let now = ContinuousClock.now
-            let elapsed = now - lastFlush
-            let atWordBoundary = token.last?.isWhitespace == true || token.last == "\n"
-
-            // Flush every ~50ms or at word boundaries (after initial 20ms warmup)
-            if elapsed >= .milliseconds(50) || (atWordBoundary && elapsed >= .milliseconds(20)) {
-                let visibleText = sanitizedAssistantText(rawBuffer)
+            if let visibleText = update.visibleText {
                 await MainActor.run {
                     updateMessageText(id: assistantID, text: visibleText)
                     streamFlushTick &+= 1
                 }
-                lastFlush = now
             }
 
-            if shouldStop {
+            if update.shouldStop {
                 await llmService.stopGeneration()
                 break
             }
         }
 
         // Final flush — applies full sanitization and switches to markdown rendering
-        let finalText = finalizedAssistantText(rawBuffer)
+        let finalText = streamingPolicy.finalize()
         await MainActor.run {
             finalizeAssistantMessage(id: assistantID, text: finalText)
             streamFlushTick &+= 1
@@ -889,131 +958,6 @@ public struct ChatView: View {
         }
 
         messages[index].text = text
-    }
-
-    // MARK: - Text sanitization
-
-    private func shouldStopStreaming(for text: String) -> Bool {
-        responseBoundaryMarkers.contains { text.contains($0) }
-    }
-
-    private func sanitizedAssistantText(_ text: String) -> String {
-        var cleaned = stripLeadingControlPreamble(from: text)
-        cleaned = stripThinkingBlocks(from: cleaned)
-
-        if let firstMarkerRange = firstBoundaryMarkerRange(in: cleaned) {
-            cleaned = String(cleaned[..<firstMarkerRange.lowerBound])
-        }
-
-        cleaned = cleaned
-            .replacingOccurrences(of: "<start_of_turn>", with: "")
-            .replacingOccurrences(of: "<end_of_turn>", with: "")
-            .replacingOccurrences(of: "<|start_of_turn|>", with: "")
-            .replacingOccurrences(of: "<|end_of_turn|>", with: "")
-            .replacingOccurrences(of: "<|turn>", with: "")
-            .replacingOccurrences(of: "<turn|>", with: "")
-            .replacingOccurrences(of: "<|channel>", with: "")
-            .replacingOccurrences(of: "<channel|>", with: "")
-            .replacingOccurrences(of: "<|think|>", with: "")
-            .replacingOccurrences(of: "<|tool>", with: "")
-            .replacingOccurrences(of: "<tool|>", with: "")
-            .replacingOccurrences(of: "<|tool_call>", with: "")
-            .replacingOccurrences(of: "<tool_call|>", with: "")
-            .replacingOccurrences(of: "<|tool_response>", with: "")
-            .replacingOccurrences(of: "<tool_response|>", with: "")
-            .replacingOccurrences(of: "<eos>", with: "")
-            .replacingOccurrences(of: "<bos>", with: "")
-
-        cleaned = stripLeadingLeakedRolePrefix(from: cleaned)
-        cleaned = trimTrailingControlPrefix(from: cleaned)
-
-        return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private func finalizedAssistantText(_ text: String) -> String {
-        sanitizedAssistantText(text)
-    }
-
-    private func firstBoundaryMarkerRange(in text: String) -> Range<String.Index>? {
-        responseBoundaryMarkers
-            .compactMap { marker in text.range(of: marker) }
-            .min(by: { $0.lowerBound < $1.lowerBound })
-    }
-
-    private func stripLeadingLeakedRolePrefix(from text: String) -> String {
-        let prefixes = [
-            "model\n",
-            "assistant\n",
-            "user\n",
-            "system\n",
-            "<|turn>model\n",
-            "<|turn>assistant\n",
-            "<|turn>user\n",
-            "<|turn>system\n",
-            "<start_of_turn>model\n",
-            "<start_of_turn>assistant\n",
-            "<start_of_turn>user\n",
-            "<|start_of_turn|>model\n",
-            "<|start_of_turn|>assistant\n",
-            "<|start_of_turn|>user\n"
-        ]
-
-        for prefix in prefixes where text.hasPrefix(prefix) {
-            return String(text.dropFirst(prefix.count))
-        }
-
-        return text
-    }
-
-    private func stripLeadingControlPreamble(from text: String) -> String {
-        var cleaned = text
-
-        while true {
-            let updated = stripLeadingLeakedRolePrefix(from: cleaned)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-
-            if updated == cleaned {
-                return cleaned
-            }
-
-            cleaned = updated
-        }
-    }
-
-    private func stripThinkingBlocks(from text: String) -> String {
-        guard text.contains("<|channel>") else {
-            return text
-        }
-
-        var cleaned = text
-
-        while let startRange = cleaned.range(of: "<|channel>") {
-            if let endRange = cleaned.range(of: "<channel|>", range: startRange.upperBound..<cleaned.endIndex) {
-                cleaned.removeSubrange(startRange.lowerBound..<endRange.upperBound)
-            } else {
-                cleaned.removeSubrange(startRange.lowerBound..<cleaned.endIndex)
-                break
-            }
-        }
-
-        return cleaned
-    }
-
-    private func trimTrailingControlPrefix(from text: String) -> String {
-        guard !text.isEmpty else { return text }
-
-        for marker in leakedControlMarkers {
-            guard marker.count > 1 else { continue }
-
-            for prefixLength in stride(from: marker.count - 1, through: 1, by: -1) {
-                let prefix = String(marker.prefix(prefixLength))
-                if text.hasSuffix(prefix) {
-                    return String(text.dropLast(prefixLength))
-                }
-            }
-        }
-
-        return text
     }
 
     // MARK: - Conversation management
@@ -1166,6 +1110,14 @@ private struct TypingDotsView: View {
                 phase = (phase + 1) % 3
             }
         }
+    }
+}
+
+private struct ConversationBottomOffsetPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }
 

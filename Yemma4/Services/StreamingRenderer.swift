@@ -188,3 +188,58 @@ struct StreamingRenderer: Sendable {
         return text
     }
 }
+
+struct StreamingRenderUpdate: Sendable {
+    let visibleText: String?
+    let shouldStop: Bool
+    let didAdvance: Bool
+}
+
+/// Shared flush policy for streamed assistant text.
+///
+/// Keeps the hot path light by only sanitizing when a visible update is likely
+/// to improve the transcript: after a short cadence interval, at a word or
+/// punctuation boundary, or once enough raw characters have accumulated.
+struct StreamingUpdatePolicy: Sendable {
+    private(set) var rawText = ""
+
+    private var lastFlush = ContinuousClock.now
+    private var lastRenderedRawCount = 0
+    private var lastVisibleText = ""
+
+    mutating func append(_ token: String, now: ContinuousClock.Instant = ContinuousClock.now) -> StreamingRenderUpdate {
+        rawText.append(token)
+
+        let shouldStop = StreamingRenderer.shouldStopStreaming(tailOf: rawText)
+        let elapsed = now - lastFlush
+        let rawDelta = rawText.count - lastRenderedRawCount
+        let endsClause = token.last.map { ".!?,:;)\n".contains($0) } ?? false
+        let atWordBoundary = token.last?.isWhitespace == true || endsClause
+        let shouldFlush =
+            shouldStop
+            || elapsed >= .milliseconds(70)
+            || (atWordBoundary && elapsed >= .milliseconds(28))
+            || (rawDelta >= 32 && elapsed >= .milliseconds(22))
+
+        guard shouldFlush else {
+            return StreamingRenderUpdate(visibleText: nil, shouldStop: shouldStop, didAdvance: false)
+        }
+
+        let visibleText = StreamingRenderer.sanitize(rawText)
+        let didAdvance = visibleText != lastVisibleText
+
+        lastFlush = now
+        lastRenderedRawCount = rawText.count
+        lastVisibleText = visibleText
+
+        return StreamingRenderUpdate(
+            visibleText: didAdvance ? visibleText : nil,
+            shouldStop: shouldStop,
+            didAdvance: didAdvance
+        )
+    }
+
+    func finalize() -> String {
+        StreamingRenderer.finalize(rawText)
+    }
+}
