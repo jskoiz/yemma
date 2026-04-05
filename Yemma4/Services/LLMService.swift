@@ -242,6 +242,8 @@ final class LLMService: @unchecked Sendable {
         )
 
         do {
+            let contextSize = self.contextSize
+            let flashAttention = self.flashAttention
             let preparedResources = try await Task.detached(priority: .utility) { [weak self] in
                 let backendStart = Date()
                 Self.ensureBackendInitialized()
@@ -283,12 +285,10 @@ final class LLMService: @unchecked Sendable {
                 )
 
                 let resourceLoadStart = Date()
-                let ctxSize = await MainActor.run { self?.contextSize ?? Self.defaultContextSize }
-                let flashAttn = await MainActor.run { self?.flashAttention ?? Self.defaultFlashAttention }
                 let loadedResources = try Self.loadTextResources(
                     modelPath: resolvedPath,
-                    contextSize: ctxSize,
-                    flashAttention: flashAttn
+                    contextSize: contextSize,
+                    flashAttention: flashAttention
                 )
                 let resourceLoadMs = Int(Date().timeIntervalSince(resourceLoadStart) * 1000)
 
@@ -1160,7 +1160,7 @@ private extension LLMService {
         }
 
         let work = withLock { () -> VisionLoadWork in
-            if let multimodalRuntime {
+            if multimodalRuntime != nil {
                 return .alreadyReady
             }
 

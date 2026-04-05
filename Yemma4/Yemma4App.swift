@@ -28,12 +28,17 @@ final class Yemma4AppDelegate: NSObject, UIApplicationDelegate {
         handleEventsForBackgroundURLSession identifier: String,
         completionHandler: @escaping () -> Void
     ) {
-        guard identifier == "\(Yemma4AppConfiguration.bundleIdentifier).model-download" else {
-            completionHandler()
+        if identifier == "\(Yemma4AppConfiguration.bundleIdentifier).model-download" {
+            BackgroundModelDownloadEvents.shared.setCompletionHandler(completionHandler)
             return
         }
 
-        BackgroundModelDownloadEvents.shared.setCompletionHandler(completionHandler)
+        if identifier == "\(Yemma4AppConfiguration.bundleIdentifier).litert-model-download" {
+            LiteRTBackgroundDownloadEvents.shared.setCompletionHandler(completionHandler)
+            return
+        }
+
+        completionHandler()
     }
 }
 
@@ -59,6 +64,9 @@ public struct Yemma4App: App {
                 .environment(conversationStore)
                 .preferredColorScheme(AppearancePreference.from(appearancePreferenceRaw).colorScheme)
                 .tint(AppTheme.accent)
+                .task {
+                    AskImageTempFiles.pruneStaleFiles()
+                }
         }
     }
 }

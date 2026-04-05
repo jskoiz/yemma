@@ -643,6 +643,5 @@ private struct OnboardingPreviewScreen: View {
         llmService: .onboardingPreview()
     )
     .preferredColorScheme(.dark)
-    .previewDevice("iPhone SE (3rd generation)")
 }
 #endif
