@@ -22,41 +22,31 @@
 
 <p align="center">
   <strong>Private, on-device AI chat for iPhone.</strong><br>
-  Built around Gemma 4, local inference, multimodal input, and a lot of product-level iteration.
+  Runs Gemma 4 locally via llama.cpp. No cloud, no accounts, no telemetry.
 </p>
 
 <p align="center">
   <a href="#screenshots">Screenshots</a> ·
-  <a href="#stack-and-structure">Stack</a> ·
-  <a href="#inference-handling">Inference</a> ·
+  <a href="#structure">Structure</a> ·
+  <a href="#inference">Inference</a> ·
   <a href="#model-assets">Model Assets</a> ·
-  <a href="#current-issues">Current Issues</a>
+  <a href="#known-issues">Known Issues</a>
 </p>
 
-Yemma 4 is an iOS app that runs Gemma 4 locally through `llama.cpp`, with prompts and responses staying on device after setup. This repo also includes the website design, landing page, and brand assets in [`website/`](website/).
+This repo contains the iOS app, landing page, and brand assets.
 
-## Snapshot
+## Features
 
-- No account, telemetry, or cloud inference
-- Streaming SwiftUI chat with markdown rendering, attachments, conversation management, advanced runtime controls, and diagnostics
-- Appearance system with `System`, `Light`, and `Dark` modes
-- Local multimodal path for image prompts
-- App code, website design, and App Store metadata in one repo all OSS
-
-## What Went Into It
-
-- Multi-asset local download flow with resume, validation, unload, and delete handling
-- Background `URLSession` download handling so the large first-run setup can continue, reconnect, and recover cleanly
-- Objective-C++ multimodal bridge for the `mmproj` vision projector
-- Runtime tuning for context size, flash attention, temperature, and response limits
-- Settings surfaces for diagnostics logs, event inspection, advanced inference controls, and debug formatting scenarios used during iteration
-- System-aware visual design with explicit light, dark, and follow-system appearance modes
-- Repeated UI iteration on onboarding, streaming behavior, scroll behavior, typing states, and chat readability
-- Simulator mock mode for faster product and UI iteration
+- Streaming chat with markdown rendering, image attachments, and conversation history
+- Resumable background model download (~6.4 GB first-time setup)
+- Multimodal inference via Objective-C++ `mmproj` vision projector bridge
+- Configurable context size, flash attention, temperature, and response limits
+- Light / Dark / System appearance modes
+- Built-in diagnostics, debug probes, and simulator mock mode
 
 ## Screenshots
 
-These are some of the less-obvious product surfaces that took real iteration time: runtime controls, debug probes, and diagnostics.
+Runtime controls, debug probes, and diagnostics.
 
 <table>
   <tr>
@@ -71,53 +61,49 @@ These are some of the less-obvious product surfaces that took real iteration tim
     </td>
   </tr>
   <tr>
-    <td valign="top"><strong>Advanced controls</strong><br>Temperature, context window, flash attention, and response length tuning in-app.</td>
-    <td valign="top"><strong>Debug probes</strong><br>Built-in markdown and renderer test scenarios for formatting stability work.</td>
-    <td valign="top"><strong>Diagnostics</strong><br>Recent events, copyable logs, and runtime metadata for debugging startup and model load behavior.</td>
+    <td valign="top"><strong>Advanced controls</strong><br>Temperature, context window, flash attention, response length.</td>
+    <td valign="top"><strong>Debug probes</strong><br>Markdown and renderer test scenarios.</td>
+    <td valign="top"><strong>Diagnostics</strong><br>Event log, copyable logs, runtime metadata.</td>
   </tr>
 </table>
 
-## Stack And Structure
+## Structure
 
-- `SwiftUI` app shell and screens in `Yemma4/Views`, with `ContentView.swift` deciding between onboarding and chat
-- `Appearance.swift` defines the app theme system and the `System` / `Light` / `Dark` appearance preference
-- `ChatSessionController.swift` manages prompt submission, streaming state, attachments, and conversation flow
-- `LLMService.swift` owns local inference through `llama.swift` / `llama.cpp`
-- `ModelDownloader.swift` handles the two-file model setup, resume support, validation, and local storage
-- `Yemma4App.swift` wires app lifecycle into the background model download session
-- `MultimodalRuntime.h` and `MultimodalRuntime.mm` bridge the vision projector into the local runtime
-- `SettingsView.swift`, `AdvancedSettingsView.swift`, and `AppDiagnostics.swift` cover model management, observability, runtime tuning, and debug/test probes
-- `website/` contains the landing page, website design, and brand assets
-- `METADATA.md` holds App Store metadata drafts, and App Store Connect deployment currently goes through `asc-cli`
+- `ContentView.swift` — root state machine (onboarding vs chat)
+- `ChatSessionController.swift` — prompt submission, streaming, attachments, conversation flow
+- `LLMService.swift` — llama.cpp inference lifecycle (load, generate, cancel, unload)
+- `ModelDownloader.swift` — two-file download with resume, validation, local storage
+- `MultimodalRuntime.h/.mm` — Objective-C++ bridge for the vision projector
+- `SettingsView.swift` / `AdvancedSettingsView.swift` — runtime tuning, diagnostics, debug probes
+- `Appearance.swift` — theme system
+- `website/` — landing page and brand assets
 
-## Inference Handling
+## Inference
 
-- `LLMService.swift` wraps the full local inference lifecycle: model load, context creation, multimodal runtime setup, prompt formatting, token streaming, cancellation, and unload
-- Prompt formatting uses the model chat template when available and falls back to a Gemma 4-specific template path when needed
-- Sampling defaults are pulled from GGUF model metadata rather than being entirely hardcoded, then exposed through in-app controls for temperature, context window, flash attention, and max response length
-- The runtime is tuned for on-device Gemma 4 usage with heavy Metal offload, explicit batch sizing, KV-cache reuse for text turns, and a separate multimodal path when image embeddings are involved
+- Prompt formatting uses the model's chat template with a Gemma 4 fallback
+- Sampling defaults read from GGUF metadata, adjustable in-app
+- Metal offload, explicit batch sizing, KV-cache reuse for text turns, separate multimodal path for images
 
 ## Model Assets
 
-- Hugging Face reference build used during development: [unsloth/gemma-4-E4B-it-GGUF](https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF)
-- Main GGUF: [`gemma-4-E4B-it-Q4_K_M.gguf`](https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF/blob/main/gemma-4-E4B-it-Q4_K_M.gguf)
-- Image projector: [`mmproj-F16.gguf`](https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF/blob/main/mmproj-F16.gguf)
+- Source: [unsloth/gemma-4-E4B-it-GGUF](https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF)
+- Model: [`gemma-4-E4B-it-Q4_K_M.gguf`](https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF/blob/main/gemma-4-E4B-it-Q4_K_M.gguf) (5.4 GB)
+- Vision projector: [`mmproj-F16.gguf`](https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF/blob/main/mmproj-F16.gguf) (~1.0 GB)
 
-## Current Issues
+## Known Issues
 
-- First-time model preparation/loading is still the main rough edge: after download, initial runtime load can be slow and occasionally buggy
-- Image inference currently depends on two local model assets: the 5.4 GB Gemma 4 GGUF and the ~1.0 GB `mmproj` projector, so first-time setup is about 6.4 GB
+- Initial model load after download can be slow and occasionally flaky
 
 ## Build
 
 1. Open `Yemma4.xcodeproj` in Xcode 15+.
 2. Run on a physical iPhone with iOS 17+.
-3. Use `./scripts/sim_run.sh` for mocked simulator iteration.
+3. Use `./scripts/sim_run.sh` for simulator testing (mocked inference).
 
 ## Release
 
-- App Store Connect deployment is handled with `asc-cli`
+App Store Connect deployment via `asc-cli`.
 
 ## License
 
-Open source under the MIT License. See [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).
