@@ -75,6 +75,65 @@ enum LLMServiceError: LocalizedError {
     }
 }
 
+enum ResponseStylePreset: String, CaseIterable, Identifiable, Sendable {
+    case focused
+    case balanced
+    case detailed
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .focused:
+            return "Focused"
+        case .balanced:
+            return "Balanced"
+        case .detailed:
+            return "Detailed"
+        }
+    }
+
+    var summary: String {
+        switch self {
+        case .focused:
+            return "Shorter, tighter answers with less drift."
+        case .balanced:
+            return "The default mix for everyday questions."
+        case .detailed:
+            return "Longer replies with a bit more explanation."
+        }
+    }
+
+    var temperature: Double {
+        switch self {
+        case .focused:
+            return 0.4
+        case .balanced:
+            return 0.7
+        case .detailed:
+            return 0.8
+        }
+    }
+
+    var maxResponseTokens: Int {
+        switch self {
+        case .focused:
+            return 768
+        case .balanced:
+            return 1024
+        case .detailed:
+            return 2048
+        }
+    }
+
+    static func matching(temperature: Double, maxResponseTokens: Int) -> Self? {
+        allCases.first { preset in
+            abs(preset.temperature - temperature) < 0.05
+                && preset.maxResponseTokens == maxResponseTokens
+        }
+    }
+}
+
 @Observable
 final class LLMService: @unchecked Sendable {
     var isModelLoaded = false
@@ -138,6 +197,22 @@ final class LLMService: @unchecked Sendable {
         contextSize = Self.defaultContextSize
         flashAttention = Self.defaultFlashAttention
         maxResponseTokens = Self.defaultMaxResponseTokens
+    }
+
+    var activeResponseStylePreset: ResponseStylePreset? {
+        ResponseStylePreset.matching(
+            temperature: temperature,
+            maxResponseTokens: maxResponseTokens
+        )
+    }
+
+    var activeResponseStyleTitle: String {
+        activeResponseStylePreset?.title ?? "Custom"
+    }
+
+    func applyResponseStylePreset(_ preset: ResponseStylePreset) {
+        temperature = preset.temperature
+        maxResponseTokens = preset.maxResponseTokens
     }
 
     deinit {

@@ -12,6 +12,7 @@ import UIKit
 #endif
 
 public struct ChatView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(LLMService.self) private var llmService
     @Environment(ConversationStore.self) private var conversationStore
 
@@ -109,7 +110,11 @@ public struct ChatView: View {
                     VStack {
                         Spacer()
                         toastView(message: toastMessage)
-                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                            .transition(
+                                reduceMotion
+                                    ? .opacity
+                                    : .move(edge: .bottom).combined(with: .opacity)
+                            )
                             .padding(.bottom, 116)
                     }
                 }
@@ -189,7 +194,7 @@ public struct ChatView: View {
             .onChange(of: pendingAttachments.map(\.id)) { _, _ in
                 scheduleConversationSave()
             }
-            .animation(.easeInOut(duration: 0.2), value: toastMessage)
+            .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: toastMessage)
             .alert(
                 "Generation Failed",
                 isPresented: Binding(
@@ -226,7 +231,11 @@ public struct ChatView: View {
         HStack(spacing: 12) {
             HStack(spacing: 2) {
                 CircleIconButton(systemName: "gearshape", filled: false, action: { showSettings = true })
+                    .accessibilityLabel("Settings")
+                    .accessibilityHint("Open settings and model controls.")
                 CircleIconButton(systemName: "bubble.left.and.bubble.right", filled: false, action: { showConversations = true })
+                    .accessibilityLabel("Saved chats")
+                    .accessibilityHint("Browse and rename saved conversations.")
             }
             .padding(4)
             .background(
@@ -243,6 +252,8 @@ public struct ChatView: View {
                     await startFreshConversation()
                 }
             }
+            .accessibilityLabel("New chat")
+            .accessibilityHint("Start a fresh conversation and keep older chats saved.")
         }
         .padding(.horizontal, 16)
         .padding(.top, 6)
@@ -338,8 +349,12 @@ public struct ChatView: View {
         }
 
         if animated {
-            withAnimation(.easeOut(duration: 0.18)) {
+            if reduceMotion {
                 action()
+            } else {
+                withAnimation(.easeOut(duration: 0.18)) {
+                    action()
+                }
             }
         } else {
             var transaction = Transaction(animation: nil)
@@ -509,7 +524,7 @@ public struct ChatView: View {
         .contextMenu {
             messageContextMenu(for: message, index: indexForMessage(message))
         }
-        .animation(.easeInOut(duration: 0.25), value: isStreaming)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: isStreaming)
     }
 
     // MARK: - Composer
@@ -518,7 +533,11 @@ public struct ChatView: View {
         VStack(spacing: 12) {
             if shouldShowTypingIndicator {
                 typingIndicator
-                    .transition(.opacity.combined(with: .scale(scale: 0.8)))
+                    .transition(
+                        reduceMotion
+                            ? .opacity
+                            : .opacity.combined(with: .scale(scale: 0.8))
+                    )
             }
 
             if !pendingAttachments.isEmpty {
@@ -557,6 +576,12 @@ public struct ChatView: View {
                 .buttonStyle(.plain)
                 .disabled(!llmService.isGenerating && !canSubmitDraft)
                 .opacity((!llmService.isGenerating && !canSubmitDraft) ? 0.45 : 1)
+                .accessibilityLabel(llmService.isGenerating ? "Stop response" : "Send message")
+                .accessibilityHint(
+                    llmService.isGenerating
+                        ? "Stops the current assistant response."
+                        : "Sends your draft to Yemma."
+                )
             }
             .padding(8)
             .inputChrome(cornerRadius: AppTheme.Radius.medium)
@@ -576,7 +601,7 @@ public struct ChatView: View {
             )
             .ignoresSafeArea(edges: .bottom)
         )
-        .animation(.easeInOut(duration: 0.2), value: shouldShowTypingIndicator)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: shouldShowTypingIndicator)
     }
 
     private func composerIcon(systemName: String, action: @escaping () -> Void) -> some View {
@@ -603,6 +628,8 @@ public struct ChatView: View {
         }
         .buttonStyle(.plain)
         .disabled(isImportingAttachments)
+        .accessibilityLabel("Add image")
+        .accessibilityHint("Attach up to four images to your next message.")
     }
 
     private var composerAttachmentStrip: some View {
@@ -697,30 +724,45 @@ public struct ChatView: View {
     }
 
     private func messageActionStrip(for message: ChatMessage, index: Int) -> some View {
-        HStack(spacing: 8) {
-            messageActionButton(title: "Retry", systemImage: "arrow.clockwise") {
-                Task { @MainActor in
-                    await retryAssistantResponse(message, index: index)
-                }
-            }
-
-            ForEach([AssistantRefinement.shorter, .moreDetail], id: \.rawValue) { refinement in
-                messageActionButton(title: refinement.title, systemImage: refinement.systemImage) {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                messageActionButton(
+                    title: "Retry",
+                    systemImage: "arrow.clockwise",
+                    accessibilityHint: "Generate the assistant reply again."
+                ) {
                     Task { @MainActor in
-                        await refineAssistantResponse(message, refinement: refinement)
+                        await retryAssistantResponse(message, index: index)
+                    }
+                }
+
+                ForEach([AssistantRefinement.shorter, .moreDetail], id: \.rawValue) { refinement in
+                    messageActionButton(
+                        title: refinement.title,
+                        systemImage: refinement.systemImage,
+                        accessibilityHint: refinement == .shorter
+                            ? "Ask for a shorter version of the latest assistant reply."
+                            : "Ask for a more detailed version of the latest assistant reply."
+                    ) {
+                        Task { @MainActor in
+                            await refineAssistantResponse(message, refinement: refinement)
+                        }
                     }
                 }
             }
-
-            Spacer(minLength: 0)
+            .padding(.horizontal, 2)
         }
-        .padding(.horizontal, 2)
     }
 
-    private func messageActionButton(title: String, systemImage: String, action: @escaping () -> Void) -> some View {
+    private func messageActionButton(
+        title: String,
+        systemImage: String,
+        accessibilityHint: String,
+        action: @escaping () -> Void
+    ) -> some View {
         Button(action: action) {
             Label(title, systemImage: systemImage)
-                .font(.system(size: 12, weight: .semibold))
+                .font(.footnote.weight(.semibold))
                 .foregroundStyle(AppTheme.textSecondary)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 7)
@@ -728,6 +770,7 @@ public struct ChatView: View {
                 .clipShape(Capsule())
         }
         .buttonStyle(.plain)
+        .accessibilityHint(accessibilityHint)
     }
 
     @ViewBuilder
@@ -784,6 +827,7 @@ public struct ChatView: View {
     }
 
     private func copyMessageText(_ text: String) {
+        AppHaptics.success()
 #if canImport(UIKit)
         UIPasteboard.general.string = text
 #endif
@@ -796,6 +840,7 @@ public struct ChatView: View {
     }
 
     private func shareMessageText(_ text: String) {
+        AppHaptics.selection()
         AppDiagnostics.shared.record(
             "Message shared",
             category: "ui",
@@ -805,6 +850,7 @@ public struct ChatView: View {
     }
 
     private func speakMessageText(_ text: String, messageID: String) {
+        AppHaptics.selection()
 #if canImport(AVFoundation)
         speechSynthesizer.stopSpeaking(at: .immediate)
         let utterance = AVSpeechUtterance(string: text)
@@ -824,6 +870,7 @@ public struct ChatView: View {
     private func editAndResendLastUserTurn(_ message: ChatMessage) {
         guard canEditAndResend(message) else { return }
         guard let messageIndex = messages.firstIndex(where: { $0.id == message.id }) else { return }
+        AppHaptics.selection()
 
         AppDiagnostics.shared.record(
             "Last user turn edited",
@@ -850,6 +897,7 @@ public struct ChatView: View {
     private func retryAssistantResponse(_ message: ChatMessage, index: Int) async {
         guard canRetryAssistantResponse(message, index: index) else { return }
         guard let userIndex = userPromptIndex(forAssistantAt: index) else { return }
+        AppHaptics.selection()
 
         let prompt = promptInput(from: messages[userIndex])
         let history = conversationHistory(from: Array(messages.prefix(userIndex)))
@@ -878,6 +926,7 @@ public struct ChatView: View {
         guard !llmService.isGenerating, !message.user.isCurrentUser else { return }
         guard let latestAssistantMessageIndex else { return }
         guard message.id == messages[latestAssistantMessageIndex].id else { return }
+        AppHaptics.selection()
 
         AppDiagnostics.shared.record(
             "Assistant refinement requested",
@@ -1074,6 +1123,8 @@ public struct ChatView: View {
             }
             .buttonStyle(.plain)
             .offset(x: 6, y: -6)
+            .accessibilityLabel("Remove image")
+            .accessibilityHint("Removes this image from the draft.")
         }
         .padding(.top, 6)
         .padding(.trailing, 2)
@@ -1420,9 +1471,7 @@ public struct ChatView: View {
     }
 
     private func triggerSendHaptic() {
-#if canImport(UIKit)
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-#endif
+        AppHaptics.softImpact()
     }
 
     private func isLowMemoryError(_ message: String) -> Bool {
@@ -1444,6 +1493,7 @@ public struct ChatView: View {
 
 /// A small three-dot "thinking" animation inspired by ChatGPT/Claude iOS apps.
 private struct TypingDotsView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var phase: Int = 0
 
     private let dotSize: CGFloat = 7
@@ -1465,6 +1515,9 @@ private struct TypingDotsView: View {
     }
 
     private func dotOpacity(for index: Int) -> Double {
+        if reduceMotion {
+            return 0.8
+        }
         let offset = (phase - index + 3) % 3
         switch offset {
         case 0: return 1.0
@@ -1474,6 +1527,9 @@ private struct TypingDotsView: View {
     }
 
     private func dotScale(for index: Int) -> CGFloat {
+        if reduceMotion {
+            return 1.0
+        }
         let offset = (phase - index + 3) % 3
         switch offset {
         case 0: return 1.0
@@ -1483,6 +1539,7 @@ private struct TypingDotsView: View {
     }
 
     private func startAnimation() {
+        guard !reduceMotion else { return }
         Timer.scheduledTimer(withTimeInterval: 0.35, repeats: true) { _ in
             withAnimation(.easeInOut(duration: 0.3)) {
                 phase = (phase + 1) % 3

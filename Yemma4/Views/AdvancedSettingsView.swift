@@ -4,6 +4,7 @@ struct AdvancedSettingsView: View {
     @Environment(LLMService.self) private var llmService
     @Environment(AppDiagnostics.self) private var diagnostics
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var needsReload = false
     @State private var diagnosticsCopied = false
@@ -30,6 +31,7 @@ struct AdvancedSettingsView: View {
                         reloadBanner
                     }
 
+                    overviewSection
                     inferenceSection
                     diagnosticsSection
 #if DEBUG
@@ -55,6 +57,8 @@ struct AdvancedSettingsView: View {
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(AppTheme.textPrimary)
             }
+            .accessibilityLabel("Back")
+            .accessibilityHint("Returns to the main settings screen.")
             Spacer()
             Text("Advanced")
                 .font(AppTheme.Typography.utilityTitle)
@@ -74,7 +78,7 @@ struct AdvancedSettingsView: View {
                 .font(.body.weight(.semibold))
                 .foregroundStyle(AppTheme.accent)
 
-            Text("Reload model to apply changes.")
+            Text("Reload the model to apply context or flash attention changes.")
                 .font(AppTheme.Typography.utilityRowTitle)
                 .foregroundStyle(AppTheme.textPrimary)
         }
@@ -82,10 +86,33 @@ struct AdvancedSettingsView: View {
         .padding(.horizontal, AppTheme.Layout.rowHorizontalPadding)
         .padding(.vertical, 14)
         .groupedCard(cornerRadius: AppTheme.Radius.medium)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var overviewSection: some View {
+        UtilitySection("Overview") {
+            infoRow(
+                icon: "bolt.circle",
+                title: "Response style",
+                detail: llmService.activeResponseStyleTitle
+            )
+            UtilitySectionSeparator()
+            infoRow(
+                icon: "text.alignleft",
+                title: "Context window",
+                detail: contextSizeLabel(llmService.contextSize)
+            )
+            UtilitySectionSeparator()
+            infoRow(
+                icon: "bolt",
+                title: "Flash attention",
+                detail: llmService.flashAttention ? "On" : "Off"
+            )
+        }
     }
 
     private var inferenceSection: some View {
-        UtilitySection("Inference") {
+        UtilitySection("Runtime Controls") {
             temperatureRow
             UtilitySectionSeparator()
             contextSizeRow
@@ -123,8 +150,11 @@ struct AdvancedSettingsView: View {
             Text("Lower values stay focused. Higher values improvise more.")
                 .font(AppTheme.Typography.utilityCaption)
                 .foregroundStyle(AppTheme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .utilityRowPadding()
+        .accessibilityElement(children: .contain)
+        .accessibilityHint("Adjusts how inventive the model sounds.")
     }
 
     private var contextSizeRow: some View {
@@ -141,24 +171,48 @@ struct AdvancedSettingsView: View {
                     .foregroundStyle(AppTheme.textSecondary)
             }
 
-            Picker("Context Window", selection: Binding(
-                get: { llmService.contextSize },
-                set: {
-                    llmService.contextSize = $0
-                    needsReload = true
-                }
-            )) {
+            Menu {
                 ForEach(contextSizeOptions, id: \.self) { size in
-                    Text(contextSizeLabel(size)).tag(size)
+                    Button(contextSizeLabel(size)) {
+                        guard llmService.contextSize != size else { return }
+                        llmService.contextSize = size
+                        needsReload = true
+                        AppHaptics.selection()
+                        diagnostics.record(
+                            "Context window changed",
+                            category: "settings",
+                            metadata: [
+                                "contextSize": size,
+                                "reloadRequired": true
+                            ]
+                        )
+                    }
                 }
+            } label: {
+                HStack {
+                    Text(contextSizeLabel(llmService.contextSize))
+                        .font(AppTheme.Typography.utilityRowTitle)
+                        .foregroundStyle(AppTheme.textPrimary)
+                    Spacer()
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(AppTheme.textSecondary)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .background(AppTheme.controlFill)
+                .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.small, style: .continuous))
             }
-            .pickerStyle(.segmented)
+            .buttonStyle(.plain)
 
             Text("Higher values use more memory. Requires model reload.")
                 .font(AppTheme.Typography.utilityCaption)
                 .foregroundStyle(AppTheme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .utilityRowPadding()
+        .accessibilityElement(children: .contain)
+        .accessibilityHint("Changes how much recent conversation the model can keep in memory.")
     }
 
     private var flashAttentionRow: some View {
@@ -166,8 +220,18 @@ struct AdvancedSettingsView: View {
             Toggle(isOn: Binding(
                 get: { llmService.flashAttention },
                 set: {
+                    guard llmService.flashAttention != $0 else { return }
                     llmService.flashAttention = $0
                     needsReload = true
+                    AppHaptics.selection()
+                    diagnostics.record(
+                        "Flash attention changed",
+                        category: "settings",
+                        metadata: [
+                            "enabled": $0,
+                            "reloadRequired": true
+                        ]
+                    )
                 }
             )) {
                 Label("Flash Attention", systemImage: "bolt")
@@ -179,8 +243,10 @@ struct AdvancedSettingsView: View {
             Text("Hardware-accelerated attention. Improves speed on supported devices. Requires model reload.")
                 .font(AppTheme.Typography.utilityCaption)
                 .foregroundStyle(AppTheme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .utilityRowPadding()
+        .accessibilityElement(children: .contain)
     }
 
     private var maxResponseTokensRow: some View {
@@ -197,21 +263,44 @@ struct AdvancedSettingsView: View {
                     .foregroundStyle(AppTheme.textSecondary)
             }
 
-            Picker("Max Response Tokens", selection: Binding(
-                get: { llmService.maxResponseTokens },
-                set: { llmService.maxResponseTokens = $0 }
-            )) {
+            Menu {
                 ForEach(maxTokenOptions, id: \.self) { count in
-                    Text(tokenLabel(count)).tag(count)
+                    Button(tokenLabel(count)) {
+                        guard llmService.maxResponseTokens != count else { return }
+                        llmService.maxResponseTokens = count
+                        AppHaptics.selection()
+                        diagnostics.record(
+                            "Max response changed",
+                            category: "settings",
+                            metadata: ["maxResponseTokens": count]
+                        )
+                    }
                 }
+            } label: {
+                HStack {
+                    Text(tokenLabel(llmService.maxResponseTokens))
+                        .font(AppTheme.Typography.utilityRowTitle)
+                        .foregroundStyle(AppTheme.textPrimary)
+                    Spacer()
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(AppTheme.textSecondary)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .background(AppTheme.controlFill)
+                .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.small, style: .continuous))
             }
-            .pickerStyle(.segmented)
+            .buttonStyle(.plain)
 
             Text("Maximum tokens the model can generate per reply.")
                 .font(AppTheme.Typography.utilityCaption)
                 .foregroundStyle(AppTheme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .utilityRowPadding()
+        .accessibilityElement(children: .contain)
+        .accessibilityHint("Sets the longest reply the model is allowed to produce.")
     }
 
     // MARK: - Diagnostics
@@ -235,8 +324,12 @@ struct AdvancedSettingsView: View {
             if !diagnostics.recentEvents.isEmpty {
                 UtilitySectionSeparator()
                 Button {
-                    withAnimation(.easeInOut(duration: 0.25)) {
+                    if reduceMotion {
                         showEventLog.toggle()
+                    } else {
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            showEventLog.toggle()
+                        }
                     }
                 } label: {
                     HStack(spacing: 14) {
@@ -371,22 +464,43 @@ struct AdvancedSettingsView: View {
     }
 
     private func infoRow(icon: String, title: String, detail: String) -> some View {
-        HStack(spacing: 14) {
-            Image(systemName: icon)
-                .frame(width: AppTheme.Layout.rowIconSize)
-                .foregroundStyle(AppTheme.textPrimary)
+        ViewThatFits(in: .vertical) {
+            HStack(spacing: 14) {
+                Image(systemName: icon)
+                    .frame(width: AppTheme.Layout.rowIconSize)
+                    .foregroundStyle(AppTheme.textPrimary)
 
-            Text(title)
-                .font(AppTheme.Typography.utilityRowTitle)
-                .foregroundStyle(AppTheme.textPrimary)
+                Text(title)
+                    .font(AppTheme.Typography.utilityRowTitle)
+                    .foregroundStyle(AppTheme.textPrimary)
 
-            Spacer()
+                Spacer()
 
-            Text(detail)
-                .font(AppTheme.Typography.utilityRowDetail)
-                .foregroundStyle(AppTheme.textSecondary)
+                Text(detail)
+                    .font(AppTheme.Typography.utilityRowDetail)
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .multilineTextAlignment(.trailing)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 14) {
+                    Image(systemName: icon)
+                        .frame(width: AppTheme.Layout.rowIconSize)
+                        .foregroundStyle(AppTheme.textPrimary)
+
+                    Text(title)
+                        .font(AppTheme.Typography.utilityRowTitle)
+                        .foregroundStyle(AppTheme.textPrimary)
+                }
+
+                Text(detail)
+                    .font(AppTheme.Typography.utilityRowDetail)
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .padding(.leading, AppTheme.Layout.rowIconSize + 14)
+            }
         }
         .utilityRowPadding()
+        .accessibilityElement(children: .combine)
     }
 
     private func destructiveRow(icon: String, title: String, action: @escaping () -> Void) -> some View {
@@ -424,6 +538,8 @@ struct AdvancedSettingsView: View {
             Button {
                 llmService.resetAdvancedSettings()
                 needsReload = true
+                AppHaptics.selection()
+                diagnostics.record("Advanced settings reset", category: "settings")
             } label: {
                 HStack(spacing: 14) {
                     Image(systemName: "arrow.counterclockwise")
@@ -459,5 +575,13 @@ struct AdvancedSettingsView: View {
     AdvancedSettingsView()
         .environment(LLMService())
         .environment(AppDiagnostics.shared)
+}
+
+#Preview("Advanced Settings Accessibility") {
+    AdvancedSettingsView()
+        .environment(LLMService())
+        .environment(AppDiagnostics.shared)
+        .dynamicTypeSize(.accessibility3)
+        .preferredColorScheme(.dark)
 }
 #endif
