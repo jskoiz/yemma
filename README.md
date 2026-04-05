@@ -33,7 +33,7 @@
   <a href="#known-issues">Known Issues</a>
 </p>
 
-Yemma 4 runs Gemma 4 on-device through `llama.cpp` with Metal GPU acceleration. Prompts and responses stay on the phone. This repo includes the app, website, and brand assets.
+This repo contains the iOS app, landing page, and brand assets.
 
 ## Features
 
@@ -61,9 +61,9 @@ Runtime controls, debug probes, and diagnostics.
     </td>
   </tr>
   <tr>
-    <td valign="top"><strong>Advanced controls</strong><br>Temperature, context window, flash attention, and response length tuning in-app.</td>
-    <td valign="top"><strong>Debug probes</strong><br>Built-in markdown and renderer test scenarios for formatting stability work.</td>
-    <td valign="top"><strong>Diagnostics</strong><br>Recent events, copyable logs, and runtime metadata for debugging startup and model load behavior.</td>
+    <td valign="top"><strong>Advanced controls</strong><br>Temperature, context window, flash attention, response length.</td>
+    <td valign="top"><strong>Debug probes</strong><br>Markdown and renderer test scenarios.</td>
+    <td valign="top"><strong>Diagnostics</strong><br>Event log, copyable logs, runtime metadata.</td>
   </tr>
 </table>
 
@@ -86,20 +86,19 @@ Runtime controls, debug probes, and diagnostics.
 
 ## Model Assets
 
-- Hugging Face reference build used during development: [unsloth/gemma-4-E4B-it-GGUF](https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF)
-- Main GGUF: [`gemma-4-E4B-it-Q4_K_M.gguf`](https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF/blob/main/gemma-4-E4B-it-Q4_K_M.gguf)
-- Image projector: [`mmproj-F16.gguf`](https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF/blob/main/mmproj-F16.gguf)
+- Source: [unsloth/gemma-4-E4B-it-GGUF](https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF)
+- Model: [`gemma-4-E4B-it-Q4_K_M.gguf`](https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF/blob/main/gemma-4-E4B-it-Q4_K_M.gguf) (5.4 GB)
+- Vision projector: [`mmproj-F16.gguf`](https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF/blob/main/mmproj-F16.gguf) (~1.0 GB)
 
 ## Known Issues
 
 - Initial model load after download can be slow and occasionally flaky
-- First-time setup downloads ~6.4 GB (5.4 GB model + ~1.0 GB vision projector)
 
 ## Build
 
 1. Open `Yemma4.xcodeproj` in Xcode 15+.
 2. Run on a physical iPhone with iOS 17+.
-3. Use `./scripts/sim_run.sh` for mocked simulator iteration.
+3. Use `./scripts/sim_run.sh` for simulator testing (mocked inference).
 
 ## Release
 
