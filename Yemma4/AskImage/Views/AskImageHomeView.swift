@@ -163,7 +163,7 @@ struct AskImageModelCard: View {
         switch state {
         case .notDownloaded:
             Button(action: onDownload) {
-                Label("Download", systemImage: "arrow.down.circle.fill")
+                Label(downloadSizeLabel, systemImage: "arrow.down.circle.fill")
                     .font(.subheadline.weight(.semibold))
                     .frame(maxWidth: .infinity)
             }
@@ -225,11 +225,20 @@ struct AskImageModelCard: View {
                 Label(reason, systemImage: "xmark.circle.fill")
                     .font(.caption)
                     .foregroundStyle(.red)
-                Button("Retry", action: onDownload)
+                Button("Retry Download", action: onDownload)
                     .font(.subheadline.weight(.medium))
                     .buttonStyle(.bordered)
             }
         }
+    }
+
+    private var downloadSizeLabel: String {
+        let gb = Double(model.expectedBytes) / 1_073_741_824
+        if gb >= 1.0 {
+            return String(format: "Download (%.1f GB)", gb)
+        }
+        let mb = Double(model.expectedBytes) / 1_048_576
+        return String(format: "Download (%.0f MB)", mb)
     }
 }
 
@@ -269,6 +278,50 @@ struct AskImageModelCard: View {
     AskImageHomeView(
         models: [.gemma4E2B, .gemma4E4B],
         modelState: { _ in .downloaded },
+        onSelectModel: { _ in },
+        onDownloadModel: { _ in },
+        onCancelDownload: { _ in },
+        onDeleteModel: { _ in },
+        onDismiss: {}
+    )
+}
+
+#Preview("Home - No Models Downloaded") {
+    AskImageHomeView(
+        models: [.gemma4E2B, .gemma4E4B],
+        modelState: { _ in .notDownloaded },
+        onSelectModel: { _ in },
+        onDownloadModel: { _ in },
+        onCancelDownload: { _ in },
+        onDeleteModel: { _ in },
+        onDismiss: {}
+    )
+}
+
+#Preview("Home - Download Failed") {
+    AskImageHomeView(
+        models: [.gemma4E2B, .gemma4E4B],
+        modelState: { id in
+            id == LiteRTModelDescriptor.gemma4E2B.id
+                ? .failed(reason: "No internet connection. Try again when the network is available.")
+                : .notDownloaded
+        },
+        onSelectModel: { _ in },
+        onDownloadModel: { _ in },
+        onCancelDownload: { _ in },
+        onDeleteModel: { _ in },
+        onDismiss: {}
+    )
+}
+
+#Preview("Home - Validation Failed") {
+    AskImageHomeView(
+        models: [.gemma4E2B, .gemma4E4B],
+        modelState: { id in
+            id == LiteRTModelDescriptor.gemma4E2B.id
+                ? .validationFailed(reason: "Downloaded file failed validation")
+                : .downloaded
+        },
         onSelectModel: { _ in },
         onDownloadModel: { _ in },
         onCancelDownload: { _ in },

@@ -198,13 +198,13 @@ struct AskImageSessionView: View {
                 .font(.system(size: 40))
                 .foregroundStyle(AppTheme.textSecondary.opacity(0.5))
 
-            Text("Attach an image to get started")
+            Text("Attach a photo, then ask a question")
                 .font(.subheadline)
                 .foregroundStyle(AppTheme.textSecondary)
 
             VStack(spacing: 8) {
-                Text("Try asking:")
-                    .font(.caption)
+                Text("Suggestions")
+                    .font(.caption.weight(.medium))
                     .foregroundStyle(AppTheme.textSecondary)
 
                 ForEach(presetPrompts, id: \.self) { preset in
@@ -306,6 +306,19 @@ struct AskImageSessionView: View {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .stroke(AppTheme.messageBubbleBorder, lineWidth: 1)
             )
+            .contextMenu {
+                if message.role == .assistant && !message.isStreaming && !message.text.isEmpty {
+                    Button {
+                        UIPasteboard.general.string = message.text
+                    } label: {
+                        Label("Copy", systemImage: "doc.on.doc")
+                    }
+
+                    ShareLink(item: message.text) {
+                        Label("Share", systemImage: "square.and.arrow.up")
+                    }
+                }
+            }
 
             if message.role == .assistant { Spacer(minLength: 60) }
         }
@@ -459,6 +472,10 @@ struct AskImageErrorBanner: View {
         .padding(12)
         .background(AppTheme.card)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(AppTheme.cardBorder, lineWidth: 1)
+        )
         .padding(.horizontal, 16)
     }
 }
@@ -528,6 +545,21 @@ struct AskImageErrorBanner: View {
                 text: "This image shows a well-composed scene with clear subject matter. The lighting is natural and the colors are vibrant. I can see several distinct elements that create an interesting visual composition."
             ),
         ],
+        attachment: AskImageAttachment(originalURL: URL(fileURLWithPath: "/tmp/test.jpg")),
+        onSend: { _ in },
+        onPickedImage: { _ in },
+        onCancel: {},
+        onNewSession: {},
+        onDismiss: {},
+        onRetryError: {}
+    )
+}
+
+#Preview("Session - Image Attached") {
+    AskImageSessionView(
+        modelName: "Gemma 4 E2B",
+        sessionState: .readyForInput,
+        messages: [],
         attachment: AskImageAttachment(originalURL: URL(fileURLWithPath: "/tmp/test.jpg")),
         onSend: { _ in },
         onPickedImage: { _ in },
