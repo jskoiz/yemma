@@ -30,6 +30,20 @@
 		D3000009 /* EmptyStateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D300000A /* EmptyStateView.swift */; };
 		D300000D /* ChatSessionController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D300000E /* ChatSessionController.swift */; };
 
+		BF2EFB3FB3C2A3A4064D2833 /* AskImageFeature.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C6C591EE57AF5C5DB656248 /* AskImageFeature.swift */; };
+		01A1E7F87DF9BD720895D67D /* LiteRTModelDescriptor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1FF2F3D4C1D46E5A02BC6EEF /* LiteRTModelDescriptor.swift */; };
+		EF64695F368DB222EF6475A0 /* LiteRTModelState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6725F40161765B926923C4E9 /* LiteRTModelState.swift */; };
+		EAC83F16FCDDD8F403A489B4 /* AskImageAttachment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54C9B3798EEA317E812239EB /* AskImageAttachment.swift */; };
+		D49FD9CFA7F96296ACA9E4F2 /* AskImageMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4BB407572E94A77AFC6A234D /* AskImageMessage.swift */; };
+		00C1C771A36DF8B5BD58F871 /* AskImageSessionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B6126C317E6091F238194EC /* AskImageSessionState.swift */; };
+		53D35FCFDD23C91D4974F184 /* AskImageRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91D36D87124BFCC98B2CB87E /* AskImageRuntime.swift */; };
+		14CD1CCDE4DB878EBFE8A628 /* AskImageModelStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 654F9B9E0D8C0FF3A41FC5EE /* AskImageModelStore.swift */; };
+		60AB44970618910CA5179A8E /* StubAskImageRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 372FEA4E5F3042D9FA20D616 /* StubAskImageRuntime.swift */; };
+		A171EC6BD23026A08A3F1D5D /* StubAskImageModelStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78A132E914214900F4F784B8 /* StubAskImageModelStore.swift */; };
+		71E76D65F8D9DDDB8EED04F7 /* AskImageHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5198412F573475C43B1CFD9 /* AskImageHomeView.swift */; };
+		10504A52C773B850ABD7A45B /* AskImageSessionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C6C7357C0318472FA74CE75 /* AskImageSessionView.swift */; };
+		B13A661DE5B1D67D41D49CE7 /* AskImageCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17D1F8E3AB73F47DB008D254 /* AskImageCoordinator.swift */; };
+
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -55,6 +69,20 @@
 		D3000008 /* ConversationBrowserSheet.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ConversationBrowserSheet.swift; sourceTree = "<group>"; };
 		D300000A /* EmptyStateView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = EmptyStateView.swift; sourceTree = "<group>"; };
 		D300000E /* ChatSessionController.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ChatSessionController.swift; sourceTree = "<group>"; };
+
+		4C6C591EE57AF5C5DB656248 /* AskImageFeature.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AskImageFeature.swift; sourceTree = "<group>"; };
+		1FF2F3D4C1D46E5A02BC6EEF /* LiteRTModelDescriptor.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LiteRTModelDescriptor.swift; sourceTree = "<group>"; };
+		6725F40161765B926923C4E9 /* LiteRTModelState.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LiteRTModelState.swift; sourceTree = "<group>"; };
+		54C9B3798EEA317E812239EB /* AskImageAttachment.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AskImageAttachment.swift; sourceTree = "<group>"; };
+		4BB407572E94A77AFC6A234D /* AskImageMessage.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AskImageMessage.swift; sourceTree = "<group>"; };
+		2B6126C317E6091F238194EC /* AskImageSessionState.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AskImageSessionState.swift; sourceTree = "<group>"; };
+		91D36D87124BFCC98B2CB87E /* AskImageRuntime.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AskImageRuntime.swift; sourceTree = "<group>"; };
+		654F9B9E0D8C0FF3A41FC5EE /* AskImageModelStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AskImageModelStore.swift; sourceTree = "<group>"; };
+		372FEA4E5F3042D9FA20D616 /* StubAskImageRuntime.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StubAskImageRuntime.swift; sourceTree = "<group>"; };
+		78A132E914214900F4F784B8 /* StubAskImageModelStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StubAskImageModelStore.swift; sourceTree = "<group>"; };
+		D5198412F573475C43B1CFD9 /* AskImageHomeView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AskImageHomeView.swift; sourceTree = "<group>"; };
+		4C6C7357C0318472FA74CE75 /* AskImageSessionView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AskImageSessionView.swift; sourceTree = "<group>"; };
+		17D1F8E3AB73F47DB008D254 /* AskImageCoordinator.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AskImageCoordinator.swift; sourceTree = "<group>"; };
 
 /* End PBXFileReference section */
 
@@ -117,6 +145,7 @@
 				B10000002 /* Yemma4App.swift */,
 				B10000004 /* ContentView.swift */,
 				B10000006 /* Assets.xcassets */,
+				17BF8C72AF4DC7EAAAE7F6E1 /* AskImage */,
 				D3100001 /* Controllers */,
 				5B7C0764582A88CC0118AAB9 /* Models */,
 				CE67C04D23A2513EC55AA96D /* Services */,
@@ -146,6 +175,51 @@
 				D3000006 /* StreamingRenderer.swift */,
 			);
 			path = Services;
+			sourceTree = "<group>";
+		};
+
+		2976BE4D22A8161826FD6697 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				1FF2F3D4C1D46E5A02BC6EEF /* LiteRTModelDescriptor.swift */,
+				6725F40161765B926923C4E9 /* LiteRTModelState.swift */,
+				54C9B3798EEA317E812239EB /* AskImageAttachment.swift */,
+				4BB407572E94A77AFC6A234D /* AskImageMessage.swift */,
+				2B6126C317E6091F238194EC /* AskImageSessionState.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		EBC354A2AAFE99C9573DFB14 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				91D36D87124BFCC98B2CB87E /* AskImageRuntime.swift */,
+				654F9B9E0D8C0FF3A41FC5EE /* AskImageModelStore.swift */,
+				372FEA4E5F3042D9FA20D616 /* StubAskImageRuntime.swift */,
+				78A132E914214900F4F784B8 /* StubAskImageModelStore.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		BA2C4DCB6232231404ABD28E /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				D5198412F573475C43B1CFD9 /* AskImageHomeView.swift */,
+				4C6C7357C0318472FA74CE75 /* AskImageSessionView.swift */,
+				17D1F8E3AB73F47DB008D254 /* AskImageCoordinator.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		17BF8C72AF4DC7EAAAE7F6E1 /* AskImage */ = {
+			isa = PBXGroup;
+			children = (
+				4C6C591EE57AF5C5DB656248 /* AskImageFeature.swift */,
+				2976BE4D22A8161826FD6697 /* Models */,
+				EBC354A2AAFE99C9573DFB14 /* Services */,
+				BA2C4DCB6232231404ABD28E /* Views */,
+			);
+			path = AskImage;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -245,6 +319,19 @@
 				D300000D /* ChatSessionController.swift in Sources */,
 				D3000007 /* ConversationBrowserSheet.swift in Sources */,
 				D3000009 /* EmptyStateView.swift in Sources */,
+				BF2EFB3FB3C2A3A4064D2833 /* AskImageFeature.swift in Sources */,
+				01A1E7F87DF9BD720895D67D /* LiteRTModelDescriptor.swift in Sources */,
+				EF64695F368DB222EF6475A0 /* LiteRTModelState.swift in Sources */,
+				EAC83F16FCDDD8F403A489B4 /* AskImageAttachment.swift in Sources */,
+				D49FD9CFA7F96296ACA9E4F2 /* AskImageMessage.swift in Sources */,
+				00C1C771A36DF8B5BD58F871 /* AskImageSessionState.swift in Sources */,
+				53D35FCFDD23C91D4974F184 /* AskImageRuntime.swift in Sources */,
+				14CD1CCDE4DB878EBFE8A628 /* AskImageModelStore.swift in Sources */,
+				60AB44970618910CA5179A8E /* StubAskImageRuntime.swift in Sources */,
+				A171EC6BD23026A08A3F1D5D /* StubAskImageModelStore.swift in Sources */,
+				71E76D65F8D9DDDB8EED04F7 /* AskImageHomeView.swift in Sources */,
+				10504A52C773B850ABD7A45B /* AskImageSessionView.swift in Sources */,
+				B13A661DE5B1D67D41D49CE7 /* AskImageCoordinator.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
