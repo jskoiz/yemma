@@ -48,7 +48,7 @@ final class ChatSessionController {
         guard !isImportingAttachments else { return false }
         let hasDraft = !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         guard hasDraft || !pendingAttachments.isEmpty else { return false }
-        return llmService.isModelLoaded || !supportsLocalModelRuntime
+        return llmService.isTextModelReady || !supportsLocalModelRuntime
     }
 
     var shouldShowTypingIndicator: Bool {
@@ -68,7 +68,7 @@ final class ChatSessionController {
     func submitDraft() {
         let trimmedText = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedText.isEmpty || !pendingAttachments.isEmpty else { return }
-        guard llmService.isModelLoaded || !supportsLocalModelRuntime else {
+        guard llmService.isTextModelReady || !supportsLocalModelRuntime else {
             AppDiagnostics.shared.record("Send blocked because model is not loaded", category: "ui")
             generationError = "The model is not loaded yet."
             return
@@ -238,7 +238,7 @@ final class ChatSessionController {
             return
         }
 
-        guard llmService.isModelLoaded else {
+        guard llmService.isTextModelReady else {
             messages = [
                 .previewMessage(user: .user, text: prompt),
                 .previewMessage(

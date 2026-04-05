@@ -82,7 +82,7 @@ public struct OnboardingView: View {
             }
 
             Text("No account. No cloud. Just chat.")
-                .font(.system(size: 40, weight: .bold, design: .serif))
+                .font(AppTheme.Typography.brandHero)
                 .foregroundStyle(AppTheme.textPrimary)
 
             Text("Yemma runs Gemma 4 entirely on your iPhone. Download the model and vision projector once, then every conversation stays on-device.")
@@ -102,16 +102,11 @@ public struct OnboardingView: View {
 
             if !supportsLocalModelRuntime {
                 Text("You’re running in the iOS Simulator. Download is skipped here and chat uses mocked replies so you can test the UI. Use a physical iPhone for real on-device inference.")
-                    .font(.system(size: 13, weight: .medium))
+                    .font(AppTheme.Typography.utilityCaption)
                     .foregroundStyle(AppTheme.textSecondary)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
-                    .background(AppTheme.controlFill)
-                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .stroke(AppTheme.controlBorder, lineWidth: 1)
-                    )
+                    .brandCard(cornerRadius: AppTheme.Radius.small)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -127,7 +122,7 @@ public struct OnboardingView: View {
             HStack(alignment: .top, spacing: 16) {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(statusTitle)
-                        .font(.system(size: 28, weight: .bold, design: .serif))
+                        .font(AppTheme.Typography.brandSection)
                         .foregroundStyle(AppTheme.textPrimary)
 
                     Text(statusDescription)
@@ -168,12 +163,12 @@ public struct OnboardingView: View {
             } else if let error = visibleErrorMessage {
                 Text(error)
                     .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Color.red.opacity(0.9))
+                    .foregroundStyle(AppTheme.destructive)
             }
             primaryAction
         }
         .padding(20)
-        .glassCard(cornerRadius: 24)
+        .brandCard(cornerRadius: AppTheme.Radius.large)
     }
 
     private func factChip(_ text: String) -> some View {
@@ -184,10 +179,6 @@ public struct OnboardingView: View {
             .padding(.vertical, 10)
             .background(AppTheme.chipFill)
             .clipShape(Capsule())
-            .overlay(
-                Capsule()
-                    .stroke(AppTheme.controlBorder, lineWidth: 1)
-            )
     }
 
     @ViewBuilder
@@ -249,10 +240,10 @@ public struct OnboardingView: View {
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(AppTheme.accentForeground.opacity(0.88))
             }
-            .padding(.horizontal, 18)
+            .padding(.horizontal, AppTheme.Layout.rowHorizontalPadding)
             .padding(.vertical, 17)
             .background(AppTheme.accent)
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.small, style: .continuous))
         }
         .buttonStyle(.plain)
         .disabled(!isEnabled)
@@ -348,7 +339,7 @@ public struct OnboardingView: View {
         }
 
         if isPreparingModel {
-            return "The file is already on this iPhone. Yemma is loading it now so chat opens ready instead of freezing."
+            return "The files are already on this iPhone. Yemma is warming the text runtime in the background so the chat shell can stay responsive."
         }
 
         if modelDownloader.isDownloaded {
@@ -363,7 +354,7 @@ public struct OnboardingView: View {
     }
 
     private var isModelDownloadedNotReady: Bool {
-        supportsLocalModelRuntime && modelDownloader.isDownloaded && !llmService.isModelLoaded
+        supportsLocalModelRuntime && modelDownloader.isDownloaded && !llmService.isTextModelReady
     }
 
     private var hasModelPreparationError: Bool {

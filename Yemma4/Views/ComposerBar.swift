@@ -64,7 +64,7 @@ struct ComposerBar: View {
 
             TextField("Ask anything", text: $draft, axis: .vertical)
                 .textFieldStyle(.plain)
-                .font(.system(size: 18, weight: .medium, design: .rounded))
+                .font(AppTheme.Typography.chatComposer)
                 .foregroundStyle(AppTheme.textPrimary)
                 .focused($isComposerFocused)
                 .submitLabel(.send)
@@ -82,7 +82,7 @@ struct ComposerBar: View {
                 Image(systemName: isGenerating ? "stop.fill" : "arrow.up")
                     .font(.system(size: 18, weight: .bold))
                     .foregroundStyle(AppTheme.accentForeground)
-                    .frame(width: 42, height: 42)
+                    .frame(width: AppTheme.Layout.composerActionSize, height: AppTheme.Layout.composerActionSize)
                     .background(AppTheme.accent)
                     .clipShape(Circle())
             }
@@ -91,15 +91,8 @@ struct ComposerBar: View {
             .opacity((!isGenerating && !canSubmit) ? 0.45 : 1)
         }
         .padding(8)
-        .background(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(AppTheme.inputFill)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 24, style: .continuous)
-                        .stroke(AppTheme.controlBorder, lineWidth: 1)
-                )
-        )
-        .contentShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .inputChrome(cornerRadius: AppTheme.Radius.medium)
+        .contentShape(RoundedRectangle(cornerRadius: AppTheme.Radius.medium, style: .continuous))
         .onTapGesture {
             isComposerFocused = true
         }
@@ -141,14 +134,14 @@ struct ComposerBar: View {
                 .tint(AppTheme.textSecondary)
 
             Text("Yemma 4 is thinking\u{2026}")
-                .font(.system(size: 14, weight: .semibold, design: .rounded))
+                .font(AppTheme.Typography.utilityCaption)
                 .foregroundStyle(AppTheme.textSecondary)
 
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
-        .glassCard(cornerRadius: 18)
+        .brandCard(cornerRadius: AppTheme.Radius.small)
     }
 
     // MARK: - Attachment Picker
@@ -223,7 +216,7 @@ struct ComposerBar: View {
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(AppTheme.messageBubbleBorder, lineWidth: 1)
+                .stroke(AppTheme.assistantBubbleBorder, lineWidth: 1)
         )
     }
 }

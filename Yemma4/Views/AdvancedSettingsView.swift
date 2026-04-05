@@ -20,10 +20,10 @@ struct AdvancedSettingsView: View {
 
     var body: some View {
         ZStack {
-            AppBackground()
+            UtilityBackground()
 
             ScrollView(showsIndicators: false) {
-                VStack(spacing: 24) {
+                VStack(spacing: AppTheme.Layout.sectionSpacing) {
                     header
 
                     if needsReload {
@@ -39,7 +39,7 @@ struct AdvancedSettingsView: View {
 #endif
                     resetSection
                 }
-                .padding(.horizontal, 16)
+                .padding(.horizontal, AppTheme.Layout.screenPadding)
                 .padding(.top, 20)
                 .padding(.bottom, 28)
             }
@@ -57,7 +57,7 @@ struct AdvancedSettingsView: View {
             }
             Spacer()
             Text("Advanced")
-                .font(.system(size: 24, weight: .semibold, design: .rounded))
+                .font(AppTheme.Typography.utilityTitle)
                 .foregroundStyle(AppTheme.textPrimary)
             Spacer()
             // Balance the back button
@@ -71,52 +71,42 @@ struct AdvancedSettingsView: View {
     private var reloadBanner: some View {
         HStack(spacing: 12) {
             Image(systemName: "arrow.triangle.2.circlepath")
-                .font(.system(size: 16, weight: .semibold))
+                .font(.body.weight(.semibold))
                 .foregroundStyle(AppTheme.accent)
 
             Text("Reload model to apply changes.")
-                .font(.system(size: 15, weight: .medium, design: .rounded))
+                .font(AppTheme.Typography.utilityRowTitle)
                 .foregroundStyle(AppTheme.textPrimary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 18)
+        .padding(.horizontal, AppTheme.Layout.rowHorizontalPadding)
         .padding(.vertical, 14)
-        .glassCard(cornerRadius: 20)
+        .groupedCard(cornerRadius: AppTheme.Radius.medium)
     }
 
     private var inferenceSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Inference")
-                .font(.system(size: 19, weight: .semibold, design: .rounded))
-                .foregroundStyle(AppTheme.textSecondary)
-                .padding(.horizontal, 12)
-
-            VStack(spacing: 0) {
-                temperatureRow
-                separator
-                contextSizeRow
-                separator
-                flashAttentionRow
-                separator
-                maxResponseTokensRow
-            }
-            .padding(.vertical, 4)
-            .glassCard(cornerRadius: 26)
+        UtilitySection("Inference") {
+            temperatureRow
+            UtilitySectionSeparator()
+            contextSizeRow
+            UtilitySectionSeparator()
+            flashAttentionRow
+            UtilitySectionSeparator()
+            maxResponseTokensRow
         }
     }
 
     private var temperatureRow: some View {
-        @Bindable var service = llmService
         return VStack(alignment: .leading, spacing: 14) {
             HStack {
                 Label("Creativity", systemImage: "slider.horizontal.3")
-                    .font(.system(size: 18, weight: .medium, design: .rounded))
+                    .font(AppTheme.Typography.utilityRowTitle)
                     .foregroundStyle(AppTheme.textPrimary)
 
                 Spacer()
 
                 Text(String(format: "%.1f", llmService.temperature))
-                    .font(.system(size: 16, weight: .semibold, design: .rounded))
+                    .font(AppTheme.Typography.utilityRowDetail)
                     .foregroundStyle(AppTheme.textSecondary)
             }
 
@@ -131,24 +121,23 @@ struct AdvancedSettingsView: View {
             .tint(AppTheme.accent)
 
             Text("Lower values stay focused. Higher values improvise more.")
-                .font(.system(size: 14, weight: .medium, design: .rounded))
+                .font(AppTheme.Typography.utilityCaption)
                 .foregroundStyle(AppTheme.textSecondary)
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 16)
+        .utilityRowPadding()
     }
 
     private var contextSizeRow: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
                 Label("Context Window", systemImage: "text.alignleft")
-                    .font(.system(size: 18, weight: .medium, design: .rounded))
+                    .font(AppTheme.Typography.utilityRowTitle)
                     .foregroundStyle(AppTheme.textPrimary)
 
                 Spacer()
 
                 Text(contextSizeLabel(llmService.contextSize))
-                    .font(.system(size: 16, weight: .semibold, design: .rounded))
+                    .font(AppTheme.Typography.utilityRowDetail)
                     .foregroundStyle(AppTheme.textSecondary)
             }
 
@@ -166,11 +155,10 @@ struct AdvancedSettingsView: View {
             .pickerStyle(.segmented)
 
             Text("Higher values use more memory. Requires model reload.")
-                .font(.system(size: 14, weight: .medium, design: .rounded))
+                .font(AppTheme.Typography.utilityCaption)
                 .foregroundStyle(AppTheme.textSecondary)
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 16)
+        .utilityRowPadding()
     }
 
     private var flashAttentionRow: some View {
@@ -183,30 +171,29 @@ struct AdvancedSettingsView: View {
                 }
             )) {
                 Label("Flash Attention", systemImage: "bolt")
-                    .font(.system(size: 18, weight: .medium, design: .rounded))
+                    .font(AppTheme.Typography.utilityRowTitle)
                     .foregroundStyle(AppTheme.textPrimary)
             }
             .tint(AppTheme.accent)
 
             Text("Hardware-accelerated attention. Improves speed on supported devices. Requires model reload.")
-                .font(.system(size: 14, weight: .medium, design: .rounded))
+                .font(AppTheme.Typography.utilityCaption)
                 .foregroundStyle(AppTheme.textSecondary)
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 16)
+        .utilityRowPadding()
     }
 
     private var maxResponseTokensRow: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
                 Label("Max Response", systemImage: "text.word.spacing")
-                    .font(.system(size: 18, weight: .medium, design: .rounded))
+                    .font(AppTheme.Typography.utilityRowTitle)
                     .foregroundStyle(AppTheme.textPrimary)
 
                 Spacer()
 
                 Text(tokenLabel(llmService.maxResponseTokens))
-                    .font(.system(size: 16, weight: .semibold, design: .rounded))
+                    .font(AppTheme.Typography.utilityRowDetail)
                     .foregroundStyle(AppTheme.textSecondary)
             }
 
@@ -221,74 +208,60 @@ struct AdvancedSettingsView: View {
             .pickerStyle(.segmented)
 
             Text("Maximum tokens the model can generate per reply.")
-                .font(.system(size: 14, weight: .medium, design: .rounded))
+                .font(AppTheme.Typography.utilityCaption)
                 .foregroundStyle(AppTheme.textSecondary)
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 16)
+        .utilityRowPadding()
     }
 
     // MARK: - Diagnostics
 
     private var diagnosticsSection: some View {
-        settingsSection("Diagnostics") {
-            VStack(spacing: 0) {
-                infoRow(icon: "waveform.path.ecg", title: "Recent events", detail: "\(diagnostics.recentEvents.count)")
-                separator
+        UtilitySection("Diagnostics") {
+            infoRow(icon: "waveform.path.ecg", title: "Recent events", detail: "\(diagnostics.recentEvents.count)")
+            UtilitySectionSeparator()
+            Button {
+                diagnostics.copyToPasteboard()
+                diagnosticsCopied = true
+            } label: {
+                utilityActionRow(icon: "doc.on.doc", title: "Copy diagnostics log")
+            }
+            .buttonStyle(.plain)
+            UtilitySectionSeparator()
+            destructiveRow(icon: "trash", title: "Clear diagnostics log") {
+                diagnostics.clear()
+            }
+
+            if !diagnostics.recentEvents.isEmpty {
+                UtilitySectionSeparator()
                 Button {
-                    diagnostics.copyToPasteboard()
-                    diagnosticsCopied = true
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        showEventLog.toggle()
+                    }
                 } label: {
                     HStack(spacing: 14) {
-                        Image(systemName: "doc.on.doc")
-                            .frame(width: 22)
+                        Image(systemName: "list.bullet.rectangle")
+                            .frame(width: AppTheme.Layout.rowIconSize)
                             .foregroundStyle(AppTheme.textPrimary)
-                        Text("Copy diagnostics log")
-                            .font(.system(size: 18, weight: .medium, design: .rounded))
+                        Text("Event log")
+                            .font(AppTheme.Typography.utilityRowTitle)
                             .foregroundStyle(AppTheme.textPrimary)
                         Spacer()
+                        Text("\(diagnostics.recentEvents.suffix(8).count)")
+                            .font(AppTheme.Typography.utilityRowDetail)
+                            .foregroundStyle(AppTheme.textSecondary)
+                        Image(systemName: showEventLog ? "chevron.up" : "chevron.down")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(AppTheme.textSecondary)
                     }
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 16)
+                    .utilityRowPadding()
                 }
                 .buttonStyle(.plain)
-                separator
-                destructiveRow(icon: "trash", title: "Clear diagnostics log") {
-                    diagnostics.clear()
-                }
 
-                if !diagnostics.recentEvents.isEmpty {
-                    separator
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.25)) {
-                            showEventLog.toggle()
-                        }
-                    } label: {
-                        HStack(spacing: 14) {
-                            Image(systemName: "list.bullet.rectangle")
-                                .frame(width: 22)
-                                .foregroundStyle(AppTheme.textPrimary)
-                            Text("Event log")
-                                .font(.system(size: 18, weight: .medium, design: .rounded))
-                                .foregroundStyle(AppTheme.textPrimary)
-                            Spacer()
-                            Text("\(diagnostics.recentEvents.suffix(8).count)")
-                                .font(.system(size: 16, weight: .medium, design: .rounded))
-                                .foregroundStyle(AppTheme.textSecondary)
-                            Image(systemName: showEventLog ? "chevron.up" : "chevron.down")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(AppTheme.textSecondary)
-                        }
-                        .padding(.horizontal, 18)
-                        .padding(.vertical, 16)
-                    }
-                    .buttonStyle(.plain)
-
-                    if showEventLog {
-                        ForEach(Array(diagnostics.recentEvents.suffix(8).reversed())) { event in
-                            separator
-                            diagnosticEventRow(event)
-                        }
+                if showEventLog {
+                    ForEach(Array(diagnostics.recentEvents.suffix(8).reversed())) { event in
+                        UtilitySectionSeparator(leadingInset: AppTheme.Layout.rowHorizontalPadding)
+                        diagnosticEventRow(event)
                     }
                 }
             }
@@ -304,18 +277,18 @@ struct AdvancedSettingsView: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline) {
                 Text(event.category.uppercased())
-                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .font(.caption.weight(.bold))
                     .foregroundStyle(AppTheme.textSecondary)
 
                 Spacer()
 
                 Text(event.timestamp.formatted(date: .omitted, time: .standard))
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .font(AppTheme.Typography.utilityCaption)
                     .foregroundStyle(AppTheme.textSecondary)
             }
 
             Text(event.message)
-                .font(.system(size: 15, weight: .semibold, design: .rounded))
+                .font(AppTheme.Typography.utilityRowTitle.weight(.semibold))
                 .foregroundStyle(AppTheme.textPrimary)
 
             if !event.metadata.isEmpty {
@@ -325,12 +298,12 @@ struct AdvancedSettingsView: View {
                         .map { "\($0.key): \($0.value)" }
                         .joined(separator: " • ")
                 )
-                .font(.system(size: 13, weight: .medium, design: .rounded))
+                .font(AppTheme.Typography.utilityCaption)
                 .foregroundStyle(AppTheme.textSecondary)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 18)
+        .padding(.horizontal, AppTheme.Layout.rowHorizontalPadding)
         .padding(.vertical, 14)
     }
 
@@ -338,28 +311,25 @@ struct AdvancedSettingsView: View {
 
 #if DEBUG
     private var debugSection: some View {
-        settingsSection("Debug Scenarios") {
-            VStack(spacing: 0) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Use these from a Debug build to probe formatting quality. Run the live prompts on a physical iPhone, since the simulator only returns mocked replies.")
-                        .font(.system(size: 14, weight: .medium, design: .rounded))
-                        .foregroundStyle(AppTheme.textSecondary)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 18)
-                .padding(.vertical, 16)
+        UtilitySection("Debug Scenarios") {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Use these from a Debug build to probe formatting quality. Run the live prompts on a physical iPhone, since the simulator only returns mocked replies.")
+                    .font(AppTheme.Typography.utilityCaption)
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .utilityRowPadding()
 
-                if let onRunDebugScenario {
-                    ForEach(DebugInferenceScenario.allCases) { scenario in
-                        separator
-                        actionDetailRow(
-                            icon: scenario.icon,
-                            title: scenario.title,
-                            detail: scenario.detail
-                        ) {
-                            dismiss()
-                            onRunDebugScenario(scenario)
-                        }
+            if let onRunDebugScenario {
+                ForEach(DebugInferenceScenario.allCases) { scenario in
+                    UtilitySectionSeparator()
+                    actionDetailRow(
+                        icon: scenario.icon,
+                        title: scenario.title,
+                        detail: scenario.detail
+                    ) {
+                        dismiss()
+                        onRunDebugScenario(scenario)
                     }
                 }
             }
@@ -376,15 +346,15 @@ struct AdvancedSettingsView: View {
         Button(action: action) {
             HStack(spacing: 14) {
                 Image(systemName: icon)
-                    .frame(width: 22)
+                    .frame(width: AppTheme.Layout.rowIconSize)
                     .foregroundStyle(AppTheme.textPrimary)
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(title)
-                        .font(.system(size: 18, weight: .medium, design: .rounded))
+                        .font(AppTheme.Typography.utilityRowTitle)
                         .foregroundStyle(AppTheme.textPrimary)
                     Text(detail)
-                        .font(.system(size: 14, weight: .medium, design: .rounded))
+                        .font(AppTheme.Typography.utilityCaption)
                         .foregroundStyle(AppTheme.textSecondary)
                         .multilineTextAlignment(.leading)
                 }
@@ -392,99 +362,81 @@ struct AdvancedSettingsView: View {
                 Spacer()
 
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.footnote.weight(.semibold))
                     .foregroundStyle(AppTheme.textSecondary)
             }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 16)
+            .utilityRowPadding()
         }
         .buttonStyle(.plain)
-    }
-
-    // MARK: - Shared Helpers
-
-    private func settingsSection<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(title)
-                .font(.system(size: 19, weight: .semibold, design: .rounded))
-                .foregroundStyle(AppTheme.textSecondary)
-                .padding(.horizontal, 12)
-
-            VStack(spacing: 0) {
-                content()
-            }
-            .padding(.vertical, 4)
-            .glassCard(cornerRadius: 26)
-        }
     }
 
     private func infoRow(icon: String, title: String, detail: String) -> some View {
         HStack(spacing: 14) {
             Image(systemName: icon)
-                .frame(width: 22)
+                .frame(width: AppTheme.Layout.rowIconSize)
                 .foregroundStyle(AppTheme.textPrimary)
 
             Text(title)
-                .font(.system(size: 18, weight: .medium, design: .rounded))
+                .font(AppTheme.Typography.utilityRowTitle)
                 .foregroundStyle(AppTheme.textPrimary)
 
             Spacer()
 
             Text(detail)
-                .font(.system(size: 16, weight: .medium, design: .rounded))
+                .font(AppTheme.Typography.utilityRowDetail)
                 .foregroundStyle(AppTheme.textSecondary)
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 16)
+        .utilityRowPadding()
     }
 
     private func destructiveRow(icon: String, title: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 14) {
                 Image(systemName: icon)
-                    .frame(width: 22)
+                    .frame(width: AppTheme.Layout.rowIconSize)
                 Text(title)
-                    .font(.system(size: 18, weight: .medium, design: .rounded))
+                    .font(AppTheme.Typography.utilityRowTitle)
                 Spacer()
             }
-            .foregroundStyle(Color.red.opacity(0.9))
-            .padding(.horizontal, 18)
-            .padding(.vertical, 16)
+            .foregroundStyle(AppTheme.destructive)
+            .utilityRowPadding()
         }
         .buttonStyle(.plain)
+    }
+
+    private func utilityActionRow(icon: String, title: String) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: icon)
+                .frame(width: AppTheme.Layout.rowIconSize)
+                .foregroundStyle(AppTheme.textPrimary)
+            Text(title)
+                .font(AppTheme.Typography.utilityRowTitle)
+                .foregroundStyle(AppTheme.textPrimary)
+            Spacer()
+        }
+        .utilityRowPadding()
     }
 
     // MARK: - Reset
 
     private var resetSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            VStack(spacing: 0) {
-                Button {
-                    llmService.resetAdvancedSettings()
-                    needsReload = true
-                } label: {
-                    HStack(spacing: 14) {
-                        Image(systemName: "arrow.counterclockwise")
-                            .frame(width: 22)
-                        Text("Reset to Defaults")
-                            .font(.system(size: 18, weight: .medium, design: .rounded))
-                        Spacer()
-                    }
-                    .foregroundStyle(AppTheme.accent)
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 16)
+        UtilitySection("Reset") {
+            Button {
+                llmService.resetAdvancedSettings()
+                needsReload = true
+            } label: {
+                HStack(spacing: 14) {
+                    Image(systemName: "arrow.counterclockwise")
+                        .frame(width: AppTheme.Layout.rowIconSize)
+                    Text("Reset to Defaults")
+                        .font(AppTheme.Typography.utilityRowTitle)
+                    Spacer()
                 }
-                .buttonStyle(.plain)
+                .foregroundStyle(AppTheme.accent)
+                .utilityRowPadding()
             }
-            .padding(.vertical, 4)
-            .glassCard(cornerRadius: 26)
+            .buttonStyle(.plain)
         }
-    }
-
-    private var separator: some View {
-        Divider()
-            .padding(.leading, 52)
-            .overlay(AppTheme.separator)
     }
 
     private func contextSizeLabel(_ size: UInt32) -> String {
@@ -501,3 +453,11 @@ struct AdvancedSettingsView: View {
         return "\(count)"
     }
 }
+
+#if DEBUG
+#Preview("Advanced Settings") {
+    AdvancedSettingsView()
+        .environment(LLMService())
+        .environment(AppDiagnostics.shared)
+}
+#endif

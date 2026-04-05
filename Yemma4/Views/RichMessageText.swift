@@ -3,6 +3,7 @@ import MarkdownUI
 
 struct RichMessageText: View {
     let text: String
+    var foregroundColor: Color = AppTheme.assistantMessageText
 
     private let chatMarkdownTheme = Theme.gitHub
         .text {
@@ -44,7 +45,7 @@ struct RichMessageText: View {
         }
         .thematicBreak {
             Divider()
-                .overlay(Color.secondary.opacity(0.2))
+                .overlay(AppTheme.separator)
                 .markdownMargin(top: 6, bottom: 6)
         }
         .code {
@@ -64,14 +65,14 @@ struct RichMessageText: View {
                     }
                     .padding(12)
             }
-            .background(Color.primary.opacity(0.04))
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .background(AppTheme.messageCodeBlockBackground)
+            .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.small, style: .continuous))
             .markdownMargin(top: 4, bottom: 8)
         }
         .blockquote { configuration in
             HStack(spacing: 0) {
                 RoundedRectangle(cornerRadius: 1.5)
-                    .fill(Color.secondary.opacity(0.3))
+                    .fill(AppTheme.messageQuote)
                     .frame(width: 3)
                 configuration.label
                     .markdownTextStyle { ForegroundColor(.secondary) }
@@ -83,7 +84,7 @@ struct RichMessageText: View {
     var body: some View {
         Markdown(text)
             .markdownTheme(chatMarkdownTheme)
-            .foregroundStyle(AppTheme.textPrimary)
+            .foregroundStyle(foregroundColor)
             .tint(AppTheme.accent)
             .textSelection(.enabled)
             .fixedSize(horizontal: false, vertical: true)
@@ -93,11 +94,12 @@ struct RichMessageText: View {
 /// Lightweight plain-text view used during streaming to avoid markdown layout churn.
 struct StreamingText: View {
     let text: String
+    var foregroundColor: Color = AppTheme.assistantMessageText
 
     var body: some View {
         Text(text)
             .font(.system(size: 16, weight: .regular))
-            .foregroundStyle(AppTheme.textPrimary)
+            .foregroundStyle(foregroundColor)
             .textSelection(.enabled)
             .fixedSize(horizontal: false, vertical: true)
     }

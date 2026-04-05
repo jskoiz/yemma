@@ -36,29 +36,6 @@ struct AppBackground: View {
     }
 }
 
-struct GlassCardModifier: ViewModifier {
-    var cornerRadius: CGFloat = 28
-
-    func body(content: Content) -> some View {
-        content
-            .background(
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .fill(AppTheme.card)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                            .stroke(AppTheme.cardBorder, lineWidth: 1)
-                    )
-            )
-            .shadow(color: AppTheme.shadow, radius: 30, x: 0, y: 18)
-    }
-}
-
-extension View {
-    func glassCard(cornerRadius: CGFloat = 28) -> some View {
-        modifier(GlassCardModifier(cornerRadius: cornerRadius))
-    }
-}
-
 struct CircleIconButton: View {
     let systemName: String
     var filled: Bool = true
@@ -69,7 +46,7 @@ struct CircleIconButton: View {
             Image(systemName: systemName)
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(AppTheme.textPrimary)
-                .frame(width: 34, height: 34)
+                .frame(width: AppTheme.Layout.controlIconSize, height: AppTheme.Layout.controlIconSize)
                 .background(
                     Circle()
                         .fill(filled ? AppTheme.controlFill : Color.clear)
@@ -92,11 +69,7 @@ struct PillButtonStyle: ButtonStyle {
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
             .background(configuration.isPressed ? pressedFill : fill)
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(AppTheme.controlBorder, lineWidth: 1)
-            )
+            .clipShape(Capsule())
     }
 }
 
@@ -109,6 +82,9 @@ public struct ContentView: View {
     @State private var loadedModelSignature: String?
     @State private var hasValidatedLocalModel = false
     @State private var isShowingOnboardingPreview = false
+    @State private var didRecordShellVisible = false
+    @State private var didRecordTextReady = false
+    @State private var didRecordVisionReady = false
 
     public init() {}
 
@@ -139,6 +115,7 @@ public struct ContentView: View {
                 category: "startup",
                 metadata: ["view": "ContentView", "elapsedMs": StartupTiming.elapsedMs()]
             )
+            recordStartupMilestonesIfNeeded()
         }
         .task {
             guard !hasValidatedLocalModel else { return }
@@ -148,6 +125,15 @@ public struct ContentView: View {
         }
         .task(id: "\(modelDownloader.modelPath ?? "")|\(modelDownloader.mmprojPath ?? "")") {
             await loadModelIfNeeded()
+        }
+        .onChange(of: shouldShowChat) { _, _ in
+            recordStartupMilestonesIfNeeded()
+        }
+        .onChange(of: llmService.isTextModelReady) { _, _ in
+            recordStartupMilestonesIfNeeded()
+        }
+        .onChange(of: llmService.isVisionReady) { _, _ in
+            recordStartupMilestonesIfNeeded()
         }
         .animation(.easeInOut(duration: 0.25), value: modelDownloader.isDownloaded)
         .animation(.easeInOut(duration: 0.25), value: llmService.isModelLoaded)
@@ -172,15 +158,59 @@ public struct ContentView: View {
     }
 
     private var shouldShowChat: Bool {
-        !isShowingOnboardingPreview && (isReadyForChat || !supportsLocalModelRuntime)
+        !isShowingOnboardingPreview && (hasWarmShell || !supportsLocalModelRuntime)
     }
 
     private var canContinueFromOnboarding: Bool {
-        isReadyForChat || !supportsLocalModelRuntime
+        modelDownloader.isDownloaded || !supportsLocalModelRuntime
     }
 
-    private var isReadyForChat: Bool {
-        modelDownloader.isDownloaded && llmService.isModelLoaded
+    private var hasWarmShell: Bool {
+        modelDownloader.isDownloaded && !hasModelPreparationError
+    }
+
+    private var hasModelPreparationError: Bool {
+        supportsLocalModelRuntime
+            && modelDownloader.isDownloaded
+            && !llmService.isTextModelReady
+            && !llmService.isModelLoading
+            && llmService.lastError != nil
+    }
+
+    @MainActor
+    private func recordStartupMilestonesIfNeeded() {
+        if shouldShowChat && !didRecordShellVisible {
+            didRecordShellVisible = true
+            AppDiagnostics.shared.record(
+                "startup: shell_visible",
+                category: "startup",
+                metadata: ["shellVisibleMs": StartupTiming.elapsedMs()]
+            )
+        }
+
+        if llmService.isTextModelReady && !didRecordTextReady {
+            didRecordTextReady = true
+            let elapsedMs = StartupTiming.elapsedMs()
+            AppDiagnostics.shared.record(
+                "startup: text_ready",
+                category: "startup",
+                metadata: ["textReadyMs": elapsedMs]
+            )
+            AppDiagnostics.shared.record(
+                "startup: ready_for_input",
+                category: "startup",
+                metadata: ["totalElapsedMs": elapsedMs]
+            )
+        }
+
+        if llmService.isVisionReady && !didRecordVisionReady {
+            didRecordVisionReady = true
+            AppDiagnostics.shared.record(
+                "startup: vision_ready",
+                category: "startup",
+                metadata: ["visionReadyMs": StartupTiming.elapsedMs()]
+            )
+        }
     }
 
     private func loadModelIfNeeded(force: Bool = false) async {
@@ -214,11 +244,9 @@ public struct ContentView: View {
                 modelLoadError = nil
             }
 
-            AppDiagnostics.shared.record(
-                "startup: ready_for_input",
-                category: "startup",
-                metadata: ["totalElapsedMs": StartupTiming.elapsedMs()]
-            )
+            await MainActor.run {
+                recordStartupMilestonesIfNeeded()
+            }
         } catch {
             await MainActor.run {
                 loadedModelSignature = nil

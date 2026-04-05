@@ -23,81 +23,71 @@ struct ConversationBrowserSheet: View {
 
     var body: some View {
         ZStack {
-            AppBackground()
+            UtilityBackground()
 
-            VStack(spacing: 20) {
-                HStack {
-                    Spacer()
-                    Text("Conversations")
-                        .font(.system(size: 24, weight: .semibold, design: .rounded))
-                        .foregroundStyle(AppTheme.textPrimary)
-                    Spacer()
-                    CircleIconButton(systemName: "xmark", action: { dismiss() })
-                }
-                .padding(.horizontal, 20)
-                .padding(.top, 18)
-
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack(alignment: .top) {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Restart With Intention")
-                                .font(.system(size: 18, weight: .semibold, design: .rounded))
-                                .foregroundStyle(AppTheme.textPrimary)
-                            Text("Use Fresh chat to clear context before switching topics. The current conversation stays previewed below so you can jump back in and keep your place.")
-                                .font(.system(size: 15, weight: .medium, design: .rounded))
-                                .foregroundStyle(AppTheme.textSecondary)
-                        }
-
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: AppTheme.Layout.sectionSpacing) {
+                    HStack {
                         Spacer()
-
-                        CircleIconButton(systemName: "xmark", filled: false, action: {})
-                            .allowsHitTesting(false)
+                        Text("Conversations")
+                            .font(AppTheme.Typography.utilityTitle)
+                            .foregroundStyle(AppTheme.textPrimary)
+                        Spacer()
+                        CircleIconButton(systemName: "xmark", action: { dismiss() })
                     }
-                }
-                .padding(18)
-                .glassCard(cornerRadius: 24)
-                .padding(.horizontal, 16)
+                    .padding(.horizontal, AppTheme.Layout.screenHeaderHorizontalPadding)
+                    .padding(.top, 18)
 
-                VStack(alignment: .leading, spacing: 14) {
-                    Text("All conversations")
-                        .font(.system(size: 18, weight: .semibold, design: .rounded))
-                        .foregroundStyle(AppTheme.textSecondary)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("Stored only on this iPhone", systemImage: "iphone")
+                            .font(AppTheme.Typography.utilityCaption)
+                            .foregroundStyle(AppTheme.accent)
 
-                    VStack(spacing: 0) {
+                        Text("Start a fresh chat when you want a clean context. Your current local thread stays available here so you can return without losing place.")
+                            .font(AppTheme.Typography.utilityRowDetail)
+                            .foregroundStyle(AppTheme.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(AppTheme.Layout.rowHorizontalPadding)
+                    .groupedCard(cornerRadius: AppTheme.Radius.medium)
+
+                    UtilitySection("Current") {
                         Button {
                             dismiss()
                         } label: {
-                            conversationRow(title: conversationPreview, subtitle: messages.isEmpty ? "Start chatting" : "Current conversation")
+                            conversationRow(
+                                title: conversationPreview,
+                                subtitle: messages.isEmpty ? "Start chatting" : "Current conversation"
+                            )
                         }
+                        .buttonStyle(.plain)
 
-                        Divider()
-                            .padding(.leading, 18)
-                            .overlay(AppTheme.separator)
+                        UtilitySectionSeparator(leadingInset: AppTheme.Layout.rowHorizontalPadding)
 
                         Button {
                             onStartFresh()
                         } label: {
                             conversationRow(title: "Fresh chat", subtitle: "Clear current thread")
                         }
+                        .buttonStyle(.plain)
                     }
-                    .glassCard(cornerRadius: 24)
-                }
-                .padding(.horizontal, 16)
 
-                Spacer()
-
-                HStack {
-                    Image(systemName: "magnifyingglass")
-                    Text("Search")
-                    Spacer()
+                    UtilitySection("Search") {
+                        HStack(spacing: 12) {
+                            Image(systemName: "magnifyingglass")
+                                .font(.body.weight(.semibold))
+                                .foregroundStyle(AppTheme.textSecondary)
+                            Text("Conversation search is coming soon")
+                                .font(AppTheme.Typography.utilityRowTitle)
+                                .foregroundStyle(AppTheme.textSecondary)
+                            Spacer()
+                        }
+                        .utilityRowPadding()
+                    }
                 }
-                .font(.system(size: 18, weight: .medium, design: .rounded))
-                .foregroundStyle(AppTheme.textSecondary)
-                .padding(.horizontal, 18)
-                .padding(.vertical, 16)
-                .glassCard(cornerRadius: 24)
-                .padding(.horizontal, 24)
-                .padding(.bottom, 20)
+                .padding(.horizontal, AppTheme.Layout.screenPadding)
+                .padding(.bottom, 28)
             }
         }
     }
@@ -105,16 +95,15 @@ struct ConversationBrowserSheet: View {
     private func conversationRow(title: String, subtitle: String) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title)
-                .font(.system(size: 18, weight: .semibold, design: .rounded))
+                .font(AppTheme.Typography.utilityRowTitle.weight(.semibold))
                 .foregroundStyle(AppTheme.textPrimary)
                 .lineLimit(1)
             Text(subtitle)
-                .font(.system(size: 15, weight: .medium, design: .rounded))
+                .font(AppTheme.Typography.utilityRowDetail)
                 .foregroundStyle(AppTheme.textSecondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 18)
-        .padding(.vertical, 16)
+        .utilityRowPadding()
         .contentShape(Rectangle())
     }
 }
