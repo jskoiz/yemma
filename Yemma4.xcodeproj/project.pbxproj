@@ -51,6 +51,8 @@
 
 		B4F0935184FC82BEAC9362C2 /* AskImageTempFiles.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD3FCEA614E16028DB9A893D /* AskImageTempFiles.swift */; };
 
+		CB7B05E97139FE38BFE49578 /* ConversationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60BF02FF587F6CBD41EDD4C6 /* ConversationStore.swift */; };
+
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -98,6 +100,8 @@
 		E1A00005 /* LiteRTLMRuntime.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LiteRTLMRuntime.swift; sourceTree = "<group>"; };
 
 		DD3FCEA614E16028DB9A893D /* AskImageTempFiles.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AskImageTempFiles.swift; sourceTree = "<group>"; };
+
+		60BF02FF587F6CBD41EDD4C6 /* ConversationStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ConversationStore.swift; sourceTree = "<group>"; };
 
 /* End PBXFileReference section */
 
@@ -189,6 +193,7 @@
 				8F33C7E02E65E40000100002 /* MultimodalRuntime.mm */,
 				11FB93FF040AF083B453837C /* ModelDownloader.swift */,
 				D3000006 /* StreamingRenderer.swift */,
+				60BF02FF587F6CBD41EDD4C6 /* ConversationStore.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -345,6 +350,7 @@
 				A2000001 /* AdvancedSettingsView.swift in Sources */,
 				B3034772627DBF9FD8624142 /* SettingsView.swift in Sources */,
 				D3000005 /* StreamingRenderer.swift in Sources */,
+				CB7B05E97139FE38BFE49578 /* ConversationStore.swift in Sources */,
 				D300000D /* ChatSessionController.swift in Sources */,
 				D3000007 /* ConversationBrowserSheet.swift in Sources */,
 				D3000009 /* EmptyStateView.swift in Sources */,
