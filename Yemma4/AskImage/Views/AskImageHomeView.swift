@@ -1,13 +1,16 @@
 import SwiftUI
 
-/// Landing screen for Ask Image — shows available models, download state, and entry point.
+/// Landing screen for Ask Image -- shows available models, download state, and entry point.
 struct AskImageHomeView: View {
     let models: [LiteRTModelDescriptor]
     let modelState: (String) -> LiteRTModelState
     let onSelectModel: (LiteRTModelDescriptor) -> Void
     let onDownloadModel: (LiteRTModelDescriptor) -> Void
+    let onCancelDownload: (LiteRTModelDescriptor) -> Void
     let onDeleteModel: (LiteRTModelDescriptor) -> Void
     let onDismiss: () -> Void
+
+    @State private var modelToDelete: LiteRTModelDescriptor?
 
     var body: some View {
         NavigationStack {
@@ -31,6 +34,26 @@ struct AskImageHomeView: View {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Done") { onDismiss() }
                 }
+            }
+            .confirmationDialog(
+                "Delete Model",
+                isPresented: Binding(
+                    get: { modelToDelete != nil },
+                    set: { if !$0 { modelToDelete = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                if let model = modelToDelete {
+                    Button("Delete \(model.displayName)", role: .destructive) {
+                        onDeleteModel(model)
+                        modelToDelete = nil
+                    }
+                    Button("Cancel", role: .cancel) {
+                        modelToDelete = nil
+                    }
+                }
+            } message: {
+                Text("This will remove the downloaded model from your device. You can re-download it later.")
             }
         }
     }
@@ -63,7 +86,8 @@ struct AskImageHomeView: View {
                     state: modelState(model.id),
                     onSelect: { onSelectModel(model) },
                     onDownload: { onDownloadModel(model) },
-                    onDelete: { onDeleteModel(model) }
+                    onCancelDownload: { onCancelDownload(model) },
+                    onDelete: { modelToDelete = model }
                 )
             }
         }
@@ -89,6 +113,7 @@ struct AskImageModelCard: View {
     let state: LiteRTModelState
     let onSelect: () -> Void
     let onDownload: () -> Void
+    let onCancelDownload: () -> Void
     let onDelete: () -> Void
 
     var body: some View {
@@ -149,9 +174,15 @@ struct AskImageModelCard: View {
             VStack(spacing: 6) {
                 ProgressView(value: progress)
                     .tint(AppTheme.accent)
-                Text("Downloading... \(Int(progress * 100))%")
-                    .font(.caption)
-                    .foregroundStyle(AppTheme.textSecondary)
+                HStack {
+                    Text("Downloading... \(Int(progress * 100))%")
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.textSecondary)
+                    Spacer()
+                    Button("Cancel", action: onCancelDownload)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.red)
+                }
             }
 
         case .downloaded, .ready:
@@ -212,6 +243,7 @@ struct AskImageModelCard: View {
         },
         onSelectModel: { _ in },
         onDownloadModel: { _ in },
+        onCancelDownload: { _ in },
         onDeleteModel: { _ in },
         onDismiss: {}
     )
@@ -219,10 +251,27 @@ struct AskImageModelCard: View {
 
 #Preview("Home - Downloading") {
     AskImageHomeView(
-        models: [.gemma4E2B],
-        modelState: { _ in .downloading(progress: 0.65) },
+        models: [.gemma4E2B, .gemma4E4B],
+        modelState: { id in
+            id == LiteRTModelDescriptor.gemma4E2B.id
+                ? .downloading(progress: 0.65)
+                : .notDownloaded
+        },
         onSelectModel: { _ in },
         onDownloadModel: { _ in },
+        onCancelDownload: { _ in },
+        onDeleteModel: { _ in },
+        onDismiss: {}
+    )
+}
+
+#Preview("Home - All Downloaded") {
+    AskImageHomeView(
+        models: [.gemma4E2B, .gemma4E4B],
+        modelState: { _ in .downloaded },
+        onSelectModel: { _ in },
+        onDownloadModel: { _ in },
+        onCancelDownload: { _ in },
         onDeleteModel: { _ in },
         onDismiss: {}
     )

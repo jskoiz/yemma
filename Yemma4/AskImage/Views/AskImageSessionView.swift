@@ -1,19 +1,21 @@
 import SwiftUI
 import PhotosUI
 
-/// The active Ask Image session — attach an image, ask a question, see the streamed answer.
+/// The active Ask Image session -- attach an image, ask a question, see the streamed answer.
 struct AskImageSessionView: View {
     let modelName: String
     let sessionState: AskImageSessionState
     let messages: [AskImageMessage]
     let attachment: AskImageAttachment?
     let onSend: (String) -> Void
-    let onAttachImage: () -> Void
+    let onPickedImage: (PhotosPickerItem) -> Void
     let onCancel: () -> Void
     let onNewSession: () -> Void
     let onDismiss: () -> Void
+    let onRetryError: () -> Void
 
     @State private var draftPrompt = ""
+    @State private var selectedPhotoItem: PhotosPickerItem?
 
     private let presetPrompts = [
         "Describe this image",
@@ -29,6 +31,7 @@ struct AskImageSessionView: View {
 
                 VStack(spacing: 0) {
                     modelPill
+                    errorBanner
                     transcriptArea
                     composerArea
                 }
@@ -45,6 +48,12 @@ struct AskImageSessionView: View {
                     }
                 }
             }
+            .onChange(of: selectedPhotoItem) { _, newValue in
+                if let item = newValue {
+                    onPickedImage(item)
+                    selectedPhotoItem = nil
+                }
+            }
         }
     }
 
@@ -53,7 +62,7 @@ struct AskImageSessionView: View {
     private var modelPill: some View {
         HStack(spacing: 6) {
             Circle()
-                .fill(sessionState == .readyForInput || sessionState == .generating ? .green : .orange)
+                .fill(statusDotColor)
                 .frame(width: 6, height: 6)
 
             Text(modelName)
@@ -78,6 +87,30 @@ struct AskImageSessionView: View {
         .padding(.top, 8)
     }
 
+    private var statusDotColor: Color {
+        switch sessionState {
+        case .readyForInput, .generating:
+            return .green
+        case .error:
+            return .red
+        case .warmingModel:
+            return .orange
+        case .idle:
+            return .gray
+        }
+    }
+
+    // MARK: - Error Banner
+
+    @ViewBuilder
+    private var errorBanner: some View {
+        if case .error(let message) = sessionState {
+            AskImageErrorBanner(message: message, onRetry: onRetryError)
+                .padding(.top, 8)
+                .transition(.move(edge: .top).combined(with: .opacity))
+        }
+    }
+
     // MARK: - Transcript
 
     private var transcriptArea: some View {
@@ -90,6 +123,7 @@ struct AskImageSessionView: View {
 
                     if let attachment {
                         attachmentBubble(attachment)
+                            .id("attachment")
                     }
 
                     ForEach(messages) { message in
@@ -101,14 +135,28 @@ struct AskImageSessionView: View {
                 .padding(.vertical, 12)
             }
             .onChange(of: messages.last?.text) { _, _ in
-                if let lastID = messages.last?.id {
+                scrollToBottom(proxy: proxy)
+            }
+            .onChange(of: messages.count) { _, _ in
+                scrollToBottom(proxy: proxy)
+            }
+            .onChange(of: attachment?.id) { _, _ in
+                if attachment != nil && messages.isEmpty {
                     withAnimation(.easeOut(duration: 0.15)) {
-                        proxy.scrollTo(lastID, anchor: .bottom)
+                        proxy.scrollTo("attachment", anchor: .bottom)
                     }
                 }
             }
         }
         .frame(maxHeight: .infinity)
+    }
+
+    private func scrollToBottom(proxy: ScrollViewProxy) {
+        if let lastID = messages.last?.id {
+            withAnimation(.easeOut(duration: 0.15)) {
+                proxy.scrollTo(lastID, anchor: .bottom)
+            }
+        }
     }
 
     private var emptyState: some View {
@@ -142,27 +190,42 @@ struct AskImageSessionView: View {
             }
         }
         .padding(.top, 40)
+        .frame(maxWidth: .infinity)
     }
 
     @ViewBuilder
     private func attachmentBubble(_ attachment: AskImageAttachment) -> some View {
         HStack {
+            Spacer(minLength: 60)
             if let thumb = attachment.thumbnailImage {
                 Image(uiImage: thumb)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
-                    .frame(width: 120, height: 90)
+                    .frame(width: 160, height: 120)
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(AppTheme.messageBubbleBorder, lineWidth: 1)
+                    )
             } else {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(AppTheme.chipFill)
-                    .frame(width: 120, height: 90)
+                    .frame(width: 160, height: 120)
                     .overlay {
-                        Image(systemName: "photo")
-                            .foregroundStyle(AppTheme.textSecondary)
+                        VStack(spacing: 6) {
+                            Image(systemName: "photo")
+                                .font(.title2)
+                                .foregroundStyle(AppTheme.textSecondary)
+                            Text("Image attached")
+                                .font(.caption2)
+                                .foregroundStyle(AppTheme.textSecondary)
+                        }
                     }
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(AppTheme.messageBubbleBorder, lineWidth: 1)
+                    )
             }
-            Spacer()
         }
     }
 
@@ -172,10 +235,21 @@ struct AskImageSessionView: View {
             if message.role == .user { Spacer(minLength: 60) }
 
             VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 4) {
-                Text(message.text)
-                    .font(.body)
-                    .foregroundStyle(AppTheme.textPrimary)
-                    .textSelection(.enabled)
+                if let attachment = message.attachment, let thumb = attachment.thumbnailImage {
+                    Image(uiImage: thumb)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: 120, height: 90)
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .padding(.bottom, 4)
+                }
+
+                if !message.text.isEmpty {
+                    Text(message.text)
+                        .font(.body)
+                        .foregroundStyle(AppTheme.textPrimary)
+                        .textSelection(.enabled)
+                }
 
                 if message.isStreaming {
                     HStack(spacing: 4) {
@@ -210,8 +284,40 @@ struct AskImageSessionView: View {
         VStack(spacing: 0) {
             Divider()
 
+            // Attached image preview strip
+            if let attachment, messages.isEmpty {
+                HStack(spacing: 8) {
+                    if let thumb = attachment.thumbnailImage {
+                        Image(uiImage: thumb)
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .frame(width: 40, height: 40)
+                            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    } else {
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(AppTheme.chipFill)
+                            .frame(width: 40, height: 40)
+                            .overlay {
+                                Image(systemName: "photo")
+                                    .font(.caption)
+                                    .foregroundStyle(AppTheme.textSecondary)
+                            }
+                    }
+                    Text("Image attached")
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.textSecondary)
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+            }
+
             HStack(spacing: 10) {
-                Button(action: onAttachImage) {
+                PhotosPicker(
+                    selection: $selectedPhotoItem,
+                    matching: .images,
+                    photoLibrary: .shared()
+                ) {
                     Image(systemName: attachment != nil ? "photo.fill" : "photo.badge.plus")
                         .font(.system(size: 18))
                         .foregroundStyle(attachment != nil ? AppTheme.accent : AppTheme.textSecondary)
@@ -220,6 +326,7 @@ struct AskImageSessionView: View {
                 TextField("Ask about the image...", text: $draftPrompt)
                     .textFieldStyle(.plain)
                     .font(.body)
+                    .disabled(sessionState == .warmingModel)
 
                 if sessionState == .generating {
                     Button(action: onCancel) {
@@ -229,19 +336,20 @@ struct AskImageSessionView: View {
                     }
                 } else {
                     Button {
-                        guard !draftPrompt.trimmingCharacters(in: .whitespaces).isEmpty else { return }
-                        onSend(draftPrompt)
+                        let trimmed = draftPrompt.trimmingCharacters(in: .whitespaces)
+                        guard !trimmed.isEmpty else { return }
+                        onSend(trimmed)
                         draftPrompt = ""
                     } label: {
                         Image(systemName: "arrow.up.circle.fill")
                             .font(.system(size: 24))
                             .foregroundStyle(
-                                draftPrompt.trimmingCharacters(in: .whitespaces).isEmpty
-                                    ? AppTheme.textSecondary.opacity(0.4)
-                                    : AppTheme.accent
+                                canSend
+                                    ? AppTheme.accent
+                                    : AppTheme.textSecondary.opacity(0.4)
                             )
                     }
-                    .disabled(draftPrompt.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .disabled(!canSend)
                 }
             }
             .padding(.horizontal, 16)
@@ -249,9 +357,15 @@ struct AskImageSessionView: View {
             .background(AppTheme.inputFill)
         }
     }
+
+    private var canSend: Bool {
+        let hasText = !draftPrompt.trimmingCharacters(in: .whitespaces).isEmpty
+        let isReady = sessionState == .readyForInput || sessionState == .idle
+        return hasText && isReady
+    }
 }
 
-// MARK: - Error State
+// MARK: - Error Banner
 
 struct AskImageErrorBanner: View {
     let message: String
@@ -289,27 +403,11 @@ struct AskImageErrorBanner: View {
         messages: [],
         attachment: nil,
         onSend: { _ in },
-        onAttachImage: {},
+        onPickedImage: { _ in },
         onCancel: {},
         onNewSession: {},
-        onDismiss: {}
-    )
-}
-
-#Preview("Session - Streaming") {
-    AskImageSessionView(
-        modelName: "Gemma 4 E2B",
-        sessionState: .generating,
-        messages: [
-            AskImageMessage(role: .user, text: "What do you see in this image?"),
-            AskImageMessage(role: .assistant, text: "This image shows a scenic landscape with mountains in the background and a lake in the foreground. The lighting suggests", isStreaming: true),
-        ],
-        attachment: AskImageAttachment(originalURL: URL(fileURLWithPath: "/tmp/test.jpg")),
-        onSend: { _ in },
-        onAttachImage: {},
-        onCancel: {},
-        onNewSession: {},
-        onDismiss: {}
+        onDismiss: {},
+        onRetryError: {}
     )
 }
 
@@ -320,9 +418,68 @@ struct AskImageErrorBanner: View {
         messages: [],
         attachment: nil,
         onSend: { _ in },
-        onAttachImage: {},
+        onPickedImage: { _ in },
         onCancel: {},
         onNewSession: {},
-        onDismiss: {}
+        onDismiss: {},
+        onRetryError: {}
+    )
+}
+
+#Preview("Session - Streaming") {
+    AskImageSessionView(
+        modelName: "Gemma 4 E2B",
+        sessionState: .generating,
+        messages: [
+            AskImageMessage(role: .user, text: "What do you see in this image?"),
+            AskImageMessage(
+                role: .assistant,
+                text: "This image shows a scenic landscape with mountains in the background and a lake in the foreground. The lighting suggests",
+                isStreaming: true
+            ),
+        ],
+        attachment: AskImageAttachment(originalURL: URL(fileURLWithPath: "/tmp/test.jpg")),
+        onSend: { _ in },
+        onPickedImage: { _ in },
+        onCancel: {},
+        onNewSession: {},
+        onDismiss: {},
+        onRetryError: {}
+    )
+}
+
+#Preview("Session - Completed") {
+    AskImageSessionView(
+        modelName: "Gemma 4 E2B",
+        sessionState: .readyForInput,
+        messages: [
+            AskImageMessage(role: .user, text: "Describe this image"),
+            AskImageMessage(
+                role: .assistant,
+                text: "This image shows a well-composed scene with clear subject matter. The lighting is natural and the colors are vibrant. I can see several distinct elements that create an interesting visual composition."
+            ),
+        ],
+        attachment: AskImageAttachment(originalURL: URL(fileURLWithPath: "/tmp/test.jpg")),
+        onSend: { _ in },
+        onPickedImage: { _ in },
+        onCancel: {},
+        onNewSession: {},
+        onDismiss: {},
+        onRetryError: {}
+    )
+}
+
+#Preview("Session - Error") {
+    AskImageSessionView(
+        modelName: "Gemma 4 E2B",
+        sessionState: .error("Model failed to load. The device may not have enough memory."),
+        messages: [],
+        attachment: nil,
+        onSend: { _ in },
+        onPickedImage: { _ in },
+        onCancel: {},
+        onNewSession: {},
+        onDismiss: {},
+        onRetryError: {}
     )
 }
