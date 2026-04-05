@@ -42,7 +42,7 @@ struct AskImageCoordinator: View {
 final class AskImageCoordinatorViewModel {
     // Dependencies
     let runtime: any AskImageRuntime
-    let modelStore: StubAskImageModelStore
+    let modelStore: any AskImageModelStore
 
     // Navigation
     var selectedModel: LiteRTModelDescriptor?
@@ -56,10 +56,18 @@ final class AskImageCoordinatorViewModel {
     private var generationTask: Task<Void, Never>?
     private var downloadTask: Task<Void, Never>?
 
-    init() {
-        let stub = StubAskImageRuntime()
-        self.runtime = stub
-        self.modelStore = StubAskImageModelStore()
+    init(
+        runtime: (any AskImageRuntime)? = nil,
+        modelStore: (any AskImageModelStore)? = nil
+    ) {
+        if let runtime {
+            self.runtime = runtime
+        } else if AskImageFeature.supportsNativeRuntime {
+            self.runtime = LiteRTLMRuntime()
+        } else {
+            self.runtime = StubAskImageRuntime()
+        }
+        self.modelStore = modelStore ?? LiteRTModelDownloader()
     }
 
     // MARK: - Model Selection
@@ -159,12 +167,6 @@ final class AskImageCoordinatorViewModel {
                 return
             }
 
-            // Write to temp file for the runtime
-            let tempDir = FileManager.default.temporaryDirectory
-            let imageFileName = "askimage-\(UUID().uuidString).jpg"
-            let imageURL = tempDir.appendingPathComponent(imageFileName)
-
-            // Generate JPEG data and thumbnail
             guard let uiImage = UIImage(data: data) else {
                 AppDiagnostics.shared.record(
                     "ask_image: image decode failed",
@@ -173,9 +175,14 @@ final class AskImageCoordinatorViewModel {
                 return
             }
 
-            // Write full-size JPEG for the runtime
-            if let jpegData = uiImage.jpegData(compressionQuality: 0.85) {
-                try? jpegData.write(to: imageURL)
+            // Write full-size JPEG via temp file manager
+            guard let jpegData = uiImage.jpegData(compressionQuality: 0.85),
+                  let imageURL = try? AskImageTempFiles.store(jpegData) else {
+                AppDiagnostics.shared.record(
+                    "ask_image: image write failed",
+                    category: "ask_image"
+                )
+                return
             }
 
             // Generate thumbnail for display
@@ -300,6 +307,7 @@ final class AskImageCoordinatorViewModel {
         messages = []
         attachment = nil
         runtime.resetConversation()
+        AskImageTempFiles.removeAll()
         sessionState = .readyForInput
 
         AppDiagnostics.shared.record(

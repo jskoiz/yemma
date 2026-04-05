@@ -49,6 +49,8 @@
 		E1A00001 /* LiteRTLMBridge.mm in Sources */ = {isa = PBXBuildFile; fileRef = E1A00003 /* LiteRTLMBridge.mm */; };
 		E1A00004 /* LiteRTLMRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1A00005 /* LiteRTLMRuntime.swift */; };
 
+		B4F0935184FC82BEAC9362C2 /* AskImageTempFiles.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD3FCEA614E16028DB9A893D /* AskImageTempFiles.swift */; };
+
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -94,6 +96,8 @@
 		E1A00002 /* LiteRTLMBridge.h */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.h; path = LiteRTLMBridge.h; sourceTree = "<group>"; };
 		E1A00003 /* LiteRTLMBridge.mm */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.cpp.objcpp; path = LiteRTLMBridge.mm; sourceTree = "<group>"; };
 		E1A00005 /* LiteRTLMRuntime.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LiteRTLMRuntime.swift; sourceTree = "<group>"; };
+
+		DD3FCEA614E16028DB9A893D /* AskImageTempFiles.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AskImageTempFiles.swift; sourceTree = "<group>"; };
 
 /* End PBXFileReference section */
 
@@ -209,6 +213,7 @@
 				654F9B9E0D8C0FF3A41FC5EE /* AskImageModelStore.swift */,
 				E1A00005 /* LiteRTLMRuntime.swift */,
 				372FEA4E5F3042D9FA20D616 /* StubAskImageRuntime.swift */,
+				DD3FCEA614E16028DB9A893D /* AskImageTempFiles.swift */,
 				78A132E914214900F4F784B8 /* StubAskImageModelStore.swift */,
 				C4A1B20100000002 /* LiteRTModelCatalog.swift */,
 				C4A1B20100000004 /* LiteRTModelDownloader.swift */,
@@ -356,6 +361,7 @@
 				71E76D65F8D9DDDB8EED04F7 /* AskImageHomeView.swift in Sources */,
 				10504A52C773B850ABD7A45B /* AskImageSessionView.swift in Sources */,
 				B13A661DE5B1D67D41D49CE7 /* AskImageCoordinator.swift in Sources */,
+				B4F0935184FC82BEAC9362C2 /* AskImageTempFiles.swift in Sources */,
 				E1A00001 /* LiteRTLMBridge.mm in Sources */,
 				E1A00004 /* LiteRTLMRuntime.swift in Sources */,
 				C4A1B20100000001 /* LiteRTModelCatalog.swift in Sources */,

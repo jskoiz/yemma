@@ -64,6 +64,9 @@ public struct Yemma4App: App {
                 .environment(conversationStore)
                 .preferredColorScheme(AppearancePreference.from(appearancePreferenceRaw).colorScheme)
                 .tint(AppTheme.accent)
+                .task {
+                    AskImageTempFiles.pruneStaleFiles()
+                }
         }
     }
 }
