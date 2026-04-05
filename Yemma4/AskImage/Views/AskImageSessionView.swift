@@ -13,6 +13,10 @@ struct AskImageSessionView: View {
     let onNewSession: () -> Void
     let onDismiss: () -> Void
     let onRetryError: () -> Void
+    var onRedownloadModel: (() -> Void)?
+
+    /// Toast message from the coordinator (image decode errors, etc.).
+    var toastMessage: String?
 
     @State private var draftPrompt = ""
     @State private var selectedPhotoItem: PhotosPickerItem?
@@ -35,6 +39,9 @@ struct AskImageSessionView: View {
                     transcriptArea
                     composerArea
                 }
+
+                // Toast overlay for non-fatal errors
+                toastOverlay
             }
             .navigationTitle("Ask Image")
             .navigationBarTitleDisplayMode(.inline)
@@ -104,10 +111,36 @@ struct AskImageSessionView: View {
 
     @ViewBuilder
     private var errorBanner: some View {
-        if case .error(let message) = sessionState {
-            AskImageErrorBanner(message: message, onRetry: onRetryError)
-                .padding(.top, 8)
-                .transition(.move(edge: .top).combined(with: .opacity))
+        if case .error(let sessionError) = sessionState {
+            AskImageErrorBanner(
+                message: sessionError.userMessage,
+                showRedownload: sessionError.shouldOfferRedownload,
+                onRetry: onRetryError,
+                onRedownload: onRedownloadModel
+            )
+            .padding(.top, 8)
+            .transition(.move(edge: .top).combined(with: .opacity))
+        }
+    }
+
+    // MARK: - Toast Overlay
+
+    @ViewBuilder
+    private var toastOverlay: some View {
+        if let toast = toastMessage {
+            VStack {
+                Spacer()
+                Text(toast)
+                    .font(.subheadline)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(Color.black.opacity(0.8))
+                    .clipShape(Capsule())
+                    .padding(.bottom, 80)
+            }
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+            .animation(.easeInOut(duration: 0.25), value: toastMessage)
         }
     }
 
@@ -284,6 +317,20 @@ struct AskImageSessionView: View {
         VStack(spacing: 0) {
             Divider()
 
+            // Queued prompt indicator
+            if sessionState == .warmingModel && !messages.isEmpty {
+                HStack(spacing: 6) {
+                    ProgressView()
+                        .scaleEffect(0.5)
+                    Text("Prompt queued -- will send when model is ready")
+                        .font(.caption2)
+                        .foregroundStyle(AppTheme.textSecondary)
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 6)
+            }
+
             // Attached image preview strip
             if let attachment, messages.isEmpty {
                 HStack(spacing: 8) {
@@ -326,7 +373,6 @@ struct AskImageSessionView: View {
                 TextField("Ask about the image...", text: $draftPrompt)
                     .textFieldStyle(.plain)
                     .font(.body)
-                    .disabled(sessionState == .warmingModel)
 
                 if sessionState == .generating {
                     Button(action: onCancel) {
@@ -360,7 +406,10 @@ struct AskImageSessionView: View {
 
     private var canSend: Bool {
         let hasText = !draftPrompt.trimmingCharacters(in: .whitespaces).isEmpty
-        let isReady = sessionState == .readyForInput || sessionState == .idle
+        // Allow sending during warmup (prompt will be queued).
+        let isReady = sessionState == .readyForInput
+            || sessionState == .idle
+            || sessionState == .warmingModel
         return hasText && isReady
     }
 }
@@ -369,7 +418,21 @@ struct AskImageSessionView: View {
 
 struct AskImageErrorBanner: View {
     let message: String
+    let showRedownload: Bool
     let onRetry: () -> Void
+    var onRedownload: (() -> Void)?
+
+    init(
+        message: String,
+        showRedownload: Bool = false,
+        onRetry: @escaping () -> Void,
+        onRedownload: (() -> Void)? = nil
+    ) {
+        self.message = message
+        self.showRedownload = showRedownload
+        self.onRetry = onRetry
+        self.onRedownload = onRedownload
+    }
 
     var body: some View {
         HStack(spacing: 10) {
@@ -379,13 +442,19 @@ struct AskImageErrorBanner: View {
             Text(message)
                 .font(.subheadline)
                 .foregroundStyle(AppTheme.textPrimary)
-                .lineLimit(2)
+                .lineLimit(3)
 
             Spacer()
 
-            Button("Retry", action: onRetry)
-                .font(.subheadline.weight(.medium))
-                .buttonStyle(.bordered)
+            if showRedownload, let onRedownload {
+                Button("Re-download", action: onRedownload)
+                    .font(.subheadline.weight(.medium))
+                    .buttonStyle(.bordered)
+            } else {
+                Button("Retry", action: onRetry)
+                    .font(.subheadline.weight(.medium))
+                    .buttonStyle(.bordered)
+            }
         }
         .padding(12)
         .background(AppTheme.card)
@@ -472,7 +541,7 @@ struct AskImageErrorBanner: View {
 #Preview("Session - Error") {
     AskImageSessionView(
         modelName: "Gemma 4 E2B",
-        sessionState: .error("Model failed to load. The device may not have enough memory."),
+        sessionState: .error(.runtimeInitFailed("The device may not have enough memory.")),
         messages: [],
         attachment: nil,
         onSend: { _ in },
@@ -481,5 +550,21 @@ struct AskImageErrorBanner: View {
         onNewSession: {},
         onDismiss: {},
         onRetryError: {}
+    )
+}
+
+#Preview("Session - Model Missing") {
+    AskImageSessionView(
+        modelName: "Gemma 4 E2B",
+        sessionState: .error(.modelFileMissing("Gemma 4 E2B")),
+        messages: [],
+        attachment: nil,
+        onSend: { _ in },
+        onPickedImage: { _ in },
+        onCancel: {},
+        onNewSession: {},
+        onDismiss: {},
+        onRetryError: {},
+        onRedownloadModel: {}
     )
 }
