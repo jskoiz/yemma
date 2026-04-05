@@ -604,16 +604,6 @@ public struct ChatView: View {
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: shouldShowTypingIndicator)
     }
 
-    private func composerIcon(systemName: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: systemName)
-                .font(.system(size: 22, weight: .semibold))
-                .foregroundStyle(AppTheme.textSecondary)
-                .frame(width: 36, height: 36)
-        }
-        .buttonStyle(.plain)
-    }
-
     private var attachmentPickerButton: some View {
         PhotosPicker(
             selection: $selectedPhotoItems,
@@ -1591,6 +1581,26 @@ private extension ChatMessage {
 #if DEBUG
 private let previewConversationID = UUID()
 
+private func previewChatStore(
+    currentConversationID: UUID = previewConversationID,
+    title: String,
+    messages: [ChatMessage],
+    draftText: String = ""
+) -> ConversationStore {
+    ConversationStore.preview(
+        currentConversationID: currentConversationID,
+        conversations: [
+            ConversationSnapshot(
+                id: currentConversationID,
+                title: title,
+                messages: messages,
+                draftText: draftText,
+                draftAttachments: []
+            )
+        ]
+    )
+}
+
 private extension LLMService {
     static func previewLoaded() -> LLMService {
         let service = LLMService()
@@ -1611,28 +1621,20 @@ private extension LLMService {
         .environment(LLMService.previewLoaded())
         .environment(ModelDownloader())
         .environment(
-            ConversationStore.preview(
-                currentConversationID: previewConversationID,
-                conversations: [
-                    ConversationSnapshot(
-                        id: previewConversationID,
-                        title: "Workout split",
-                        messages: [
-                            .previewMessage(
-                                user: .user,
-                                text: "Plan me a focused three-day workout split for strength and cardio."
-                            ),
-                            .previewMessage(
-                user: .yemma,
-                text: "Here is a simple split: Day 1 push and intervals, Day 2 lower body and incline walking, Day 3 pull and steady-state cardio. Keep each session around 45 minutes."
-            ),
-                            .previewMessage(
-                                user: .user,
-                                text: "Keep it beginner friendly and make the gym version optional."
-                            )
-                        ],
-                        draftText: "",
-                        draftAttachments: []
+            previewChatStore(
+                title: "Workout split",
+                messages: [
+                    .previewMessage(
+                        user: .user,
+                        text: "Plan me a focused three-day workout split for strength and cardio."
+                    ),
+                    .previewMessage(
+                        user: .yemma,
+                        text: "Here is a simple split: Day 1 push and intervals, Day 2 lower body and incline walking, Day 3 pull and steady-state cardio. Keep each session around 45 minutes."
+                    ),
+                    .previewMessage(
+                        user: .user,
+                        text: "Keep it beginner friendly and make the gym version optional."
                     )
                 ]
             )
@@ -1644,18 +1646,35 @@ private extension LLMService {
         .environment(LLMService.previewWarmShell())
         .environment(ModelDownloader())
         .environment(
-            ConversationStore.preview(
-                currentConversationID: previewConversationID,
-                conversations: [
-                    ConversationSnapshot(
-                        id: previewConversationID,
-                        title: "New chat",
-                        messages: [],
-                        draftText: "Draft a short thank-you note after an interview.",
-                        draftAttachments: []
-                    )
-                ]
+            previewChatStore(
+                title: "New chat",
+                messages: [],
+                draftText: "Draft a short thank-you note after an interview."
             )
         )
+}
+
+#Preview("Chat Dark Compact") {
+    ChatView()
+        .environment(LLMService.previewLoaded())
+        .environment(ModelDownloader())
+        .environment(
+            previewChatStore(
+                title: "Travel plans",
+                messages: [
+                    .previewMessage(
+                        user: .user,
+                        text: "Build me a two-day Honolulu itinerary with food, beach time, and one rainy-day backup."
+                    ),
+                    .previewMessage(
+                        user: .yemma,
+                        text: "Day 1 can stay centered around Kakaako, Ala Moana, and Waikiki. Day 2 can lean east side with Hanauma Bay timing, a casual lunch, and a museum backup if weather turns."
+                    )
+                ],
+                draftText: "Keep the budget moderate and avoid rental-car-only stops."
+            )
+        )
+        .preferredColorScheme(.dark)
+        .previewDevice("iPhone SE (3rd generation)")
 }
 #endif

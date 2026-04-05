@@ -635,4 +635,14 @@ private struct OnboardingPreviewScreen: View {
         llmService: .onboardingPreview()
     )
 }
+
+#Preview("Setup Dark Compact") {
+    OnboardingPreviewScreen(
+        supportsLocalModelRuntime: true,
+        downloader: .preview(),
+        llmService: .onboardingPreview()
+    )
+    .preferredColorScheme(.dark)
+    .previewDevice("iPhone SE (3rd generation)")
+}
 #endif
