@@ -171,7 +171,7 @@ public struct ContentView: View {
     }
 
     private var canContinueFromOnboarding: Bool {
-        modelDownloader.isDownloaded || !supportsLocalModelRuntime
+        hasWarmShell || !supportsLocalModelRuntime
     }
 
     private var hasWarmShell: Bool {

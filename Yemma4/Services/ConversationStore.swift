@@ -151,7 +151,7 @@ private struct PersistedMessage: Codable, Sendable {
         case .read:
             .read
         case .error:
-            .sent
+            .error
         case nil:
             nil
         }
