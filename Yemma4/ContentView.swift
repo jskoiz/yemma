@@ -74,6 +74,7 @@ struct PillButtonStyle: ButtonStyle {
 }
 
 public struct ContentView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(ModelDownloader.self) private var modelDownloader
     @Environment(LLMService.self) private var llmService
 
@@ -96,7 +97,11 @@ public struct ContentView: View {
                         isShowingOnboardingPreview = true
                     }
                 )
-                    .transition(.opacity.combined(with: .move(edge: .trailing)))
+                    .transition(
+                        reduceMotion
+                            ? .opacity
+                            : .opacity.combined(with: .move(edge: .trailing))
+                    )
             } else {
                 OnboardingView(
                     onContinue: canContinueFromOnboarding ? {
@@ -106,7 +111,11 @@ public struct ContentView: View {
                         Task { await loadModelIfNeeded(force: true) }
                     } : nil
                 )
-                    .transition(.opacity.combined(with: .move(edge: .leading)))
+                    .transition(
+                        reduceMotion
+                            ? .opacity
+                            : .opacity.combined(with: .move(edge: .leading))
+                    )
             }
         }
         .onAppear {
@@ -135,10 +144,10 @@ public struct ContentView: View {
         .onChange(of: llmService.isVisionReady) { _, _ in
             recordStartupMilestonesIfNeeded()
         }
-        .animation(.easeInOut(duration: 0.25), value: modelDownloader.isDownloaded)
-        .animation(.easeInOut(duration: 0.25), value: llmService.isModelLoaded)
-        .animation(.easeInOut(duration: 0.25), value: llmService.isModelLoading)
-        .animation(.easeInOut(duration: 0.25), value: isShowingOnboardingPreview)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: modelDownloader.isDownloaded)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: llmService.isModelLoaded)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: llmService.isModelLoading)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: isShowingOnboardingPreview)
         .alert(
             "Unable to Load Model",
             isPresented: Binding(

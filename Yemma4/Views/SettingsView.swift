@@ -173,6 +173,7 @@ public enum DebugInferenceScenario: String, CaseIterable, Identifiable {
 
 public struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(ModelDownloader.self) private var modelDownloader
     @Environment(LLMService.self) private var llmService
     @Environment(ConversationStore.self) private var conversationStore
@@ -192,6 +193,11 @@ public struct SettingsView: View {
         self.onRunDebugScenario = onRunDebugScenario
     }
 
+    private let repositoryURL = URL(string: "https://github.com/jskoiz/yemma")!
+    private let licenseURL = URL(string: "https://github.com/jskoiz/yemma/blob/main/LICENSE")!
+    private let metadataURL = URL(string: "https://github.com/jskoiz/yemma/blob/main/METADATA.md")!
+    private let supportURL = URL(string: "https://github.com/jskoiz/yemma/issues")!
+
     public var body: some View {
         NavigationStack {
             ZStack {
@@ -200,9 +206,10 @@ public struct SettingsView: View {
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: AppTheme.Layout.sectionSpacing) {
                         header
-                        appSection
+                        everydaySection
+                        storageSection
+                        trustSection
                         aboutSection
-                        moreSection
                     }
                     .padding(.horizontal, AppTheme.Layout.screenPadding)
                     .padding(.top, 20)
@@ -251,39 +258,100 @@ public struct SettingsView: View {
                 .foregroundStyle(AppTheme.textPrimary)
             Spacer()
             CircleIconButton(systemName: "xmark", action: { dismiss() })
+                .accessibilityLabel("Close settings")
         }
         .padding(.horizontal, 4)
     }
 
-    private var appSection: some View {
-        UtilitySection("App") {
-            infoRow(icon: "shippingbox", title: "Manage models", detail: modelSizeText)
+    private var everydaySection: some View {
+        UtilitySection("Everyday") {
+            responseStyleRow
             UtilitySectionSeparator()
             appearanceRow
             UtilitySectionSeparator()
             advancedRow
+        }
+    }
+
+    private var storageSection: some View {
+        UtilitySection("Storage") {
+            infoRow(
+                icon: "shippingbox",
+                title: "Local model",
+                detail: modelSizeText,
+                accessibilityHint: "Shows the amount of space used by the downloaded on-device model."
+            )
             UtilitySectionSeparator()
             Button {
+                AppHaptics.selection()
                 dismiss()
                 onShowOnboarding()
             } label: {
-                utilityActionRow(icon: "sparkles.rectangle.stack", title: "View onboarding screen")
+                utilityActionRow(
+                    icon: "sparkles.rectangle.stack",
+                    title: "View onboarding",
+                    detail: "See download, setup, and local model status again."
+                )
             }
             .buttonStyle(.plain)
             UtilitySectionSeparator()
-            destructiveRow(icon: "trash", title: "Delete conversation history") {
+            destructiveRow(
+                icon: "trash",
+                title: "Delete conversation history",
+                accessibilityHint: "Deletes saved chats and drafts from this iPhone."
+            ) {
                 showClearConversationConfirmation = true
             }
+            UtilitySectionSeparator()
+            destructiveRow(
+                icon: "externaldrive.badge.minus",
+                title: "Delete downloaded model",
+                accessibilityHint: "Removes the local model and sends the app back to setup."
+            ) {
+                showDeleteModelConfirmation = true
+            }
+        }
+    }
+
+    private var trustSection: some View {
+        UtilitySection("Privacy & Trust") {
+            trustRow
+            UtilitySectionSeparator()
+            linkRow(
+                icon: "doc.text",
+                title: "MIT license",
+                detail: "Read the app license.",
+                url: licenseURL,
+                accessibilityHint: "Opens the app license in Safari."
+            )
+            UtilitySectionSeparator()
+            linkRow(
+                icon: "shield.lefthalf.filled",
+                title: "Model details and attributions",
+                detail: "Where the model comes from and what stays local.",
+                url: metadataURL,
+                accessibilityHint: "Opens project metadata in Safari."
+            )
+            UtilitySectionSeparator()
+            linkRow(
+                icon: "lifepreserver",
+                title: "Support and feedback",
+                detail: "Report bugs or ask for help.",
+                url: supportURL,
+                accessibilityHint: "Opens GitHub issues in Safari."
+            )
         }
     }
 
     private var aboutSection: some View {
         UtilitySection("About") {
-            linkRow(icon: "doc.text", title: "Terms & Conditions", url: URL(string: "https://github.com/jskoiz/yemma-4/blob/main/LICENSE")!)
-            UtilitySectionSeparator()
-            linkRow(icon: "lock", title: "Privacy Policy", url: URL(string: "https://github.com/jskoiz/yemma-4")!)
-            UtilitySectionSeparator()
-            linkRow(icon: "books.vertical", title: "Licenses", url: URL(string: "https://github.com/ggml-org/llama.cpp")!)
+            linkRow(
+                icon: "link",
+                title: "Project repository",
+                detail: "Source, releases, and updates.",
+                url: repositoryURL,
+                accessibilityHint: "Opens the project repository in Safari."
+            )
             UtilitySectionSeparator()
             infoRow(icon: "building.2", title: "Made by", detail: "AVMIL Labs in Honolulu, Hawaii")
             UtilitySectionSeparator()
@@ -291,44 +359,114 @@ public struct SettingsView: View {
         }
     }
 
-    private var moreSection: some View {
-        UtilitySection("More") {
-            linkRow(icon: "square.and.arrow.up", title: "Share the app", url: URL(string: "https://github.com/jskoiz/yemma-4")!)
-            UtilitySectionSeparator()
-            linkRow(icon: "link", title: "Project repository", url: URL(string: "https://github.com/jskoiz/yemma-4")!)
-            UtilitySectionSeparator()
-            destructiveRow(icon: "externaldrive.badge.minus", title: "Delete downloaded model") {
-                showDeleteModelConfirmation = true
-            }
-        }
-    }
-
-    private func infoRow(icon: String, title: String, detail: String) -> some View {
-        HStack(spacing: 14) {
-            Image(systemName: icon)
-                .frame(width: AppTheme.Layout.rowIconSize)
-                .foregroundStyle(AppTheme.textPrimary)
-
-            Text(title)
+    private var trustRow: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Private after download", systemImage: "lock.shield.fill")
                 .font(AppTheme.Typography.utilityRowTitle)
                 .foregroundStyle(AppTheme.textPrimary)
 
-            Spacer()
-
-            Text(detail)
+            Text("Yemma runs on-device on your iPhone, keeps chats local, and does not ask for an account.")
                 .font(AppTheme.Typography.utilityRowDetail)
                 .foregroundStyle(AppTheme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .utilityRowPadding()
+        .accessibilityElement(children: .combine)
+    }
+
+    private var responseStyleRow: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Label("Response style", systemImage: "bolt.circle")
+                    .font(AppTheme.Typography.utilityRowTitle)
+                    .foregroundStyle(AppTheme.textPrimary)
+
+                Spacer()
+
+                Text(llmService.activeResponseStyleTitle)
+                    .font(AppTheme.Typography.utilityRowDetail)
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+
+            Text("Pick a simple preset first. Advanced runtime controls stay available below.")
+                .font(AppTheme.Typography.utilityCaption)
+                .foregroundStyle(AppTheme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            VStack(spacing: 0) {
+                ForEach(Array(ResponseStylePreset.allCases.enumerated()), id: \.element.id) { index, preset in
+                    Button {
+                        applyResponseStylePreset(preset)
+                    } label: {
+                        responseStyleButton(preset)
+                    }
+                    .buttonStyle(.plain)
+
+                    if index != ResponseStylePreset.allCases.count - 1 {
+                        UtilitySectionSeparator(leadingInset: AppTheme.Layout.rowIconSize + 12)
+                    }
+                }
+            }
         }
         .utilityRowPadding()
+        .accessibilityElement(children: .contain)
+    }
+
+    private func responseStyleButton(_ preset: ResponseStylePreset) -> some View {
+        let isSelected = llmService.activeResponseStylePreset == preset
+
+        return HStack(alignment: .top, spacing: 12) {
+            Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(isSelected ? AppTheme.accent : AppTheme.textTertiary)
+                .frame(width: AppTheme.Layout.rowIconSize)
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Text(preset.title)
+                        .font(AppTheme.Typography.utilityRowTitle.weight(.semibold))
+                        .foregroundStyle(AppTheme.textPrimary)
+
+                    if isSelected {
+                        Text("Current")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(AppTheme.accent)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(AppTheme.accentSoft)
+                            .clipShape(Capsule())
+                    }
+                }
+
+                Text(preset.summary)
+                    .font(AppTheme.Typography.utilityCaption)
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(preset.title)
+        .accessibilityValue(isSelected ? "Current" : "Not selected")
+        .accessibilityHint("Applies \(preset.summary.lowercased())")
     }
 
     private var advancedRow: some View {
         NavigationLink {
             AdvancedSettingsView(onRunDebugScenario: onRunDebugScenario)
         } label: {
-            utilityActionRow(icon: "gearshape.2", title: "Advanced")
+            utilityActionRow(
+                icon: "gearshape.2",
+                title: "Advanced runtime controls",
+                detail: "Context window, flash attention, response limit, and diagnostics."
+            )
         }
         .buttonStyle(.plain)
+        .accessibilityHint("Opens lower-level model controls and diagnostics.")
     }
 
     private var appearanceRow: some View {
@@ -345,56 +483,197 @@ public struct SettingsView: View {
                     .foregroundStyle(AppTheme.textSecondary)
             }
 
-            Picker("Appearance", selection: appearancePreferenceBinding) {
-                ForEach(AppearancePreference.allCases) { appearance in
-                    Text(appearance.title)
-                        .tag(appearance)
+            if dynamicTypeSize.isAccessibilitySize {
+                Menu {
+                    ForEach(AppearancePreference.allCases) { appearance in
+                        Button(appearance.title) {
+                            appearancePreferenceBinding.wrappedValue = appearance
+                        }
+                    }
+                } label: {
+                    HStack {
+                        Text(selectedAppearancePreference.title)
+                            .font(AppTheme.Typography.utilityRowTitle)
+                            .foregroundStyle(AppTheme.textPrimary)
+                        Spacer()
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(AppTheme.textSecondary)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+                    .background(AppTheme.controlFill)
+                    .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.small, style: .continuous))
                 }
+                .buttonStyle(.plain)
+            } else {
+                Picker("Appearance", selection: appearancePreferenceBinding) {
+                    ForEach(AppearancePreference.allCases) { appearance in
+                        Text(appearance.title)
+                            .tag(appearance)
+                    }
+                }
+                .pickerStyle(.segmented)
             }
-            .pickerStyle(.segmented)
 
             Text("Match your iPhone by default, or keep Yemma in light or dark mode.")
                 .font(AppTheme.Typography.utilityCaption)
                 .foregroundStyle(AppTheme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .utilityRowPadding()
+        .accessibilityElement(children: .contain)
     }
 
-    private func destructiveRow(icon: String, title: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+    private func infoRow(
+        icon: String,
+        title: String,
+        detail: String,
+        accessibilityHint: String? = nil
+    ) -> some View {
+        ViewThatFits(in: .vertical) {
             HStack(spacing: 14) {
                 Image(systemName: icon)
                     .frame(width: AppTheme.Layout.rowIconSize)
+                    .foregroundStyle(AppTheme.textPrimary)
+
                 Text(title)
                     .font(AppTheme.Typography.utilityRowTitle)
+                    .foregroundStyle(AppTheme.textPrimary)
+
                 Spacer()
+
+                Text(detail)
+                    .font(AppTheme.Typography.utilityRowDetail)
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .multilineTextAlignment(.trailing)
             }
-            .foregroundStyle(AppTheme.destructive)
-            .utilityRowPadding()
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 14) {
+                    Image(systemName: icon)
+                        .frame(width: AppTheme.Layout.rowIconSize)
+                        .foregroundStyle(AppTheme.textPrimary)
+
+                    Text(title)
+                        .font(AppTheme.Typography.utilityRowTitle)
+                        .foregroundStyle(AppTheme.textPrimary)
+                }
+
+                Text(detail)
+                    .font(AppTheme.Typography.utilityRowDetail)
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .padding(.leading, AppTheme.Layout.rowIconSize + 14)
+            }
+        }
+        .utilityRowPadding()
+        .accessibilityElement(children: .combine)
+        .accessibilityHint(accessibilityHint ?? "")
+    }
+
+    private func destructiveRow(
+        icon: String,
+        title: String,
+        accessibilityHint: String? = nil,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            utilityActionRow(icon: icon, title: title, titleColor: AppTheme.destructive, chevronColor: AppTheme.destructive)
+                .accessibilityHint(accessibilityHint ?? "")
         }
         .buttonStyle(.plain)
     }
 
-    private func linkRow(icon: String, title: String, url: URL) -> some View {
+    private func linkRow(
+        icon: String,
+        title: String,
+        detail: String,
+        url: URL,
+        accessibilityHint: String? = nil
+    ) -> some View {
         Link(destination: url) {
-            utilityActionRow(icon: icon, title: title)
+            utilityActionRow(icon: icon, title: title, detail: detail)
+                .accessibilityHint(accessibilityHint ?? "")
         }
+        .buttonStyle(.plain)
     }
 
-    private func utilityActionRow(icon: String, title: String) -> some View {
-        HStack(spacing: 14) {
-            Image(systemName: icon)
-                .frame(width: AppTheme.Layout.rowIconSize)
-                .foregroundStyle(AppTheme.textPrimary)
-            Text(title)
-                .font(AppTheme.Typography.utilityRowTitle)
-                .foregroundStyle(AppTheme.textPrimary)
-            Spacer()
-            Image(systemName: "chevron.right")
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(AppTheme.textSecondary)
+    private func utilityActionRow(
+        icon: String,
+        title: String,
+        detail: String? = nil,
+        titleColor: Color = AppTheme.textPrimary,
+        chevronColor: Color = AppTheme.textSecondary
+    ) -> some View {
+        ViewThatFits(in: .vertical) {
+            HStack(spacing: 14) {
+                Image(systemName: icon)
+                    .frame(width: AppTheme.Layout.rowIconSize)
+                    .foregroundStyle(titleColor)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(AppTheme.Typography.utilityRowTitle)
+                        .foregroundStyle(titleColor)
+
+                    if let detail {
+                        Text(detail)
+                            .font(AppTheme.Typography.utilityCaption)
+                            .foregroundStyle(AppTheme.textSecondary)
+                            .multilineTextAlignment(.leading)
+                    }
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(chevronColor)
+            }
+
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 14) {
+                    Image(systemName: icon)
+                        .frame(width: AppTheme.Layout.rowIconSize)
+                        .foregroundStyle(titleColor)
+
+                    Text(title)
+                        .font(AppTheme.Typography.utilityRowTitle)
+                        .foregroundStyle(titleColor)
+                }
+
+                if let detail {
+                    Text(detail)
+                        .font(AppTheme.Typography.utilityCaption)
+                        .foregroundStyle(AppTheme.textSecondary)
+                        .padding(.leading, AppTheme.Layout.rowIconSize + 14)
+                }
+
+                HStack {
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(chevronColor)
+                }
+            }
         }
         .utilityRowPadding()
+        .accessibilityElement(children: .combine)
+    }
+
+    private func applyResponseStylePreset(_ preset: ResponseStylePreset) {
+        guard llmService.activeResponseStylePreset != preset else { return }
+        llmService.applyResponseStylePreset(preset)
+        AppHaptics.selection()
+        AppDiagnostics.shared.record(
+            "Response style preset applied",
+            category: "settings",
+            metadata: [
+                "preset": preset.rawValue,
+                "temperature": preset.temperature,
+                "maxResponseTokens": preset.maxResponseTokens
+            ]
+        )
     }
 
     private var modelSizeText: String {
@@ -425,7 +704,16 @@ public struct SettingsView: View {
     private var appearancePreferenceBinding: Binding<AppearancePreference> {
         Binding(
             get: { selectedAppearancePreference },
-            set: { appearancePreferenceRaw = $0.rawValue }
+            set: { newValue in
+                guard appearancePreferenceRaw != newValue.rawValue else { return }
+                appearancePreferenceRaw = newValue.rawValue
+                AppHaptics.selection()
+                AppDiagnostics.shared.record(
+                    "Appearance preference changed",
+                    category: "settings",
+                    metadata: ["appearance": newValue.rawValue]
+                )
+            }
         )
     }
 
@@ -443,5 +731,14 @@ public struct SettingsView: View {
         .environment(ModelDownloader())
         .environment(LLMService())
         .environment(ConversationStore.preview())
+}
+
+#Preview("Settings Accessibility") {
+    SettingsView(onShowOnboarding: {})
+        .environment(ModelDownloader())
+        .environment(LLMService())
+        .environment(ConversationStore.preview())
+        .dynamicTypeSize(.accessibility3)
+        .preferredColorScheme(.dark)
 }
 #endif

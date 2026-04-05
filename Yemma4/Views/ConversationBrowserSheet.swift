@@ -23,6 +23,7 @@ struct ConversationBrowserSheet: View {
                     UtilitySection("Chats") {
                         Button {
                             AppDiagnostics.shared.record("Fresh conversation requested", category: "ui")
+                            AppHaptics.selection()
                             onStartFresh()
                             dismiss()
                         } label: {
@@ -48,6 +49,7 @@ struct ConversationBrowserSheet: View {
                                         "messageCount": metadata.messageCount
                                     ]
                                 )
+                                AppHaptics.selection()
                                 onSelectConversation(metadata.id)
                                 dismiss()
                             } label: {
@@ -90,6 +92,7 @@ struct ConversationBrowserSheet: View {
                     category: "ui",
                     metadata: ["conversationID": renameConversation.id.uuidString]
                 )
+                AppHaptics.selection()
                 conversationStore.renameConversation(id: renameConversation.id, title: trimmedTitle)
                 self.renameConversation = nil
             }
@@ -107,6 +110,7 @@ struct ConversationBrowserSheet: View {
                 .foregroundStyle(AppTheme.textPrimary)
             Spacer()
             CircleIconButton(systemName: "xmark", action: { dismiss() })
+                .accessibilityLabel("Close conversations")
         }
         .padding(.horizontal, AppTheme.Layout.screenHeaderHorizontalPadding)
         .padding(.top, 18)
