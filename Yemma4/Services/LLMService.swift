@@ -338,11 +338,12 @@ final class LLMService: @unchecked Sendable {
                 return old
             }
 
-            oldResources.visionTask?.cancel()
-            Self.freeResources(
+            Self.releaseResources(
                 model: oldResources.model,
                 context: oldResources.context,
-                multimodalRuntime: oldResources.multimodalRuntime
+                multimodalRuntime: oldResources.multimodalRuntime,
+                visionTask: oldResources.visionTask,
+                reason: "model_reload"
             )
 
             await MainActor.run {
@@ -396,7 +397,7 @@ final class LLMService: @unchecked Sendable {
             let continuationBox = StreamContinuationBox(continuation)
             let task = Task {
                 do {
-                    let requiresVision = !prompt.images.isEmpty
+                    let requiresVision = !prompt.images.isEmpty || history.contains(where: { !$0.images.isEmpty })
                     let currentResources = try await self.prepareGenerationResources(requiresVision: requiresVision)
                     let formattedPrompt = Self.formatPrompt(
                         prompt: prompt,
@@ -979,12 +980,12 @@ private extension LLMService {
         }
 
         await MainActor.run {
-            isModelLoading = false
+            lastError = error.localizedDescription
             isModelLoaded = currentState.hasTextModel
             isVisionReady = currentState.hasVisionRuntime
             isVisionLoading = false
             modelLoadStage = currentState.hasTextModel ? .ready : .failed
-            lastError = error.localizedDescription
+            isModelLoading = false
         }
     }
 
@@ -1045,11 +1046,12 @@ private extension LLMService {
             return current
         }
 
-        resources.visionTask?.cancel()
-        Self.freeResources(
+        Self.releaseResources(
             model: resources.model,
             context: resources.context,
-            multimodalRuntime: resources.multimodalRuntime
+            multimodalRuntime: resources.multimodalRuntime,
+            visionTask: resources.visionTask,
+            reason: "model_unload"
         )
     }
 
@@ -1066,6 +1068,36 @@ private extension LLMService {
 
         if let model {
             llama_model_free(model)
+        }
+    }
+
+    static func releaseResources(
+        model: OpaquePointer?,
+        context: OpaquePointer?,
+        multimodalRuntime: YemmaMultimodalRuntime?,
+        visionTask: Task<YemmaMultimodalRuntime, Error>?,
+        reason: String
+    ) {
+        guard let visionTask else {
+            freeResources(model: model, context: context, multimodalRuntime: multimodalRuntime)
+            return
+        }
+
+        visionTask.cancel()
+        AppDiagnostics.shared.record(
+            "Deferring resource cleanup until vision task settles",
+            category: "model",
+            metadata: ["reason": reason]
+        )
+
+        Task.detached(priority: .utility) {
+            _ = await visionTask.result
+            freeResources(model: model, context: context, multimodalRuntime: multimodalRuntime)
+            AppDiagnostics.shared.record(
+                "Deferred resource cleanup finished",
+                category: "model",
+                metadata: ["reason": reason]
+            )
         }
     }
 

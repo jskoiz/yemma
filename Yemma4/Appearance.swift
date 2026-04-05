@@ -233,12 +233,14 @@ private struct AppPanelModifier: ViewModifier {
 private struct OptionalShadowModifier: ViewModifier {
     let style: AppTheme.ShadowStyle?
 
+    @ViewBuilder
     func body(content: Content) -> some View {
-        guard let style else { return AnyView(content) }
-        let token = AppTheme.shadow(style)
-        return AnyView(
+        if let style {
+            let token = AppTheme.shadow(style)
             content.shadow(color: token.color, radius: token.radius, x: 0, y: token.y)
-        )
+        } else {
+            content
+        }
     }
 }
 

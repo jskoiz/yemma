@@ -338,10 +338,7 @@ final class ChatSessionController {
     }
 
     func storeAttachmentData(_ data: Data, fileExtension: String) throws -> URL {
-        let directory = FileManager.default
-            .urls(for: .cachesDirectory, in: .userDomainMask)
-            .first!
-            .appendingPathComponent("chat-attachments", isDirectory: true)
+        let directory = ConversationAttachmentStore.directoryURL()
 
         try FileManager.default.createDirectory(
             at: directory,
