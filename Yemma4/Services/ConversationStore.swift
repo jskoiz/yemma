@@ -21,6 +21,77 @@ struct ConversationSnapshot: Sendable {
     let draftAttachments: [Attachment]
 }
 
+enum ConversationAttachmentStore {
+    private static let directoryName = "chat-attachments"
+
+    static func directoryURL(
+        fileManager: FileManager = .default,
+        baseDirectoryOverride: URL? = nil
+    ) -> URL {
+        if let baseDirectoryOverride {
+            return baseDirectoryOverride.appendingPathComponent(directoryName, isDirectory: true)
+        }
+
+        guard let cachesDirectory = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first else {
+            fatalError("Unable to locate the caches directory for attachment storage.")
+        }
+
+        return cachesDirectory.appendingPathComponent(directoryName, isDirectory: true)
+    }
+
+    static func removeAll(
+        fileManager: FileManager = .default,
+        baseDirectoryOverride: URL? = nil
+    ) -> Int {
+        let directory = directoryURL(fileManager: fileManager, baseDirectoryOverride: baseDirectoryOverride)
+        guard fileManager.fileExists(atPath: directory.path) else { return 0 }
+
+        let removedCount = fileCount(in: directory, fileManager: fileManager)
+        try? fileManager.removeItem(at: directory)
+        return removedCount
+    }
+
+    static func removeFiles(
+        at urls: [URL],
+        fileManager: FileManager = .default,
+        baseDirectoryOverride: URL? = nil
+    ) -> Int {
+        let directory = directoryURL(fileManager: fileManager, baseDirectoryOverride: baseDirectoryOverride)
+        let directoryPath = directory.standardizedFileURL.path + "/"
+        var removedCount = 0
+
+        for url in Set(urls.map(\.standardizedFileURL)) where url.path.hasPrefix(directoryPath) {
+            guard fileManager.fileExists(atPath: url.path) else { continue }
+            do {
+                try fileManager.removeItem(at: url)
+                removedCount += 1
+            } catch {
+                continue
+            }
+        }
+
+        return removedCount
+    }
+
+    private static func fileCount(in directory: URL, fileManager: FileManager) -> Int {
+        guard let enumerator = fileManager.enumerator(
+            at: directory,
+            includingPropertiesForKeys: [.isRegularFileKey]
+        ) else {
+            return 0
+        }
+
+        var count = 0
+        for case let fileURL as URL in enumerator {
+            let values = try? fileURL.resourceValues(forKeys: [.isRegularFileKey])
+            if values?.isRegularFile == true {
+                count += 1
+            }
+        }
+        return count
+    }
+}
+
 private struct PersistedConversation: Codable, Sendable {
     let id: UUID
     var title: String
@@ -105,6 +176,7 @@ final class ConversationStore {
     private let fileManager: FileManager
     private let defaults: UserDefaults
     private let storageRootOverride: URL?
+    // Protects persisted store mutations so file I/O helpers remain safe if they are ever reused off the main actor.
     private let ioLock = NSLock()
 
     private static let indexFileName = "index.json"
@@ -231,22 +303,36 @@ final class ConversationStore {
 
     func renameConversation(id: UUID, title: String) {
         guard let trimmedTitle = cleanedTitle(title) else { return }
-        guard var conversation = readConversation(id: id) else { return }
+        ioLock.lock()
+        defer { ioLock.unlock() }
+
+        guard var conversation = readConversationLocked(id: id) else { return }
         guard let metadataIndex = conversations.firstIndex(where: { $0.id == id }) else { return }
 
+        let updatedAt = Date()
         conversation.title = trimmedTitle
+        conversation.updatedAt = updatedAt
         conversations[metadataIndex].title = trimmedTitle
-        conversations[metadataIndex].updatedAt = Date()
+        conversations[metadataIndex].updatedAt = updatedAt
         conversations[metadataIndex].isCustomTitle = true
-        conversation.updatedAt = conversations[metadataIndex].updatedAt
 
-        writeConversation(conversation)
-        writeIndex()
+        ensureRootDirectoryLocked()
+        ensureConversationDirectoryLocked(id: conversation.id)
+        writeConversationLocked(conversation)
+        writeIndexLocked()
     }
 
     func deleteConversation(id: UUID) {
         ioLock.lock()
         defer { ioLock.unlock() }
+
+        let removedAttachmentFiles = readConversationLocked(id: id).map { conversation in
+            ConversationAttachmentStore.removeFiles(
+                at: Self.attachmentURLs(in: conversation),
+                fileManager: fileManager,
+                baseDirectoryOverride: storageRootOverride
+            )
+        } ?? 0
 
         let directory = conversationDirectory(for: id)
         if fileManager.fileExists(atPath: directory.path) {
@@ -266,6 +352,17 @@ final class ConversationStore {
                 defaults.removeObject(forKey: Self.currentConversationDefaultsKey)
             }
         }
+
+        if removedAttachmentFiles > 0 {
+            AppDiagnostics.shared.record(
+                "Conversation attachments deleted",
+                category: "storage",
+                metadata: [
+                    "conversationID": id.uuidString,
+                    "files": removedAttachmentFiles
+                ]
+            )
+        }
     }
 
     func deleteAllConversations() {
@@ -276,13 +373,29 @@ final class ConversationStore {
             try? fileManager.removeItem(at: rootDirectory)
         }
 
+        let removedAttachmentFiles = ConversationAttachmentStore.removeAll(
+            fileManager: fileManager,
+            baseDirectoryOverride: storageRootOverride
+        )
+
         conversations = []
         currentConversationID = nil
         defaults.removeObject(forKey: Self.currentConversationDefaultsKey)
+
+        if removedAttachmentFiles > 0 {
+            AppDiagnostics.shared.record(
+                "Conversation attachments cleared",
+                category: "storage",
+                metadata: ["files": removedAttachmentFiles]
+            )
+        }
     }
 
     private var documentsDirectory: URL {
-        fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
+        guard let documentsDirectory = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            fatalError("Unable to locate the documents directory for conversation storage.")
+        }
+        return documentsDirectory
     }
 
     private var rootDirectory: URL {
@@ -342,6 +455,10 @@ final class ConversationStore {
         ioLock.lock()
         defer { ioLock.unlock() }
 
+        return readConversationLocked(id: id)
+    }
+
+    private func readConversationLocked(id: UUID) -> PersistedConversation? {
         let conversationURL = conversationURL(for: id)
         guard let data = try? Data(contentsOf: conversationURL) else {
             return nil
@@ -392,6 +509,12 @@ final class ConversationStore {
         guard let title else { return nil }
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private static func attachmentURLs(in conversation: PersistedConversation) -> [URL] {
+        let messageAttachments = conversation.messages.flatMap(\.attachments).map(\.url)
+        let draftAttachments = conversation.draftAttachments.map(\.url)
+        return messageAttachments + draftAttachments
     }
 
     private static func suggestedTitle(for messages: [ChatMessage]) -> String {

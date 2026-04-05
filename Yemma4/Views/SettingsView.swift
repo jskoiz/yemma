@@ -246,7 +246,7 @@ public struct SettingsView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This removes saved local chats and drafts on this iPhone.")
+            Text("This removes saved local chats, drafts, and attached images on this iPhone.")
         }
     }
 
