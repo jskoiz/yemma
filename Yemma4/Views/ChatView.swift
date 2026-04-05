@@ -39,11 +39,7 @@ public struct ChatView: View {
     private let pinnedThreshold: CGFloat = 48
     private let releasePinnedThreshold: CGFloat = 120
 
-    private let quickPrompts: [(title: String, subtitle: String, prompt: String)] = [
-        ("Design", "a workout routine", "Design a simple workout routine I can do at home."),
-        ("Begin", "meditating", "Begin a meditation habit with a simple 7-day plan."),
-        ("Explain", "a complex idea", "Explain a complex idea in a simple way.")
-    ]
+    private let taskStarters = ChatStarter.defaults
 
     private let onShowOnboarding: () -> Void
 
@@ -339,7 +335,9 @@ public struct ChatView: View {
             isModelLoaded: llmService.isTextModelReady,
             isModelLoading: llmService.isModelLoading,
             supportsLocalModelRuntime: supportsLocalModelRuntime,
-            modelLoadStageText: modelStatusText
+            modelLoadStageText: modelStatusText,
+            starters: taskStarters,
+            onSelectStarter: selectStarter
         )
     }
 
@@ -448,10 +446,6 @@ public struct ChatView: View {
 
     private var composerSection: some View {
         VStack(spacing: 12) {
-            if messages.isEmpty {
-                quickPromptStrip
-            }
-
             if shouldShowTypingIndicator {
                 typingIndicator
                     .transition(.opacity.combined(with: .scale(scale: 0.8)))
@@ -513,31 +507,6 @@ public struct ChatView: View {
             .ignoresSafeArea(edges: .bottom)
         )
         .animation(.easeInOut(duration: 0.2), value: shouldShowTypingIndicator)
-    }
-
-    private var quickPromptStrip: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 10) {
-                ForEach(quickPrompts, id: \.title) { prompt in
-                    Button {
-                        draft = prompt.prompt
-                        isComposerFocused = true
-                    } label: {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(prompt.title)
-                                .font(.system(size: 15, weight: .semibold, design: .rounded))
-                                .foregroundStyle(AppTheme.textPrimary)
-                            Text(prompt.subtitle)
-                                .font(.system(size: 13, weight: .medium, design: .rounded))
-                                .foregroundStyle(AppTheme.textSecondary)
-                        }
-                        .frame(width: 154, alignment: .leading)
-                    }
-                    .buttonStyle(PillButtonStyle())
-                }
-            }
-            .padding(.horizontal, 1)
-        }
     }
 
     private func composerIcon(systemName: String, action: @escaping () -> Void) -> some View {
@@ -604,14 +573,28 @@ public struct ChatView: View {
 
     private var modelStatusText: String {
         if !supportsLocalModelRuntime {
-            return "Simulator mode: mock replies are enabled so you can test the chat UI without downloading the model."
+            return "Simulator mode with mock replies."
         }
 
         if llmService.isModelLoading {
             return llmService.modelLoadStage.statusText
         }
 
-        return "Preparing your on-device model..."
+        return "Preparing your on-device model."
+    }
+
+    private func selectStarter(_ starter: ChatStarter) {
+        draft = starter.prompt
+        isComposerFocused = true
+        AppDiagnostics.shared.record(
+            "Starter selected",
+            category: "ui",
+            metadata: [
+                "starter": starter.title,
+                "messages": messages.count,
+                "textReady": llmService.isTextModelReady
+            ]
+        )
     }
 
     private func toastView(message: String) -> some View {
