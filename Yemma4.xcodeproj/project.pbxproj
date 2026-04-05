@@ -503,6 +503,10 @@
 				DEVELOPMENT_TEAM = H8PYU9TN9X;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				HEADER_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SRCROOT)/Yemma4/ThirdParty/litert_lm/include",
+				);
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Yemma uses the camera so you can capture photos to include in conversations.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Yemma saves generated and selected images to your photo library when you ask it to.";
@@ -518,7 +522,17 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SRCROOT)/Yemma4/ThirdParty/litert_lm",
+				);
 				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-llitert_lm_full",
+					"-lc++",
+					"-lresolv",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.avmillabs.yemma4;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_OBJC_BRIDGING_HEADER = Yemma4/Yemma4-Bridging-Header.h;
@@ -540,6 +554,10 @@
 				DEVELOPMENT_TEAM = H8PYU9TN9X;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				HEADER_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SRCROOT)/Yemma4/ThirdParty/litert_lm/include",
+				);
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Yemma uses the camera so you can capture photos to include in conversations.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Yemma saves generated and selected images to your photo library when you ask it to.";
@@ -555,7 +573,17 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SRCROOT)/Yemma4/ThirdParty/litert_lm",
+				);
 				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-llitert_lm_full",
+					"-lc++",
+					"-lresolv",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.avmillabs.yemma4;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_OBJC_BRIDGING_HEADER = Yemma4/Yemma4-Bridging-Header.h;
