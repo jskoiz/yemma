@@ -35,9 +35,28 @@
 
 Yemma 4 is an iOS app that runs Gemma 4 locally through `llama.cpp`, with prompts and responses staying on device after setup. This repo also includes the website design, landing page, and brand assets in [`website/`](website/).
 
+## Snapshot
+
+- No account, telemetry, or cloud inference
+- Streaming SwiftUI chat with markdown rendering, attachments, conversation management, advanced runtime controls, and diagnostics
+- Appearance system with `System`, `Light`, and `Dark` modes
+- Local multimodal path for image prompts
+- App code, website design, and App Store metadata in one repo all OSS
+
+## What Went Into It
+
+- Multi-asset local download flow with resume, validation, unload, and delete handling
+- Background `URLSession` download handling so the large first-run setup can continue, reconnect, and recover cleanly
+- Objective-C++ multimodal bridge for the `mmproj` vision projector
+- Runtime tuning for context size, flash attention, temperature, and response limits
+- Settings surfaces for diagnostics logs, event inspection, advanced inference controls, and debug formatting scenarios used during iteration
+- System-aware visual design with explicit light, dark, and follow-system appearance modes
+- Repeated UI iteration on onboarding, streaming behavior, scroll behavior, typing states, and chat readability
+- Simulator mock mode for faster product and UI iteration
+
 ## Screenshots
 
-These are some of the less-obvious product surfaces that took real dogfooding time: runtime controls, debug probes, and diagnostics.
+These are some of the less-obvious product surfaces that took real iteration time: runtime controls, debug probes, and diagnostics.
 
 <table>
   <tr>
@@ -53,29 +72,10 @@ These are some of the less-obvious product surfaces that took real dogfooding ti
   </tr>
   <tr>
     <td valign="top"><strong>Advanced controls</strong><br>Temperature, context window, flash attention, and response length tuning in-app.</td>
-    <td valign="top"><strong>Dogfooding probes</strong><br>Built-in markdown and renderer test scenarios for formatting stability work.</td>
+    <td valign="top"><strong>Debug probes</strong><br>Built-in markdown and renderer test scenarios for formatting stability work.</td>
     <td valign="top"><strong>Diagnostics</strong><br>Recent events, copyable logs, and runtime metadata for debugging startup and model load behavior.</td>
   </tr>
 </table>
-
-## Snapshot
-
-- No account, telemetry, or cloud inference
-- Streaming SwiftUI chat with markdown rendering, attachments, conversation management, advanced runtime controls, and diagnostics
-- Appearance system with `System`, `Light`, and `Dark` modes
-- Local multimodal path for image prompts
-- App code, website design, and App Store metadata in one repo all OSS
-
-## What Went Into It
-
-- Multi-asset local download flow with resume, validation, unload, and delete handling
-- Background `URLSession` download handling so the large first-run setup can continue, reconnect, and recover cleanly
-- Objective-C++ multimodal bridge for the `mmproj` vision projector
-- Runtime tuning for context size, flash attention, temperature, and response limits
-- Settings surfaces for diagnostics logs, event inspection, advanced inference controls, and debug formatting scenarios used for dogfooding
-- System-aware visual design with explicit light, dark, and follow-system appearance modes
-- Repeated UI iteration on onboarding, streaming behavior, scroll behavior, typing states, and chat readability
-- Simulator mock mode for faster product and UI iteration
 
 ## Stack And Structure
 
