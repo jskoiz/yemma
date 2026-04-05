@@ -27,11 +27,11 @@ struct EmptyStateView: View {
 
             if !isModelLoaded {
                 Text(statusText)
-                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    .font(AppTheme.Typography.utilityRowTitle)
                     .foregroundStyle(statusTextColor)
-                    .padding(.horizontal, 18)
+                    .padding(.horizontal, AppTheme.Layout.rowHorizontalPadding)
                     .padding(.vertical, 10)
-                    .glassCard(cornerRadius: 18)
+                    .brandCard(cornerRadius: AppTheme.Radius.small)
             }
         }
         .frame(maxWidth: .infinity, minHeight: 320)
@@ -53,3 +53,31 @@ struct EmptyStateView: View {
         supportsLocalModelRuntime ? AppTheme.textSecondary : AppTheme.textPrimary
     }
 }
+
+#if DEBUG
+#Preview("Warm Shell") {
+    ZStack {
+        AppBackground()
+        EmptyStateView(
+            isModelLoaded: false,
+            isModelLoading: true,
+            supportsLocalModelRuntime: true,
+            modelLoadStageText: ModelLoadStage.loadingModel.statusText
+        )
+        .padding(.horizontal, 16)
+    }
+}
+
+#Preview("Ready") {
+    ZStack {
+        AppBackground()
+        EmptyStateView(
+            isModelLoaded: true,
+            isModelLoading: false,
+            supportsLocalModelRuntime: true,
+            modelLoadStageText: ModelLoadStage.ready.statusText
+        )
+        .padding(.horizontal, 16)
+    }
+}
+#endif

@@ -197,16 +197,16 @@ public struct SettingsView: View {
     public var body: some View {
         NavigationStack {
             ZStack {
-                AppBackground()
+                UtilityBackground()
 
                 ScrollView(showsIndicators: false) {
-                    VStack(spacing: 24) {
+                    VStack(spacing: AppTheme.Layout.sectionSpacing) {
                         header
                         appSection
                         aboutSection
                         moreSection
                     }
-                    .padding(.horizontal, 16)
+                    .padding(.horizontal, AppTheme.Layout.screenPadding)
                     .padding(.top, 20)
                     .padding(.bottom, 28)
                 }
@@ -248,7 +248,7 @@ public struct SettingsView: View {
         HStack {
             Spacer()
             Text("Settings")
-                .font(.system(size: 24, weight: .semibold, design: .rounded))
+                .font(AppTheme.Typography.utilityTitle)
                 .foregroundStyle(AppTheme.textPrimary)
             Spacer()
             CircleIconButton(systemName: "xmark", action: { dismiss() })
@@ -257,126 +257,77 @@ public struct SettingsView: View {
     }
 
     private var appSection: some View {
-        settingsSection("App") {
-            VStack(spacing: 0) {
-                infoRow(icon: "shippingbox", title: "Manage models", detail: modelSizeText)
-                separator
-                appearanceRow
-                separator
-                advancedRow
-                separator
-                Button {
-                    dismiss()
-                    onShowOnboarding()
-                } label: {
-                    HStack(spacing: 14) {
-                        Image(systemName: "sparkles.rectangle.stack")
-                            .frame(width: 22)
-                            .foregroundStyle(AppTheme.textPrimary)
-                        Text("View onboarding screen")
-                            .font(.system(size: 18, weight: .medium, design: .rounded))
-                            .foregroundStyle(AppTheme.textPrimary)
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(AppTheme.textSecondary)
-                    }
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 16)
-                }
-                .buttonStyle(.plain)
-                separator
-                destructiveRow(icon: "trash", title: "Delete conversation history") {
-                    showClearConversationConfirmation = true
-                }
+        UtilitySection("App") {
+            infoRow(icon: "shippingbox", title: "Manage models", detail: modelSizeText)
+            UtilitySectionSeparator()
+            appearanceRow
+            UtilitySectionSeparator()
+            advancedRow
+            UtilitySectionSeparator()
+            Button {
+                dismiss()
+                onShowOnboarding()
+            } label: {
+                utilityActionRow(icon: "sparkles.rectangle.stack", title: "View onboarding screen")
+            }
+            .buttonStyle(.plain)
+            UtilitySectionSeparator()
+            destructiveRow(icon: "trash", title: "Delete conversation history") {
+                showClearConversationConfirmation = true
             }
         }
     }
 
     private var aboutSection: some View {
-        settingsSection("About") {
-            VStack(spacing: 0) {
-                linkRow(icon: "doc.text", title: "Terms & Conditions", url: URL(string: "https://github.com/jskoiz/yemma-4/blob/main/LICENSE")!)
-                separator
-                linkRow(icon: "lock", title: "Privacy Policy", url: URL(string: "https://github.com/jskoiz/yemma-4")!)
-                separator
-                linkRow(icon: "books.vertical", title: "Licenses", url: URL(string: "https://github.com/ggml-org/llama.cpp")!)
-                separator
-                infoRow(icon: "building.2", title: "Made by", detail: "AVMIL Labs in Honolulu, Hawaii")
-                separator
-                infoRow(icon: "info.circle", title: "Version", detail: appVersionText)
-            }
+        UtilitySection("About") {
+            linkRow(icon: "doc.text", title: "Terms & Conditions", url: URL(string: "https://github.com/jskoiz/yemma-4/blob/main/LICENSE")!)
+            UtilitySectionSeparator()
+            linkRow(icon: "lock", title: "Privacy Policy", url: URL(string: "https://github.com/jskoiz/yemma-4")!)
+            UtilitySectionSeparator()
+            linkRow(icon: "books.vertical", title: "Licenses", url: URL(string: "https://github.com/ggml-org/llama.cpp")!)
+            UtilitySectionSeparator()
+            infoRow(icon: "building.2", title: "Made by", detail: "AVMIL Labs in Honolulu, Hawaii")
+            UtilitySectionSeparator()
+            infoRow(icon: "info.circle", title: "Version", detail: appVersionText)
         }
     }
 
     private var moreSection: some View {
-        settingsSection("More") {
-            VStack(spacing: 0) {
-                linkRow(icon: "square.and.arrow.up", title: "Share the app", url: URL(string: "https://github.com/jskoiz/yemma-4")!)
-                separator
-                linkRow(icon: "link", title: "Project repository", url: URL(string: "https://github.com/jskoiz/yemma-4")!)
-                separator
-                destructiveRow(icon: "externaldrive.badge.minus", title: "Delete downloaded model") {
-                    showDeleteModelConfirmation = true
-                }
+        UtilitySection("More") {
+            linkRow(icon: "square.and.arrow.up", title: "Share the app", url: URL(string: "https://github.com/jskoiz/yemma-4")!)
+            UtilitySectionSeparator()
+            linkRow(icon: "link", title: "Project repository", url: URL(string: "https://github.com/jskoiz/yemma-4")!)
+            UtilitySectionSeparator()
+            destructiveRow(icon: "externaldrive.badge.minus", title: "Delete downloaded model") {
+                showDeleteModelConfirmation = true
             }
-        }
-    }
-
-
-    private func settingsSection<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(title)
-                .font(.system(size: 19, weight: .semibold, design: .rounded))
-                .foregroundStyle(AppTheme.textSecondary)
-                .padding(.horizontal, 12)
-
-            VStack(spacing: 0) {
-                content()
-            }
-            .padding(.vertical, 4)
-            .glassCard(cornerRadius: 26)
         }
     }
 
     private func infoRow(icon: String, title: String, detail: String) -> some View {
         HStack(spacing: 14) {
             Image(systemName: icon)
-                .frame(width: 22)
+                .frame(width: AppTheme.Layout.rowIconSize)
                 .foregroundStyle(AppTheme.textPrimary)
 
             Text(title)
-                .font(.system(size: 18, weight: .medium, design: .rounded))
+                .font(AppTheme.Typography.utilityRowTitle)
                 .foregroundStyle(AppTheme.textPrimary)
 
             Spacer()
 
             Text(detail)
-                .font(.system(size: 16, weight: .medium, design: .rounded))
+                .font(AppTheme.Typography.utilityRowDetail)
                 .foregroundStyle(AppTheme.textSecondary)
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 16)
+        .utilityRowPadding()
     }
 
     private var advancedRow: some View {
         NavigationLink {
             AdvancedSettingsView(onRunDebugScenario: onRunDebugScenario)
         } label: {
-            HStack(spacing: 14) {
-                Image(systemName: "gearshape.2")
-                    .frame(width: 22)
-                    .foregroundStyle(AppTheme.textPrimary)
-                Text("Advanced")
-                    .font(.system(size: 18, weight: .medium, design: .rounded))
-                    .foregroundStyle(AppTheme.textPrimary)
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(AppTheme.textSecondary)
-            }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 16)
+            utilityActionRow(icon: "gearshape.2", title: "Advanced")
         }
         .buttonStyle(.plain)
     }
@@ -385,13 +336,13 @@ public struct SettingsView: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
                 Label("Appearance", systemImage: "circle.lefthalf.filled")
-                    .font(.system(size: 18, weight: .medium, design: .rounded))
+                    .font(AppTheme.Typography.utilityRowTitle)
                     .foregroundStyle(AppTheme.textPrimary)
 
                 Spacer()
 
                 Text(selectedAppearancePreference.title)
-                    .font(.system(size: 16, weight: .medium, design: .rounded))
+                    .font(AppTheme.Typography.utilityRowDetail)
                     .foregroundStyle(AppTheme.textSecondary)
             }
 
@@ -404,52 +355,47 @@ public struct SettingsView: View {
             .pickerStyle(.segmented)
 
             Text("Match your iPhone by default, or keep Yemma in light or dark mode.")
-                .font(.system(size: 14, weight: .medium, design: .rounded))
+                .font(AppTheme.Typography.utilityCaption)
                 .foregroundStyle(AppTheme.textSecondary)
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 16)
+        .utilityRowPadding()
     }
 
     private func destructiveRow(icon: String, title: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 14) {
                 Image(systemName: icon)
-                    .frame(width: 22)
+                    .frame(width: AppTheme.Layout.rowIconSize)
                 Text(title)
-                    .font(.system(size: 18, weight: .medium, design: .rounded))
+                    .font(AppTheme.Typography.utilityRowTitle)
                 Spacer()
             }
-            .foregroundStyle(Color.red.opacity(0.9))
-            .padding(.horizontal, 18)
-            .padding(.vertical, 16)
+            .foregroundStyle(AppTheme.destructive)
+            .utilityRowPadding()
         }
         .buttonStyle(.plain)
     }
 
     private func linkRow(icon: String, title: String, url: URL) -> some View {
         Link(destination: url) {
-            HStack(spacing: 14) {
-                Image(systemName: icon)
-                    .frame(width: 22)
-                    .foregroundStyle(AppTheme.textPrimary)
-                Text(title)
-                    .font(.system(size: 18, weight: .medium, design: .rounded))
-                    .foregroundStyle(AppTheme.textPrimary)
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(AppTheme.textSecondary)
-            }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 16)
+            utilityActionRow(icon: icon, title: title)
         }
     }
 
-    private var separator: some View {
-        Divider()
-            .padding(.leading, 52)
-            .overlay(AppTheme.separator)
+    private func utilityActionRow(icon: String, title: String) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: icon)
+                .frame(width: AppTheme.Layout.rowIconSize)
+                .foregroundStyle(AppTheme.textPrimary)
+            Text(title)
+                .font(AppTheme.Typography.utilityRowTitle)
+                .foregroundStyle(AppTheme.textPrimary)
+            Spacer()
+            Image(systemName: "chevron.right")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(AppTheme.textSecondary)
+        }
+        .utilityRowPadding()
     }
 
     private var modelSizeText: String {
@@ -491,3 +437,11 @@ public struct SettingsView: View {
         return "\(version) (\(build))"
     }
 }
+
+#if DEBUG
+#Preview("Settings") {
+    SettingsView(onClearConversation: {}, onShowOnboarding: {})
+        .environment(ModelDownloader())
+        .environment(LLMService())
+}
+#endif

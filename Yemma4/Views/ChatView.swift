@@ -189,16 +189,17 @@ public struct ChatView: View {
 
     private var topBar: some View {
         HStack(spacing: 12) {
-            HStack(spacing: 0) {
-                CircleIconButton(systemName: "gearshape", action: { showSettings = true })
-                CircleIconButton(systemName: "bubble.left.and.bubble.right", action: { showConversations = true })
+            HStack(spacing: 2) {
+                CircleIconButton(systemName: "gearshape", filled: false, action: { showSettings = true })
+                CircleIconButton(systemName: "bubble.left.and.bubble.right", filled: false, action: { showConversations = true })
             }
-            .padding(3)
+            .padding(4)
             .background(
                 Capsule()
                     .fill(AppTheme.controlFill)
-                    .overlay(Capsule().stroke(AppTheme.controlBorder, lineWidth: 1))
+                    .overlay(Capsule().stroke(AppTheme.inputBorder, lineWidth: 1))
             )
+            .floatingShadow()
 
             Spacer(minLength: 0)
 
@@ -255,34 +256,12 @@ public struct ChatView: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: 26) {
-            Spacer(minLength: 72)
-
-            VStack(spacing: 18) {
-                Text("Meet Yemma 4")
-                    .font(.system(size: 24, weight: .semibold, design: .rounded))
-                    .foregroundStyle(AppTheme.textPrimary)
-
-                Text("Chat with Google's latest Gemma 4 model entirely on your device. No provider connection, no cloud relay, and no account required.")
-                    .font(.system(size: 16, weight: .medium, design: .rounded))
-                    .foregroundStyle(AppTheme.textSecondary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 560)
-            }
-            .padding(.horizontal, 24)
-
-            Spacer(minLength: 24)
-
-            if !llmService.isModelLoaded {
-                Text(modelStatusText)
-                    .font(.system(size: 15, weight: .semibold, design: .rounded))
-                    .foregroundStyle(modelStatusTextColor)
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 10)
-                    .glassCard(cornerRadius: 18)
-            }
-        }
-        .frame(maxWidth: .infinity, minHeight: 320)
+        EmptyStateView(
+            isModelLoaded: llmService.isTextModelReady,
+            isModelLoading: llmService.isModelLoading,
+            supportsLocalModelRuntime: supportsLocalModelRuntime,
+            modelLoadStageText: modelStatusText
+        )
     }
 
     // MARK: - Message rows with grouping
@@ -304,8 +283,8 @@ public struct ChatView: View {
             VStack(alignment: message.user.isCurrentUser ? .trailing : .leading, spacing: 4) {
                 if shouldShowAssistantLabel(at: index) {
                     Text("Yemma 4")
-                        .font(.system(size: 12, weight: .semibold, design: .rounded))
-                        .foregroundStyle(AppTheme.textSecondary)
+                        .font(AppTheme.Typography.chatLabel)
+                        .foregroundStyle(AppTheme.assistantLabel)
                         .padding(.horizontal, 2)
                         .padding(.top, index == 0 ? 0 : 8)
                 }
@@ -337,11 +316,20 @@ public struct ChatView: View {
         return AnyShapeStyle(AppTheme.assistantBubble)
     }
 
+    private func messageBubbleBorder(for message: ChatMessage) -> Color {
+        message.user.isCurrentUser ? AppTheme.userBubbleBorder : AppTheme.assistantBubbleBorder
+    }
+
+    private func messageTextColor(for message: ChatMessage) -> Color {
+        message.user.isCurrentUser ? AppTheme.userMessageText : AppTheme.assistantMessageText
+    }
+
     @ViewBuilder
     private func messageBubble(_ message: ChatMessage) -> some View {
         let text = displayText(for: message)
         let shouldRenderText = shouldRenderText(for: message, text: text)
         let isStreaming = message.id == streamingMessageID && llmService.isGenerating
+        let textColor = messageTextColor(for: message)
 
         VStack(
             alignment: message.user.isCurrentUser ? .trailing : .leading,
@@ -355,25 +343,25 @@ public struct ChatView: View {
                 Group {
                     if message.user.isCurrentUser {
                         Text(text)
-                            .font(.system(size: 16, weight: .medium, design: .rounded))
-                            .foregroundStyle(AppTheme.textPrimary)
+                            .font(AppTheme.Typography.chatUserMessage)
+                            .foregroundStyle(textColor)
                             .multilineTextAlignment(.trailing)
                             .textSelection(.enabled)
                     } else if isStreaming {
-                        StreamingText(text: text)
+                        StreamingText(text: text, foregroundColor: textColor)
                     } else {
-                        RichMessageText(text: text)
+                        RichMessageText(text: text, foregroundColor: textColor)
                     }
                 }
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 13)
+        .padding(.horizontal, AppTheme.Layout.bubbleHorizontalPadding)
+        .padding(.vertical, AppTheme.Layout.bubbleVerticalPadding)
         .background(messageBubbleBackground(for: message))
-        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.medium, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(AppTheme.messageBubbleBorder, lineWidth: 1)
+            RoundedRectangle(cornerRadius: AppTheme.Radius.medium, style: .continuous)
+                .stroke(messageBubbleBorder(for: message), lineWidth: 1)
         )
         .animation(.easeInOut(duration: 0.25), value: isStreaming)
     }
@@ -400,7 +388,7 @@ public struct ChatView: View {
 
                 TextField("Ask anything", text: $draft, axis: .vertical)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 18, weight: .medium, design: .rounded))
+                    .font(AppTheme.Typography.chatComposer)
                     .foregroundStyle(AppTheme.textPrimary)
                     .focused($isComposerFocused)
                     .submitLabel(.send)
@@ -420,7 +408,7 @@ public struct ChatView: View {
                     Image(systemName: llmService.isGenerating ? "stop.fill" : "arrow.up")
                         .font(.system(size: 18, weight: .bold))
                         .foregroundStyle(AppTheme.accentForeground)
-                        .frame(width: 42, height: 42)
+                        .frame(width: AppTheme.Layout.composerActionSize, height: AppTheme.Layout.composerActionSize)
                         .background(AppTheme.accent)
                         .clipShape(Circle())
                 }
@@ -429,15 +417,8 @@ public struct ChatView: View {
                 .opacity((!llmService.isGenerating && !canSubmitDraft) ? 0.45 : 1)
             }
             .padding(8)
-            .background(
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .fill(AppTheme.inputFill)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 24, style: .continuous)
-                            .stroke(AppTheme.controlBorder, lineWidth: 1)
-                    )
-            )
-            .contentShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .inputChrome(cornerRadius: AppTheme.Radius.medium)
+            .contentShape(RoundedRectangle(cornerRadius: AppTheme.Radius.medium, style: .continuous))
             .onTapGesture {
                 isComposerFocused = true
             }
@@ -540,7 +521,7 @@ public struct ChatView: View {
         guard !isImportingAttachments else { return false }
         let hasDraft = !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         guard hasDraft || !pendingAttachments.isEmpty else { return false }
-        return llmService.isModelLoaded || !supportsLocalModelRuntime
+        return llmService.isTextModelReady || !supportsLocalModelRuntime
     }
 
     private var modelStatusText: String {
@@ -553,14 +534,6 @@ public struct ChatView: View {
         }
 
         return "Preparing your on-device model..."
-    }
-
-    private var modelStatusTextColor: Color {
-        if !supportsLocalModelRuntime {
-            return AppTheme.textPrimary
-        }
-
-        return AppTheme.textSecondary
     }
 
     private func toastView(message: String) -> some View {
@@ -636,7 +609,7 @@ public struct ChatView: View {
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(AppTheme.messageBubbleBorder, lineWidth: 1)
+                .stroke(AppTheme.assistantBubbleBorder, lineWidth: 1)
         )
     }
 
@@ -763,7 +736,7 @@ public struct ChatView: View {
     private func submitDraft() {
         let trimmedText = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedText.isEmpty || !pendingAttachments.isEmpty else { return }
-        guard llmService.isModelLoaded || !supportsLocalModelRuntime else {
+        guard llmService.isTextModelReady || !supportsLocalModelRuntime else {
             AppDiagnostics.shared.record("Send blocked because model is not loaded", category: "ui")
             generationError = "The model is not loaded yet."
             return
@@ -1092,7 +1065,7 @@ public struct ChatView: View {
             return
         }
 
-        guard llmService.isModelLoaded else {
+        guard llmService.isTextModelReady else {
             messages = [
                 .previewMessage(user: .user, text: prompt),
                 .previewMessage(
@@ -1218,6 +1191,13 @@ private extension LLMService {
         service.isModelLoaded = true
         return service
     }
+
+    static func previewWarmShell() -> LLMService {
+        let service = LLMService()
+        service.isModelLoading = true
+        service.modelLoadStage = .loadingModel
+        return service
+    }
 }
 
 #Preview("Chat") {
@@ -1239,6 +1219,12 @@ private extension LLMService {
     )
     .environment(LLMService.previewLoaded())
     .environment(ModelDownloader())
+}
+
+#Preview("Warm Shell") {
+    ChatView()
+        .environment(LLMService.previewWarmShell())
+        .environment(ModelDownloader())
 }
 #endif
 
@@ -1264,81 +1250,71 @@ private struct ConversationsView: View {
 
     var body: some View {
         ZStack {
-            AppBackground()
+            UtilityBackground()
 
-            VStack(spacing: 20) {
-                HStack {
-                    Spacer()
-                    Text("Conversations")
-                        .font(.system(size: 24, weight: .semibold, design: .rounded))
-                        .foregroundStyle(AppTheme.textPrimary)
-                    Spacer()
-                    CircleIconButton(systemName: "xmark", action: { dismiss() })
-                }
-                .padding(.horizontal, 20)
-                .padding(.top, 18)
-
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack(alignment: .top) {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Restart With Intention")
-                                .font(.system(size: 18, weight: .semibold, design: .rounded))
-                                .foregroundStyle(AppTheme.textPrimary)
-                            Text("Use Fresh chat to clear context before switching topics. The current conversation stays previewed below so you can jump back in and keep your place.")
-                                .font(.system(size: 15, weight: .medium, design: .rounded))
-                                .foregroundStyle(AppTheme.textSecondary)
-                        }
-
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: AppTheme.Layout.sectionSpacing) {
+                    HStack {
                         Spacer()
-
-                        CircleIconButton(systemName: "xmark", filled: false, action: {})
-                            .allowsHitTesting(false)
+                        Text("Conversations")
+                            .font(AppTheme.Typography.utilityTitle)
+                            .foregroundStyle(AppTheme.textPrimary)
+                        Spacer()
+                        CircleIconButton(systemName: "xmark", action: { dismiss() })
                     }
-                }
-                .padding(18)
-                .glassCard(cornerRadius: 24)
-                .padding(.horizontal, 16)
+                    .padding(.horizontal, AppTheme.Layout.screenHeaderHorizontalPadding)
+                    .padding(.top, 18)
 
-                VStack(alignment: .leading, spacing: 14) {
-                    Text("All conversations")
-                        .font(.system(size: 18, weight: .semibold, design: .rounded))
-                        .foregroundStyle(AppTheme.textSecondary)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("Stored only on this iPhone", systemImage: "iphone")
+                            .font(AppTheme.Typography.utilityCaption)
+                            .foregroundStyle(AppTheme.accent)
 
-                    VStack(spacing: 0) {
+                        Text("Start a fresh chat when you want a clean context. Your current local thread stays available here so you can return without losing place.")
+                            .font(AppTheme.Typography.utilityRowDetail)
+                            .foregroundStyle(AppTheme.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(AppTheme.Layout.rowHorizontalPadding)
+                    .groupedCard(cornerRadius: AppTheme.Radius.medium)
+
+                    UtilitySection("Current") {
                         Button {
                             dismiss()
                         } label: {
-                            conversationRow(title: conversationPreview, subtitle: messages.isEmpty ? "Start chatting" : "Current conversation")
+                            conversationRow(
+                                title: conversationPreview,
+                                subtitle: messages.isEmpty ? "Start chatting" : "Current conversation"
+                            )
                         }
+                        .buttonStyle(.plain)
 
-                        Divider()
-                            .padding(.leading, 18)
-                            .overlay(AppTheme.separator)
+                        UtilitySectionSeparator(leadingInset: AppTheme.Layout.rowHorizontalPadding)
 
                         Button {
                             onStartFresh()
                         } label: {
                             conversationRow(title: "Fresh chat", subtitle: "Clear current thread")
                         }
+                        .buttonStyle(.plain)
                     }
-                    .glassCard(cornerRadius: 24)
-                }
-                .padding(.horizontal, 16)
 
-                Spacer()
-
-                HStack {
-                    Image(systemName: "magnifyingglass")
-                    Text("Search")
-                    Spacer()
+                    UtilitySection("Search") {
+                        HStack(spacing: 12) {
+                            Image(systemName: "magnifyingglass")
+                                .font(.body.weight(.semibold))
+                                .foregroundStyle(AppTheme.textSecondary)
+                            Text("Conversation search is coming soon")
+                                .font(AppTheme.Typography.utilityRowTitle)
+                                .foregroundStyle(AppTheme.textSecondary)
+                            Spacer()
+                        }
+                        .utilityRowPadding()
+                    }
                 }
-                .font(.system(size: 18, weight: .medium, design: .rounded))
-                .foregroundStyle(AppTheme.textSecondary)
-                .padding(.horizontal, 18)
-                .padding(.vertical, 16)
-                .glassCard(cornerRadius: 24)
-                .padding(.horizontal, 24)
-                .padding(.bottom, 20)
+                .padding(.horizontal, AppTheme.Layout.screenPadding)
+                .padding(.bottom, 28)
             }
         }
     }
@@ -1346,16 +1322,15 @@ private struct ConversationsView: View {
     private func conversationRow(title: String, subtitle: String) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title)
-                .font(.system(size: 18, weight: .semibold, design: .rounded))
+                .font(AppTheme.Typography.utilityRowTitle.weight(.semibold))
                 .foregroundStyle(AppTheme.textPrimary)
                 .lineLimit(1)
             Text(subtitle)
-                .font(.system(size: 15, weight: .medium, design: .rounded))
+                .font(AppTheme.Typography.utilityRowDetail)
                 .foregroundStyle(AppTheme.textSecondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 18)
-        .padding(.vertical, 16)
+        .utilityRowPadding()
         .contentShape(Rectangle())
     }
 }
