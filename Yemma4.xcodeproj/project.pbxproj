@@ -44,6 +44,9 @@
 		10504A52C773B850ABD7A45B /* AskImageSessionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C6C7357C0318472FA74CE75 /* AskImageSessionView.swift */; };
 		B13A661DE5B1D67D41D49CE7 /* AskImageCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17D1F8E3AB73F47DB008D254 /* AskImageCoordinator.swift */; };
 
+		E1A00001 /* LiteRTLMBridge.mm in Sources */ = {isa = PBXBuildFile; fileRef = E1A00003 /* LiteRTLMBridge.mm */; };
+		E1A00004 /* LiteRTLMRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1A00005 /* LiteRTLMRuntime.swift */; };
+
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -83,6 +86,10 @@
 		D5198412F573475C43B1CFD9 /* AskImageHomeView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AskImageHomeView.swift; sourceTree = "<group>"; };
 		4C6C7357C0318472FA74CE75 /* AskImageSessionView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AskImageSessionView.swift; sourceTree = "<group>"; };
 		17D1F8E3AB73F47DB008D254 /* AskImageCoordinator.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AskImageCoordinator.swift; sourceTree = "<group>"; };
+
+		E1A00002 /* LiteRTLMBridge.h */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.h; path = LiteRTLMBridge.h; sourceTree = "<group>"; };
+		E1A00003 /* LiteRTLMBridge.mm */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.cpp.objcpp; path = LiteRTLMBridge.mm; sourceTree = "<group>"; };
+		E1A00005 /* LiteRTLMRuntime.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LiteRTLMRuntime.swift; sourceTree = "<group>"; };
 
 /* End PBXFileReference section */
 
@@ -148,6 +155,7 @@
 				17BF8C72AF4DC7EAAAE7F6E1 /* AskImage */,
 				D3100001 /* Controllers */,
 				5B7C0764582A88CC0118AAB9 /* Models */,
+				E1A00006 /* Native */,
 				CE67C04D23A2513EC55AA96D /* Services */,
 				54934DF62416A306B1C5304E /* Views */,
 				53CB1EB0E92750BF686F214C /* LaunchScreen.storyboard */,
@@ -195,6 +203,7 @@
 			children = (
 				91D36D87124BFCC98B2CB87E /* AskImageRuntime.swift */,
 				654F9B9E0D8C0FF3A41FC5EE /* AskImageModelStore.swift */,
+				E1A00005 /* LiteRTLMRuntime.swift */,
 				372FEA4E5F3042D9FA20D616 /* StubAskImageRuntime.swift */,
 				78A132E914214900F4F784B8 /* StubAskImageModelStore.swift */,
 			);
@@ -220,6 +229,15 @@
 				BA2C4DCB6232231404ABD28E /* Views */,
 			);
 			path = AskImage;
+			sourceTree = "<group>";
+		};
+		E1A00006 /* Native */ = {
+			isa = PBXGroup;
+			children = (
+				E1A00002 /* LiteRTLMBridge.h */,
+				E1A00003 /* LiteRTLMBridge.mm */,
+			);
+			path = Native;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -332,6 +350,8 @@
 				71E76D65F8D9DDDB8EED04F7 /* AskImageHomeView.swift in Sources */,
 				10504A52C773B850ABD7A45B /* AskImageSessionView.swift in Sources */,
 				B13A661DE5B1D67D41D49CE7 /* AskImageCoordinator.swift in Sources */,
+				E1A00001 /* LiteRTLMBridge.mm in Sources */,
+				E1A00004 /* LiteRTLMRuntime.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
