@@ -1,7 +1,6 @@
 import Foundation
 import Observation
 import LlamaSwift
-import CryptoKit
 import os
 
 struct PromptImageAsset: Hashable, Sendable {
@@ -76,10 +75,71 @@ enum LLMServiceError: LocalizedError {
     }
 }
 
+enum ResponseStylePreset: String, CaseIterable, Identifiable, Sendable {
+    case focused
+    case balanced
+    case detailed
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .focused:
+            return "Focused"
+        case .balanced:
+            return "Balanced"
+        case .detailed:
+            return "Detailed"
+        }
+    }
+
+    var summary: String {
+        switch self {
+        case .focused:
+            return "Shorter, tighter answers with less drift."
+        case .balanced:
+            return "The default mix for everyday questions."
+        case .detailed:
+            return "Longer replies with a bit more explanation."
+        }
+    }
+
+    var temperature: Double {
+        switch self {
+        case .focused:
+            return 0.4
+        case .balanced:
+            return 0.7
+        case .detailed:
+            return 0.8
+        }
+    }
+
+    var maxResponseTokens: Int {
+        switch self {
+        case .focused:
+            return 768
+        case .balanced:
+            return 1024
+        case .detailed:
+            return 2048
+        }
+    }
+
+    static func matching(temperature: Double, maxResponseTokens: Int) -> Self? {
+        allCases.first { preset in
+            abs(preset.temperature - temperature) < 0.05
+                && preset.maxResponseTokens == maxResponseTokens
+        }
+    }
+}
+
 @Observable
 final class LLMService: @unchecked Sendable {
     var isModelLoaded = false
     var isModelLoading = false
+    var isVisionReady = false
+    var isVisionLoading = false
     var isGenerating = false
     var temperature: Double {
         didSet { UserDefaults.standard.set(temperature, forKey: "llm_temperature") }
@@ -96,6 +156,10 @@ final class LLMService: @unchecked Sendable {
     var lastError: String?
     var modelLoadStage: ModelLoadStage = .idle
 
+    var isTextModelReady: Bool {
+        isModelLoaded
+    }
+
     static let defaultTemperature: Double = 0.7
     static let defaultContextSize: UInt32 = 8192
     static let defaultFlashAttention: Bool = true
@@ -105,8 +169,12 @@ final class LLMService: @unchecked Sendable {
     @ObservationIgnored private var context: OpaquePointer?
     @ObservationIgnored private var vocab: OpaquePointer?
     @ObservationIgnored private var multimodalRuntime: YemmaMultimodalRuntime?
+    @ObservationIgnored private var loadedModelPath: String?
+    @ObservationIgnored private var loadedMMProjPath: String?
     @ObservationIgnored private var generationTask: Task<Void, Never>?
     @ObservationIgnored private var generationGroup: DispatchGroup?
+    @ObservationIgnored private var visionPreparationTask: Task<YemmaMultimodalRuntime, Error>?
+    @ObservationIgnored private var visionPreparationID: UInt64 = 0
     @ObservationIgnored private let stateLock = NSLock()
     @ObservationIgnored private var samplerConfig = SamplerConfig.defaults
     /// Tokens from the last successful generation (prompt + response) used for KV cache reuse.
@@ -131,6 +199,22 @@ final class LLMService: @unchecked Sendable {
         maxResponseTokens = Self.defaultMaxResponseTokens
     }
 
+    var activeResponseStylePreset: ResponseStylePreset? {
+        ResponseStylePreset.matching(
+            temperature: temperature,
+            maxResponseTokens: maxResponseTokens
+        )
+    }
+
+    var activeResponseStyleTitle: String {
+        activeResponseStylePreset?.title ?? "Custom"
+    }
+
+    func applyResponseStylePreset(_ preset: ResponseStylePreset) {
+        temperature = preset.temperature
+        maxResponseTokens = preset.maxResponseTokens
+    }
+
     deinit {
         stopGenerationSynchronously()
         freeLoadedModel()
@@ -143,6 +227,8 @@ final class LLMService: @unchecked Sendable {
         await stopGeneration()
         await MainActor.run {
             isModelLoading = true
+            isVisionReady = false
+            isVisionLoading = false
             modelLoadStage = .preparingRuntime
             lastError = nil
         }
@@ -176,22 +262,16 @@ final class LLMService: @unchecked Sendable {
                 if let fileAttrs = try? FileManager.default.attributesOfItem(atPath: resolvedPath),
                    let fileSize = fileAttrs[.size] as? Int64 {
                     let fileSizeMB = Int(fileSize / (1024 * 1024))
-                    var sha256 = "unavailable"
-                    if let fileHandle = FileHandle(forReadingAtPath: resolvedPath) {
-                        var hasher = SHA256()
-                        while autoreleasepool(invoking: {
-                            let chunk = fileHandle.readData(ofLength: 8 * 1024 * 1024)
-                            guard !chunk.isEmpty else { return false }
-                            hasher.update(data: chunk)
-                            return true
-                        }) {}
-                        fileHandle.closeFile()
-                        sha256 = hasher.finalize().map { String(format: "%02x", $0) }.joined()
-                    }
+                    let fileURL = URL(fileURLWithPath: resolvedPath)
+                    let sha256 = ModelIntegrityCache.cachedSHA256(for: fileURL) ?? "not-cached"
                     AppDiagnostics.shared.record(
                         "Model file info",
                         category: "model",
-                        metadata: ["fileSizeMB": fileSizeMB, "sha256": sha256]
+                        metadata: [
+                            "fileSizeMB": fileSizeMB,
+                            "sha256": sha256,
+                            "sha256Source": sha256 == "not-cached" ? "cache-miss" : "cached"
+                        ]
                     )
                 }
 
@@ -205,9 +285,8 @@ final class LLMService: @unchecked Sendable {
                 let resourceLoadStart = Date()
                 let ctxSize = await MainActor.run { self?.contextSize ?? Self.defaultContextSize }
                 let flashAttn = await MainActor.run { self?.flashAttention ?? Self.defaultFlashAttention }
-                let loadedResources = try Self.loadResources(
+                let loadedResources = try Self.loadTextResources(
                     modelPath: resolvedPath,
-                    mmprojPath: resolvedMMProjPath,
                     contextSize: ctxSize,
                     flashAttention: flashAttn
                 )
@@ -239,27 +318,40 @@ final class LLMService: @unchecked Sendable {
 
             await setModelLoadStage(.activatingModel)
 
-            let oldResources: (model: OpaquePointer?, context: OpaquePointer?, multimodalRuntime: YemmaMultimodalRuntime?) = withLock {
-                let old = (model: model, context: context, multimodalRuntime: multimodalRuntime)
+            let oldResources: (model: OpaquePointer?, context: OpaquePointer?, multimodalRuntime: YemmaMultimodalRuntime?, visionTask: Task<YemmaMultimodalRuntime, Error>?) = withLock {
+                let old = (
+                    model: model,
+                    context: context,
+                    multimodalRuntime: multimodalRuntime,
+                    visionTask: visionPreparationTask
+                )
                 model = preparedResources.loadedResources.model
                 context = preparedResources.loadedResources.context
                 vocab = preparedResources.loadedResources.vocab
-                multimodalRuntime = preparedResources.loadedResources.multimodalRuntime
+                multimodalRuntime = nil
+                loadedModelPath = resolvedPath
+                loadedMMProjPath = resolvedMMProjPath
                 samplerConfig = preparedResources.loadedResources.samplerConfig
+                visionPreparationTask = nil
+                visionPreparationID = 0
                 cachedPromptTokens = []
                 return old
             }
 
-            Self.freeResources(
+            Self.releaseResources(
                 model: oldResources.model,
                 context: oldResources.context,
-                multimodalRuntime: oldResources.multimodalRuntime
+                multimodalRuntime: oldResources.multimodalRuntime,
+                visionTask: oldResources.visionTask,
+                reason: "model_reload"
             )
 
             await MainActor.run {
                 temperature = preparedResources.loadedResources.samplerConfig.temperature
                 isModelLoaded = true
                 isModelLoading = false
+                isVisionReady = false
+                isVisionLoading = false
                 modelLoadStage = .ready
                 lastError = nil
             }
@@ -279,6 +371,7 @@ final class LLMService: @unchecked Sendable {
                     "loadMs": loadDurationMs,
                     "backendInitMs": preparedResources.backendInitMs,
                     "resourceLoadMs": preparedResources.resourceLoadMs,
+                    "visionEagerInit": false,
                     "threads": preparedResources.loadedResources.threadCounts.decode,
                     "batchThreads": preparedResources.loadedResources.threadCounts.batch
                 ]
@@ -295,47 +388,6 @@ final class LLMService: @unchecked Sendable {
 #if targetEnvironment(simulator)
         return makeSimulatorStream(prompt: prompt, history: history)
 #else
-        let currentResources = withLock {
-            (model: model, context: context, vocab: vocab, multimodalRuntime: multimodalRuntime)
-        }
-
-        guard
-            isModelLoaded,
-            let currentModel = currentResources.model,
-            let currentContext = currentResources.context,
-            let currentVocab = currentResources.vocab
-        else {
-            let error = LLMServiceError.modelNotLoaded
-            Task { [weak self] in
-                await self?.setLastError(error.localizedDescription)
-            }
-            return AsyncStream { continuation in
-                continuation.finish()
-            }
-        }
-
-        let formattedPrompt = Self.formatPrompt(
-            prompt: prompt,
-            history: history,
-            model: currentModel
-        )
-        let generationConfig = withLock { samplerConfig.withTemperatureOverride(temperature) }
-        AppDiagnostics.shared.record(
-            "Generation requested",
-            category: "generation",
-            metadata: [
-                "historyCount": history.count,
-                "promptChars": prompt.text.count,
-                "promptImages": prompt.images.count,
-                "historyImages": history.reduce(into: 0) { count, message in
-                    count += message.images.count
-                },
-                "temperature": generationConfig.temperature,
-                "topK": generationConfig.topK,
-                "topP": generationConfig.topP
-            ]
-        )
-
         let completionGroup = CompletionGroupBox()
         completionGroup.enter()
 
@@ -343,20 +395,55 @@ final class LLMService: @unchecked Sendable {
 
         let stream = AsyncStream<String> { continuation in
             let continuationBox = StreamContinuationBox(continuation)
-            let job = GenerationJob(
-                service: self,
-                formattedPrompt: formattedPrompt,
-                context: currentContext,
-                vocab: currentVocab,
-                multimodalRuntime: currentResources.multimodalRuntime,
-                samplerConfig: generationConfig,
-                maxGeneratedTokens: self.maxResponseTokens,
-                continuation: continuationBox,
-                completionGroup: completionGroup,
-                previousCachedTokens: previousCached
-            )
             let task = Task {
-                await Self.runGeneration(job)
+                do {
+                    let requiresVision = !prompt.images.isEmpty || history.contains(where: { !$0.images.isEmpty })
+                    let currentResources = try await self.prepareGenerationResources(requiresVision: requiresVision)
+                    let formattedPrompt = Self.formatPrompt(
+                        prompt: prompt,
+                        history: history,
+                        model: currentResources.model
+                    )
+                    let generationConfig = self.withLock {
+                        samplerConfig.withTemperatureOverride(temperature)
+                    }
+
+                    AppDiagnostics.shared.record(
+                        "Generation requested",
+                        category: "generation",
+                        metadata: [
+                            "historyCount": history.count,
+                            "promptChars": prompt.text.count,
+                            "promptImages": prompt.images.count,
+                            "historyImages": history.reduce(into: 0) { count, message in
+                                count += message.images.count
+                            },
+                            "temperature": generationConfig.temperature,
+                            "topK": generationConfig.topK,
+                            "topP": generationConfig.topP,
+                            "visionReady": currentResources.multimodalRuntime != nil
+                        ]
+                    )
+
+                    let job = GenerationJob(
+                        service: self,
+                        formattedPrompt: formattedPrompt,
+                        context: currentResources.context,
+                        vocab: currentResources.vocab,
+                        multimodalRuntime: currentResources.multimodalRuntime,
+                        samplerConfig: generationConfig,
+                        maxGeneratedTokens: self.maxResponseTokens,
+                        continuation: continuationBox,
+                        completionGroup: completionGroup,
+                        previousCachedTokens: previousCached
+                    )
+                    await Self.runGeneration(job)
+                } catch {
+                    completionGroup.leave()
+                    await self.setLastError(error.localizedDescription)
+                    await self.finishGeneration()
+                    continuationBox.finish()
+                }
             }
 
             self.withLock {
@@ -471,17 +558,23 @@ private extension LLMService {
         let images: [PromptImageAsset]
     }
 
-    struct LoadedResources: @unchecked Sendable {
+    struct LoadedTextResources: @unchecked Sendable {
         let model: OpaquePointer
         let context: OpaquePointer
         let vocab: OpaquePointer
-        let multimodalRuntime: YemmaMultimodalRuntime
         let samplerConfig: SamplerConfig
         let threadCounts: ModelLoadThreadCounts
     }
 
+    struct GenerationResources: @unchecked Sendable {
+        let model: OpaquePointer
+        let context: OpaquePointer
+        let vocab: OpaquePointer
+        let multimodalRuntime: YemmaMultimodalRuntime?
+    }
+
     struct PreparedResources: @unchecked Sendable {
-        let loadedResources: LoadedResources
+        let loadedResources: LoadedTextResources
         let backendInitMs: Int
         let resourceLoadMs: Int
     }
@@ -514,12 +607,11 @@ private extension LLMService {
         )
     }
 
-    static func loadResources(
+    static func loadTextResources(
         modelPath: String,
-        mmprojPath: String,
         contextSize: UInt32 = defaultContextSize,
         flashAttention: Bool = defaultFlashAttention
-    ) throws -> LoadedResources {
+    ) throws -> LoadedTextResources {
         var modelParams = llama_model_default_params()
 #if targetEnvironment(simulator)
         modelParams.n_gpu_layers = 0
@@ -552,23 +644,10 @@ private extension LLMService {
             throw LLMServiceError.contextCreationFailed(path: modelPath)
         }
 
-        let runtime: YemmaMultimodalRuntime
-        do {
-            runtime = try YemmaMultimodalRuntime(
-                mmProjPath: mmprojPath,
-                model: UnsafeMutableRawPointer(newModel)
-            )
-        } catch {
-            llama_free(newContext)
-            llama_model_free(newModel)
-            throw error
-        }
-
-        return LoadedResources(
+        return LoadedTextResources(
             model: newModel,
             context: newContext,
             vocab: newVocab,
-            multimodalRuntime: runtime,
             samplerConfig: samplerConfig(for: newModel),
             threadCounts: threadCounts
         )
@@ -893,15 +972,20 @@ private extension LLMService {
     }
 
     func publishLoadFailure(_ error: Error) async {
-        let stillHasLoadedModel = withLock {
-            model != nil && context != nil && vocab != nil && multimodalRuntime != nil
+        let currentState = withLock {
+            (
+                hasTextModel: model != nil && context != nil && vocab != nil,
+                hasVisionRuntime: multimodalRuntime != nil
+            )
         }
 
         await MainActor.run {
-            isModelLoading = false
-            isModelLoaded = stillHasLoadedModel
-            modelLoadStage = stillHasLoadedModel ? .ready : .failed
             lastError = error.localizedDescription
+            isModelLoaded = currentState.hasTextModel
+            isVisionReady = currentState.hasVisionRuntime
+            isVisionLoading = false
+            modelLoadStage = currentState.hasTextModel ? .ready : .failed
+            isModelLoading = false
         }
     }
 
@@ -917,6 +1001,7 @@ extension LLMService {
     func signalLoadingIntent() {
         guard !isModelLoading else { return }
         isModelLoading = true
+        isVisionLoading = false
         modelLoadStage = .preparingRuntime
         lastError = nil
     }
@@ -928,6 +1013,8 @@ extension LLMService {
         freeLoadedModel()
         await MainActor.run {
             isModelLoading = false
+            isVisionReady = false
+            isVisionLoading = false
             modelLoadStage = .idle
             lastError = nil
         }
@@ -938,20 +1025,33 @@ extension LLMService {
 private extension LLMService {
     func freeLoadedModel() {
         let resources = withLock {
-            let current = (model: model, context: context, multimodalRuntime: multimodalRuntime)
+            let current = (
+                model: model,
+                context: context,
+                multimodalRuntime: multimodalRuntime,
+                visionTask: visionPreparationTask
+            )
             model = nil
             context = nil
             vocab = nil
             multimodalRuntime = nil
+            loadedModelPath = nil
+            loadedMMProjPath = nil
+            visionPreparationTask = nil
+            visionPreparationID = 0
             isModelLoaded = false
+            isVisionReady = false
+            isVisionLoading = false
             cachedPromptTokens = []
             return current
         }
 
-        Self.freeResources(
+        Self.releaseResources(
             model: resources.model,
             context: resources.context,
-            multimodalRuntime: resources.multimodalRuntime
+            multimodalRuntime: resources.multimodalRuntime,
+            visionTask: resources.visionTask,
+            reason: "model_unload"
         )
     }
 
@@ -971,6 +1071,36 @@ private extension LLMService {
         }
     }
 
+    static func releaseResources(
+        model: OpaquePointer?,
+        context: OpaquePointer?,
+        multimodalRuntime: YemmaMultimodalRuntime?,
+        visionTask: Task<YemmaMultimodalRuntime, Error>?,
+        reason: String
+    ) {
+        guard let visionTask else {
+            freeResources(model: model, context: context, multimodalRuntime: multimodalRuntime)
+            return
+        }
+
+        visionTask.cancel()
+        AppDiagnostics.shared.record(
+            "Deferring resource cleanup until vision task settles",
+            category: "model",
+            metadata: ["reason": reason]
+        )
+
+        Task.detached(priority: .utility) {
+            _ = await visionTask.result
+            freeResources(model: model, context: context, multimodalRuntime: multimodalRuntime)
+            AppDiagnostics.shared.record(
+                "Deferred resource cleanup finished",
+                category: "model",
+                metadata: ["reason": reason]
+            )
+        }
+    }
+
     func withLock<T>(_ body: () throws -> T) rethrows -> T {
         stateLock.lock()
         defer { stateLock.unlock() }
@@ -983,6 +1113,163 @@ private extension LLMService {
             generationTask = nil
             generationGroup = nil
             return pair
+        }
+    }
+
+    func prepareGenerationResources(requiresVision: Bool) async throws -> GenerationResources {
+        if requiresVision {
+            try await ensureVisionRuntimeLoaded()
+        }
+
+        let resources = try withLock { () throws -> GenerationResources in
+            guard
+                isModelLoaded,
+                let model,
+                let context,
+                let vocab
+            else {
+                throw LLMServiceError.modelNotLoaded
+            }
+
+            return GenerationResources(
+                model: model,
+                context: context,
+                vocab: vocab,
+                multimodalRuntime: multimodalRuntime
+            )
+        }
+
+        if requiresVision, resources.multimodalRuntime == nil {
+            throw LLMServiceError.multimodalRuntimeUnavailable
+        }
+
+        return resources
+    }
+
+    func ensureVisionRuntimeLoaded() async throws {
+        enum VisionLoadWork {
+            case alreadyReady
+            case prepare(
+                task: Task<YemmaMultimodalRuntime, Error>,
+                taskID: UInt64,
+                model: OpaquePointer,
+                mmprojPath: String,
+                startedNow: Bool
+            )
+            case unavailable
+        }
+
+        let work = withLock { () -> VisionLoadWork in
+            if let multimodalRuntime {
+                return .alreadyReady
+            }
+
+            guard let model, let mmprojPath = loadedMMProjPath else {
+                return .unavailable
+            }
+
+            if let visionPreparationTask {
+                return .prepare(
+                    task: visionPreparationTask,
+                    taskID: visionPreparationID,
+                    model: model,
+                    mmprojPath: mmprojPath,
+                    startedNow: false
+                )
+            }
+
+            visionPreparationID &+= 1
+            let taskID = visionPreparationID
+            let task = Task.detached(priority: .utility) {
+                let loadStart = Date()
+                let runtime = try YemmaMultimodalRuntime(
+                    mmProjPath: mmprojPath,
+                    model: UnsafeMutableRawPointer(model)
+                )
+                let loadMs = Int(Date().timeIntervalSince(loadStart) * 1000)
+                AppDiagnostics.shared.record(
+                    "Vision runtime prepared",
+                    category: "model",
+                    metadata: [
+                        "mmprojPath": mmprojPath,
+                        "loadMs": loadMs
+                    ]
+                )
+                return runtime
+            }
+            visionPreparationTask = task
+            return .prepare(
+                task: task,
+                taskID: taskID,
+                model: model,
+                mmprojPath: mmprojPath,
+                startedNow: true
+            )
+        }
+
+        switch work {
+        case .alreadyReady:
+            return
+        case .unavailable:
+            throw LLMServiceError.multimodalRuntimeUnavailable
+        case let .prepare(task, taskID, model, mmprojPath, startedNow):
+            if startedNow {
+                await MainActor.run {
+                    isVisionLoading = true
+                    lastError = nil
+                }
+                AppDiagnostics.shared.record(
+                    "Preparing vision runtime",
+                    category: "model",
+                    metadata: [
+                        "mmprojPath": mmprojPath,
+                        "modelPath": loadedModelPath ?? "unknown"
+                    ]
+                )
+            }
+
+            do {
+                let runtime = try await task.value
+                let didStoreRuntime = withLock {
+                    if visionPreparationID == taskID {
+                        visionPreparationTask = nil
+                        if multimodalRuntime == nil, self.model == model, loadedMMProjPath == mmprojPath {
+                            multimodalRuntime = runtime
+                        }
+                    }
+                    return multimodalRuntime != nil
+                }
+
+                await MainActor.run {
+                    isVisionLoading = false
+                    isVisionReady = didStoreRuntime
+                    if didStoreRuntime {
+                        lastError = nil
+                    }
+                }
+            } catch {
+                withLock {
+                    if visionPreparationID == taskID {
+                        visionPreparationTask = nil
+                    }
+                }
+
+                await MainActor.run {
+                    isVisionLoading = false
+                    isVisionReady = multimodalRuntime != nil
+                    lastError = error.localizedDescription
+                }
+
+                AppDiagnostics.shared.record(
+                    "Vision runtime preparation failed",
+                    category: "model",
+                    metadata: [
+                        "mmprojPath": mmprojPath,
+                        "error": error.localizedDescription
+                    ]
+                )
+                throw error
+            }
         }
     }
 

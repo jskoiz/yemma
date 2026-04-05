@@ -44,6 +44,7 @@ public struct Yemma4App: App {
     @State private var diagnostics = AppDiagnostics.shared
     @State private var modelDownloader = ModelDownloader()
     @State private var llmService = LLMService()
+    @State private var conversationStore = ConversationStore()
 
     public static let bundleIdentifier = Yemma4AppConfiguration.bundleIdentifier
 
@@ -55,6 +56,7 @@ public struct Yemma4App: App {
                 .environment(diagnostics)
                 .environment(modelDownloader)
                 .environment(llmService)
+                .environment(conversationStore)
                 .preferredColorScheme(AppearancePreference.from(appearancePreferenceRaw).colorScheme)
                 .tint(AppTheme.accent)
         }

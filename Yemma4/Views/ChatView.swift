@@ -3,12 +3,18 @@ import PhotosUI
 import SwiftUI
 import ExyteChat
 
+#if canImport(AVFoundation)
+import AVFoundation
+#endif
+
 #if canImport(UIKit)
 import UIKit
 #endif
 
 public struct ChatView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(LLMService.self) private var llmService
+    @Environment(ConversationStore.self) private var conversationStore
 
     private let supportsLocalModelRuntime = Yemma4AppConfiguration.supportsLocalModelRuntime
     @State private var messages: [ChatMessage] = []
@@ -23,51 +29,62 @@ public struct ChatView: View {
     @State private var toastTask: Task<Void, Never>?
     @State private var showSettings = false
     @State private var showConversations = false
+    @State private var loadedConversationID: UUID?
+    @State private var isRestoringConversation = false
+    @State private var conversationSaveTask: Task<Void, Never>?
+    @State private var sharePayload: SharePayload?
     @FocusState private var isComposerFocused: Bool
+#if canImport(AVFoundation)
+    @State private var speechSynthesizer = AVSpeechSynthesizer()
+#endif
 
     // MARK: - Streaming state
     /// The ID of the assistant message currently being streamed.
     @State private var streamingMessageID: String?
     /// Monotonic counter bumped each time we flush visible text — drives auto-scroll.
     @State private var streamFlushTick: UInt64 = 0
-    /// Whether the user was scrolled to the bottom before the last content change.
+    /// Whether the transcript is currently close enough to the bottom to auto-scroll.
     @State private var isPinnedToBottom = true
+    @State private var scrollViewportHeight: CGFloat = 0
 
-    private let leakedControlMarkers = [
-        "<start_of_turn>",
-        "<end_of_turn>",
-        "<|start_of_turn|>",
-        "<|end_of_turn|>",
-        "<|turn>",
-        "<turn|>",
-        "<|channel>",
-        "<channel|>",
-        "<|think|>",
-        "<|tool>",
-        "<tool|>",
-        "<|tool_call>",
-        "<tool_call|>",
-        "<|tool_response>",
-        "<tool_response|>",
-        "<eos>",
-        "<bos>"
-    ]
+    private let bottomAnchorID = "conversation-bottom-anchor"
+    private let scrollCoordinateSpaceName = "conversation-scroll"
+    private let pinnedThreshold: CGFloat = 48
+    private let releasePinnedThreshold: CGFloat = 120
 
-    private let responseBoundaryMarkers = [
-        "<end_of_turn>",
-        "<|end_of_turn|>",
-        "<turn|>",
-        "<start_of_turn>user",
-        "<|start_of_turn|>user",
-        "<|turn>user",
-        "<|turn>system"
-    ]
+    private let taskStarters = ChatStarter.defaults
 
-    private let quickPrompts: [(title: String, subtitle: String, prompt: String)] = [
-        ("Design", "a workout routine", "Design a simple workout routine I can do at home."),
-        ("Begin", "meditating", "Begin a meditation habit with a simple 7-day plan."),
-        ("Explain", "a complex idea", "Explain a complex idea in a simple way.")
-    ]
+    private enum AssistantRefinement: String {
+        case shorter
+        case moreDetail
+
+        var title: String {
+            switch self {
+            case .shorter:
+                return "Shorter"
+            case .moreDetail:
+                return "More detail"
+            }
+        }
+
+        var systemImage: String {
+            switch self {
+            case .shorter:
+                return "text.alignleft"
+            case .moreDetail:
+                return "plus.bubble"
+            }
+        }
+
+        var prompt: String {
+            switch self {
+            case .shorter:
+                return "Make that shorter and more direct."
+            case .moreDetail:
+                return "Expand that with a bit more detail and one concrete example."
+            }
+        }
+    }
 
     private let onShowOnboarding: () -> Void
 
@@ -93,7 +110,11 @@ public struct ChatView: View {
                     VStack {
                         Spacer()
                         toastView(message: toastMessage)
-                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                            .transition(
+                                reduceMotion
+                                    ? .opacity
+                                    : .move(edge: .bottom).combined(with: .opacity)
+                            )
                             .padding(.bottom, 116)
                     }
                 }
@@ -104,11 +125,6 @@ public struct ChatView: View {
             }
             .sheet(isPresented: $showSettings) {
                 SettingsView(
-                    onClearConversation: {
-                        Task { @MainActor in
-                            await clearConversation()
-                        }
-                    },
                     onShowOnboarding: {
                         showSettings = false
                         onShowOnboarding()
@@ -126,11 +142,17 @@ public struct ChatView: View {
                     .presentationBackground(.clear)
             }
             .sheet(isPresented: $showConversations) {
-                ConversationsView(
-                    messages: messages,
+                ConversationBrowserSheet(
+                    currentConversationID: loadedConversationID,
+                    onSelectConversation: { conversationID in
+                        Task { @MainActor in
+                            await switchConversation(to: conversationID)
+                            showConversations = false
+                        }
+                    },
                     onStartFresh: {
                         Task { @MainActor in
-                            await clearConversation()
+                            await startFreshConversation()
                             showConversations = false
                         }
                     }
@@ -146,9 +168,18 @@ public struct ChatView: View {
                     metadata: ["view": "ChatView", "elapsedMs": StartupTiming.elapsedMs()]
                 )
             }
+            .task {
+                await restoreConversationIfNeeded(force: true)
+            }
             .onDisappear {
                 Task { @MainActor in
+                    persistConversationNow()
                     await stopGeneration()
+                }
+            }
+            .onChange(of: conversationStore.currentConversationID) { _, _ in
+                Task { @MainActor in
+                    await restoreConversationIfNeeded(force: true)
                 }
             }
             .onChange(of: selectedPhotoItems) { _, newItems in
@@ -157,7 +188,13 @@ public struct ChatView: View {
                     await importSelectedPhotos(from: newItems)
                 }
             }
-            .animation(.easeInOut(duration: 0.2), value: toastMessage)
+            .onChange(of: draft) { _, _ in
+                scheduleConversationSave()
+            }
+            .onChange(of: pendingAttachments.map(\.id)) { _, _ in
+                scheduleConversationSave()
+            }
+            .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: toastMessage)
             .alert(
                 "Generation Failed",
                 isPresented: Binding(
@@ -184,29 +221,39 @@ public struct ChatView: View {
             } message: {
                 Text(memoryAlertMessage ?? "Your device ran low on memory. Try a shorter conversation.")
             }
+            .sheet(item: $sharePayload) { payload in
+                ActivityShareSheet(activityItems: [payload.text])
+            }
         }
     }
 
     private var topBar: some View {
         HStack(spacing: 12) {
-            HStack(spacing: 0) {
-                CircleIconButton(systemName: "gearshape", action: { showSettings = true })
-                CircleIconButton(systemName: "bubble.left.and.bubble.right", action: { showConversations = true })
+            HStack(spacing: 2) {
+                CircleIconButton(systemName: "gearshape", filled: false, action: { showSettings = true })
+                    .accessibilityLabel("Settings")
+                    .accessibilityHint("Open settings and model controls.")
+                CircleIconButton(systemName: "bubble.left.and.bubble.right", filled: false, action: { showConversations = true })
+                    .accessibilityLabel("Saved chats")
+                    .accessibilityHint("Browse and rename saved conversations.")
             }
-            .padding(3)
+            .padding(4)
             .background(
                 Capsule()
                     .fill(AppTheme.controlFill)
-                    .overlay(Capsule().stroke(AppTheme.controlBorder, lineWidth: 1))
+                    .overlay(Capsule().stroke(AppTheme.inputBorder, lineWidth: 1))
             )
+            .floatingShadow()
 
             Spacer(minLength: 0)
 
             CircleIconButton(systemName: "square.and.pencil") {
                 Task { @MainActor in
-                    await clearConversation()
+                    await startFreshConversation()
                 }
             }
+            .accessibilityLabel("New chat")
+            .accessibilityHint("Start a fresh conversation and keep older chats saved.")
         }
         .padding(.horizontal, 16)
         .padding(.top, 6)
@@ -216,73 +263,160 @@ public struct ChatView: View {
     // MARK: - Conversation content with auto-scroll
 
     private var conversationContent: some View {
-        ScrollViewReader { proxy in
-            ScrollView(showsIndicators: false) {
-                LazyVStack(spacing: messages.isEmpty ? 26 : 6) {
-                    if messages.isEmpty {
-                        emptyState
-                    } else {
-                        ForEach(Array(messages.enumerated()), id: \.element.id) { index, message in
-                            messageRow(message, index: index)
-                                .id(message.id)
+        GeometryReader { geometry in
+            ScrollViewReader { proxy in
+                ZStack(alignment: .bottomTrailing) {
+                    ScrollView(showsIndicators: false) {
+                        LazyVStack(spacing: 0) {
+                            if messages.isEmpty {
+                                emptyState
+                            } else {
+                                ForEach(Array(messages.enumerated()), id: \.element.id) { index, message in
+                                    messageRow(message, index: index)
+                                        .padding(.top, messageTopSpacing(at: index))
+                                        .id(message.id)
+                                }
+                            }
+
+                            Color.clear
+                                .frame(height: 1)
+                                .id(bottomAnchorID)
+                                .background(
+                                    GeometryReader { bottomProxy in
+                                        Color.clear.preference(
+                                            key: ConversationBottomOffsetPreferenceKey.self,
+                                            value: bottomProxy.frame(in: .named(scrollCoordinateSpaceName)).maxY
+                                        )
+                                    }
+                                )
                         }
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 18)
+                        .frame(maxWidth: .infinity, minHeight: 0)
+                    }
+                    .coordinateSpace(name: scrollCoordinateSpaceName)
+                    .scrollDismissesKeyboard(.interactively)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        isComposerFocused = false
+                    }
+                    .defaultScrollAnchor(.bottom)
+                    .onAppear {
+                        scrollViewportHeight = geometry.size.height
+                    }
+                    .onChange(of: geometry.size.height) { _, newHeight in
+                        scrollViewportHeight = newHeight
+                    }
+                    .onPreferenceChange(ConversationBottomOffsetPreferenceKey.self) { bottomMaxY in
+                        updatePinnedState(bottomMaxY: bottomMaxY)
+                    }
+                    .onChange(of: messages.count) { _, _ in
+                        scrollToBottomIfPinned(proxy: proxy, animated: true)
+                    }
+                    .onChange(of: streamFlushTick) { _, _ in
+                        scrollToBottomIfPinned(proxy: proxy, animated: false)
+                    }
+
+                    if shouldShowJumpToLatest {
+                        jumpToLatestButton(proxy: proxy)
+                            .padding(.trailing, 16)
+                            .padding(.bottom, 12)
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.bottom, 18)
-                .frame(maxWidth: .infinity, minHeight: 0)
-            }
-            .scrollDismissesKeyboard(.interactively)
-            .contentShape(Rectangle())
-            .onTapGesture {
-                isComposerFocused = false
-            }
-            .defaultScrollAnchor(.bottom)
-            .onChange(of: messages.count) { _, _ in
-                scrollToBottomIfPinned(proxy: proxy)
-            }
-            .onChange(of: streamFlushTick) { _, _ in
-                scrollToBottomIfPinned(proxy: proxy)
             }
         }
     }
 
-    private func scrollToBottomIfPinned(proxy: ScrollViewProxy) {
-        guard isPinnedToBottom, let lastID = messages.last?.id else { return }
-        withAnimation(.easeOut(duration: 0.15)) {
-            proxy.scrollTo(lastID, anchor: .bottom)
+    private var shouldShowJumpToLatest: Bool {
+        !messages.isEmpty && !isPinnedToBottom
+    }
+
+    private func messageTopSpacing(at index: Int) -> CGFloat {
+        guard index > 0 else { return 0 }
+        let previous = messages[index - 1]
+        let current = messages[index]
+        return previous.user.isCurrentUser == current.user.isCurrentUser ? 4 : 14
+    }
+
+    private func scrollToBottomIfPinned(proxy: ScrollViewProxy, animated: Bool) {
+        guard isPinnedToBottom else { return }
+        scrollToBottom(proxy: proxy, animated: animated)
+    }
+
+    private func scrollToBottom(proxy: ScrollViewProxy, animated: Bool) {
+        let action = {
+            proxy.scrollTo(bottomAnchorID, anchor: .bottom)
         }
+
+        if animated {
+            if reduceMotion {
+                action()
+            } else {
+                withAnimation(.easeOut(duration: 0.18)) {
+                    action()
+                }
+            }
+        } else {
+            var transaction = Transaction(animation: nil)
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                action()
+            }
+        }
+    }
+
+    private func updatePinnedState(bottomMaxY: CGFloat) {
+        guard scrollViewportHeight > 0 else { return }
+
+        let distanceFromBottom = max(bottomMaxY - scrollViewportHeight, 0)
+        let nextPinnedState =
+            isPinnedToBottom
+            ? distanceFromBottom <= releasePinnedThreshold
+            : distanceFromBottom <= pinnedThreshold
+
+        guard nextPinnedState != isPinnedToBottom else { return }
+        isPinnedToBottom = nextPinnedState
+
+        guard llmService.isGenerating else { return }
+        AppDiagnostics.shared.record(
+            nextPinnedState ? "Transcript auto-scroll resumed" : "Transcript auto-scroll paused",
+            category: "ui",
+            metadata: [
+                "distanceFromBottom": Int(distanceFromBottom),
+                "messages": messages.count
+            ]
+        )
+    }
+
+    private func jumpToLatestButton(proxy: ScrollViewProxy) -> some View {
+        Button {
+            isPinnedToBottom = true
+            AppDiagnostics.shared.record(
+                "Transcript jumped to latest",
+                category: "ui",
+                metadata: ["messages": messages.count]
+            )
+            scrollToBottom(proxy: proxy, animated: true)
+        } label: {
+            Label("Latest", systemImage: "arrow.down.circle.fill")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(AppTheme.textPrimary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+        }
+        .buttonStyle(.plain)
+        .brandCard(cornerRadius: AppTheme.Radius.small)
     }
 
     private var emptyState: some View {
-        VStack(spacing: 26) {
-            Spacer(minLength: 72)
-
-            VStack(spacing: 18) {
-                Text("Meet Yemma 4")
-                    .font(.system(size: 24, weight: .semibold, design: .rounded))
-                    .foregroundStyle(AppTheme.textPrimary)
-
-                Text("Chat with Google's latest Gemma 4 model entirely on your device. No provider connection, no cloud relay, and no account required.")
-                    .font(.system(size: 16, weight: .medium, design: .rounded))
-                    .foregroundStyle(AppTheme.textSecondary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 560)
-            }
-            .padding(.horizontal, 24)
-
-            Spacer(minLength: 24)
-
-            if !llmService.isModelLoaded {
-                Text(modelStatusText)
-                    .font(.system(size: 15, weight: .semibold, design: .rounded))
-                    .foregroundStyle(modelStatusTextColor)
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 10)
-                    .glassCard(cornerRadius: 18)
-            }
-        }
-        .frame(maxWidth: .infinity, minHeight: 320)
+        EmptyStateView(
+            isModelLoaded: llmService.isTextModelReady,
+            isModelLoading: llmService.isModelLoading,
+            supportsLocalModelRuntime: supportsLocalModelRuntime,
+            modelLoadStageText: modelStatusText,
+            starters: taskStarters,
+            onSelectStarter: selectStarter
+        )
     }
 
     // MARK: - Message rows with grouping
@@ -301,16 +435,19 @@ public struct ChatView: View {
                 Spacer(minLength: 54)
             }
 
-            VStack(alignment: message.user.isCurrentUser ? .trailing : .leading, spacing: 4) {
+            VStack(alignment: message.user.isCurrentUser ? .trailing : .leading, spacing: 6) {
                 if shouldShowAssistantLabel(at: index) {
                     Text("Yemma 4")
-                        .font(.system(size: 12, weight: .semibold, design: .rounded))
-                        .foregroundStyle(AppTheme.textSecondary)
+                        .font(AppTheme.Typography.chatLabel)
+                        .foregroundStyle(AppTheme.assistantLabel)
                         .padding(.horizontal, 2)
-                        .padding(.top, index == 0 ? 0 : 8)
                 }
 
                 messageBubble(message)
+
+                if shouldShowMessageActionStrip(for: message, index: index) {
+                    messageActionStrip(for: message, index: index)
+                }
             }
             .frame(
                 maxWidth: message.user.isCurrentUser ? 420 : .infinity,
@@ -337,11 +474,20 @@ public struct ChatView: View {
         return AnyShapeStyle(AppTheme.assistantBubble)
     }
 
+    private func messageBubbleBorder(for message: ChatMessage) -> Color {
+        message.user.isCurrentUser ? AppTheme.userBubbleBorder : AppTheme.assistantBubbleBorder
+    }
+
+    private func messageTextColor(for message: ChatMessage) -> Color {
+        message.user.isCurrentUser ? AppTheme.userMessageText : AppTheme.assistantMessageText
+    }
+
     @ViewBuilder
     private func messageBubble(_ message: ChatMessage) -> some View {
         let text = displayText(for: message)
         let shouldRenderText = shouldRenderText(for: message, text: text)
         let isStreaming = message.id == streamingMessageID && llmService.isGenerating
+        let textColor = messageTextColor(for: message)
 
         VStack(
             alignment: message.user.isCurrentUser ? .trailing : .leading,
@@ -355,40 +501,43 @@ public struct ChatView: View {
                 Group {
                     if message.user.isCurrentUser {
                         Text(text)
-                            .font(.system(size: 16, weight: .medium, design: .rounded))
-                            .foregroundStyle(AppTheme.textPrimary)
+                            .font(AppTheme.Typography.chatUserMessage)
+                            .foregroundStyle(textColor)
                             .multilineTextAlignment(.trailing)
                             .textSelection(.enabled)
                     } else if isStreaming {
-                        StreamingText(text: text)
+                        StreamingText(text: text, foregroundColor: textColor)
                     } else {
-                        RichMessageText(text: text)
+                        RichMessageText(text: text, foregroundColor: textColor)
                     }
                 }
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 13)
+        .padding(.horizontal, AppTheme.Layout.bubbleHorizontalPadding)
+        .padding(.vertical, AppTheme.Layout.bubbleVerticalPadding)
         .background(messageBubbleBackground(for: message))
-        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.medium, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(AppTheme.messageBubbleBorder, lineWidth: 1)
+            RoundedRectangle(cornerRadius: AppTheme.Radius.medium, style: .continuous)
+                .stroke(messageBubbleBorder(for: message), lineWidth: 1)
         )
-        .animation(.easeInOut(duration: 0.25), value: isStreaming)
+        .contextMenu {
+            messageContextMenu(for: message, index: indexForMessage(message))
+        }
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: isStreaming)
     }
 
     // MARK: - Composer
 
     private var composerSection: some View {
         VStack(spacing: 12) {
-            if messages.isEmpty {
-                quickPromptStrip
-            }
-
             if shouldShowTypingIndicator {
                 typingIndicator
-                    .transition(.opacity.combined(with: .scale(scale: 0.8)))
+                    .transition(
+                        reduceMotion
+                            ? .opacity
+                            : .opacity.combined(with: .scale(scale: 0.8))
+                    )
             }
 
             if !pendingAttachments.isEmpty {
@@ -400,7 +549,7 @@ public struct ChatView: View {
 
                 TextField("Ask anything", text: $draft, axis: .vertical)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 18, weight: .medium, design: .rounded))
+                    .font(AppTheme.Typography.chatComposer)
                     .foregroundStyle(AppTheme.textPrimary)
                     .focused($isComposerFocused)
                     .submitLabel(.send)
@@ -420,24 +569,23 @@ public struct ChatView: View {
                     Image(systemName: llmService.isGenerating ? "stop.fill" : "arrow.up")
                         .font(.system(size: 18, weight: .bold))
                         .foregroundStyle(AppTheme.accentForeground)
-                        .frame(width: 42, height: 42)
+                        .frame(width: AppTheme.Layout.composerActionSize, height: AppTheme.Layout.composerActionSize)
                         .background(AppTheme.accent)
                         .clipShape(Circle())
                 }
                 .buttonStyle(.plain)
                 .disabled(!llmService.isGenerating && !canSubmitDraft)
                 .opacity((!llmService.isGenerating && !canSubmitDraft) ? 0.45 : 1)
+                .accessibilityLabel(llmService.isGenerating ? "Stop response" : "Send message")
+                .accessibilityHint(
+                    llmService.isGenerating
+                        ? "Stops the current assistant response."
+                        : "Sends your draft to Yemma."
+                )
             }
             .padding(8)
-            .background(
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .fill(AppTheme.inputFill)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 24, style: .continuous)
-                            .stroke(AppTheme.controlBorder, lineWidth: 1)
-                    )
-            )
-            .contentShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .inputChrome(cornerRadius: AppTheme.Radius.medium)
+            .contentShape(RoundedRectangle(cornerRadius: AppTheme.Radius.medium, style: .continuous))
             .onTapGesture {
                 isComposerFocused = true
             }
@@ -453,42 +601,7 @@ public struct ChatView: View {
             )
             .ignoresSafeArea(edges: .bottom)
         )
-        .animation(.easeInOut(duration: 0.2), value: shouldShowTypingIndicator)
-    }
-
-    private var quickPromptStrip: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 10) {
-                ForEach(quickPrompts, id: \.title) { prompt in
-                    Button {
-                        draft = prompt.prompt
-                        isComposerFocused = true
-                    } label: {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(prompt.title)
-                                .font(.system(size: 15, weight: .semibold, design: .rounded))
-                                .foregroundStyle(AppTheme.textPrimary)
-                            Text(prompt.subtitle)
-                                .font(.system(size: 13, weight: .medium, design: .rounded))
-                                .foregroundStyle(AppTheme.textSecondary)
-                        }
-                        .frame(width: 154, alignment: .leading)
-                    }
-                    .buttonStyle(PillButtonStyle())
-                }
-            }
-            .padding(.horizontal, 1)
-        }
-    }
-
-    private func composerIcon(systemName: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: systemName)
-                .font(.system(size: 22, weight: .semibold))
-                .foregroundStyle(AppTheme.textSecondary)
-                .frame(width: 36, height: 36)
-        }
-        .buttonStyle(.plain)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: shouldShowTypingIndicator)
     }
 
     private var attachmentPickerButton: some View {
@@ -505,6 +618,8 @@ public struct ChatView: View {
         }
         .buttonStyle(.plain)
         .disabled(isImportingAttachments)
+        .accessibilityLabel("Add image")
+        .accessibilityHint("Attach up to four images to your next message.")
     }
 
     private var composerAttachmentStrip: some View {
@@ -540,27 +655,370 @@ public struct ChatView: View {
         guard !isImportingAttachments else { return false }
         let hasDraft = !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         guard hasDraft || !pendingAttachments.isEmpty else { return false }
-        return llmService.isModelLoaded || !supportsLocalModelRuntime
+        return llmService.isTextModelReady || !supportsLocalModelRuntime
     }
 
     private var modelStatusText: String {
         if !supportsLocalModelRuntime {
-            return "Simulator mode: mock replies are enabled so you can test the chat UI without downloading the model."
+            return "Simulator mode with mock replies."
         }
 
         if llmService.isModelLoading {
             return llmService.modelLoadStage.statusText
         }
 
-        return "Preparing your on-device model..."
+        return "Preparing your on-device model."
     }
 
-    private var modelStatusTextColor: Color {
-        if !supportsLocalModelRuntime {
-            return AppTheme.textPrimary
+    private func selectStarter(_ starter: ChatStarter) {
+        draft = starter.prompt
+        isComposerFocused = true
+        AppDiagnostics.shared.record(
+            "Starter selected",
+            category: "ui",
+            metadata: [
+                "starter": starter.title,
+                "messages": messages.count,
+                "textReady": llmService.isTextModelReady
+            ]
+        )
+        scheduleConversationSave()
+    }
+
+    private func indexForMessage(_ message: ChatMessage) -> Int {
+        messages.firstIndex(where: { $0.id == message.id }) ?? -1
+    }
+
+    private func lastUserMessageIndex() -> Int? {
+        messages.lastIndex(where: \.user.isCurrentUser)
+    }
+
+    private func latestAssistantMessageIndex() -> Int? {
+        messages.lastIndex(where: { !$0.user.isCurrentUser })
+    }
+
+    private func canEditAndResend(_ message: ChatMessage) -> Bool {
+        guard !llmService.isGenerating, message.user.isCurrentUser else { return false }
+        guard let lastUserMessageIndex else { return false }
+        return message.id == messages[lastUserMessageIndex].id
+    }
+
+    private func canRetryAssistantResponse(_ message: ChatMessage, index: Int) -> Bool {
+        guard !llmService.isGenerating, !message.user.isCurrentUser else { return false }
+        guard index >= 0, index == latestAssistantMessageIndex(), index == messages.indices.last else { return false }
+        return userPromptIndex(forAssistantAt: index) != nil
+    }
+
+    private func shouldShowMessageActionStrip(for message: ChatMessage, index: Int) -> Bool {
+        canRetryAssistantResponse(message, index: index)
+    }
+
+    private func messageActionStrip(for message: ChatMessage, index: Int) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                messageActionButton(
+                    title: "Retry",
+                    systemImage: "arrow.clockwise",
+                    accessibilityHint: "Generate the assistant reply again."
+                ) {
+                    Task { @MainActor in
+                        await retryAssistantResponse(message, index: index)
+                    }
+                }
+
+                ForEach([AssistantRefinement.shorter, .moreDetail], id: \.rawValue) { refinement in
+                    messageActionButton(
+                        title: refinement.title,
+                        systemImage: refinement.systemImage,
+                        accessibilityHint: refinement == .shorter
+                            ? "Ask for a shorter version of the latest assistant reply."
+                            : "Ask for a more detailed version of the latest assistant reply."
+                    ) {
+                        Task { @MainActor in
+                            await refineAssistantResponse(message, refinement: refinement)
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 2)
+        }
+    }
+
+    private func messageActionButton(
+        title: String,
+        systemImage: String,
+        accessibilityHint: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: systemImage)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(AppTheme.textSecondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(AppTheme.controlFill)
+                .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint(accessibilityHint)
+    }
+
+    @ViewBuilder
+    private func messageContextMenu(for message: ChatMessage, index: Int) -> some View {
+        let trimmedText = message.text.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if !trimmedText.isEmpty {
+            Button {
+                copyMessageText(trimmedText)
+            } label: {
+                Label("Copy", systemImage: "doc.on.doc")
+            }
+
+            Button {
+                shareMessageText(trimmedText)
+            } label: {
+                Label("Share", systemImage: "square.and.arrow.up")
+            }
+
+            Button {
+                speakMessageText(trimmedText, messageID: message.id)
+            } label: {
+                Label("Speak", systemImage: "speaker.wave.2")
+            }
         }
 
-        return AppTheme.textSecondary
+        if canEditAndResend(message) {
+            Button {
+                editAndResendLastUserTurn(message)
+            } label: {
+                Label("Edit & Resend", systemImage: "square.and.pencil")
+            }
+        }
+
+        if canRetryAssistantResponse(message, index: index) {
+            Button {
+                Task { @MainActor in
+                    await retryAssistantResponse(message, index: index)
+                }
+            } label: {
+                Label("Retry", systemImage: "arrow.clockwise")
+            }
+
+            ForEach([AssistantRefinement.shorter, .moreDetail], id: \.rawValue) { refinement in
+                Button {
+                    Task { @MainActor in
+                        await refineAssistantResponse(message, refinement: refinement)
+                    }
+                } label: {
+                    Label(refinement.title, systemImage: refinement.systemImage)
+                }
+            }
+        }
+    }
+
+    private func copyMessageText(_ text: String) {
+        AppHaptics.success()
+#if canImport(UIKit)
+        UIPasteboard.general.string = text
+#endif
+        AppDiagnostics.shared.record(
+            "Message copied",
+            category: "ui",
+            metadata: ["chars": text.count]
+        )
+        showToast("Copied")
+    }
+
+    private func shareMessageText(_ text: String) {
+        AppHaptics.selection()
+        AppDiagnostics.shared.record(
+            "Message shared",
+            category: "ui",
+            metadata: ["chars": text.count]
+        )
+        sharePayload = SharePayload(text: text)
+    }
+
+    private func speakMessageText(_ text: String, messageID: String) {
+        AppHaptics.selection()
+#if canImport(AVFoundation)
+        speechSynthesizer.stopSpeaking(at: .immediate)
+        let utterance = AVSpeechUtterance(string: text)
+        utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
+        speechSynthesizer.speak(utterance)
+#endif
+        AppDiagnostics.shared.record(
+            "Message spoken",
+            category: "ui",
+            metadata: [
+                "messageID": messageID,
+                "chars": text.count
+            ]
+        )
+    }
+
+    private func editAndResendLastUserTurn(_ message: ChatMessage) {
+        guard canEditAndResend(message) else { return }
+        guard let messageIndex = messages.firstIndex(where: { $0.id == message.id }) else { return }
+        AppHaptics.selection()
+
+        AppDiagnostics.shared.record(
+            "Last user turn edited",
+            category: "ui",
+            metadata: [
+                "chars": message.text.count,
+                "images": message.attachments.count
+            ]
+        )
+
+        draft = message.text
+        pendingAttachments = message.attachments
+        selectedPhotoItems = []
+        messages.removeSubrange(messageIndex..<messages.endIndex)
+        isComposerFocused = true
+        scheduleConversationSave(delayMs: 0)
+    }
+
+    private func userPromptIndex(forAssistantAt index: Int) -> Int? {
+        guard index > 0 else { return nil }
+        return messages[..<index].lastIndex(where: \.user.isCurrentUser)
+    }
+
+    private func retryAssistantResponse(_ message: ChatMessage, index: Int) async {
+        guard canRetryAssistantResponse(message, index: index) else { return }
+        guard let userIndex = userPromptIndex(forAssistantAt: index) else { return }
+        AppHaptics.selection()
+
+        let prompt = promptInput(from: messages[userIndex])
+        let history = conversationHistory(from: Array(messages.prefix(userIndex)))
+
+        AppDiagnostics.shared.record(
+            "Assistant response retried",
+            category: "ui",
+            metadata: [
+                "assistantID": message.id,
+                "historyCount": history.count
+            ]
+        )
+
+        await stopGeneration()
+        updateMessageText(id: message.id, text: "")
+        generationError = nil
+        memoryAlertMessage = nil
+        isPinnedToBottom = true
+        generationTask = Task {
+            await streamReply(prompt: prompt, history: history, assistantID: message.id)
+        }
+        scheduleConversationSave(delayMs: 0)
+    }
+
+    private func refineAssistantResponse(_ message: ChatMessage, refinement: AssistantRefinement) async {
+        guard !llmService.isGenerating, !message.user.isCurrentUser else { return }
+        guard let latestAssistantMessageIndex else { return }
+        guard message.id == messages[latestAssistantMessageIndex].id else { return }
+        AppHaptics.selection()
+
+        AppDiagnostics.shared.record(
+            "Assistant refinement requested",
+            category: "ui",
+            metadata: [
+                "assistantID": message.id,
+                "refinement": refinement.rawValue
+            ]
+        )
+
+        draft = ""
+        pendingAttachments.removeAll()
+        selectedPhotoItems = []
+        await handlePrompt(refinement.prompt, attachments: [])
+    }
+
+    @MainActor
+    private func restoreConversationIfNeeded(force: Bool = false) async {
+        let targetConversationID = conversationStore.currentConversationID ?? conversationStore.ensureCurrentConversation()
+        guard force || loadedConversationID != targetConversationID else { return }
+
+        conversationSaveTask?.cancel()
+        isRestoringConversation = true
+        await stopGeneration()
+
+        guard let snapshot = conversationStore.loadConversation(id: targetConversationID) else {
+            let newConversationID = conversationStore.startFreshConversation()
+            guard let fallbackSnapshot = conversationStore.loadConversation(id: newConversationID) else {
+                isRestoringConversation = false
+                return
+            }
+            applyConversationSnapshot(fallbackSnapshot)
+            return
+        }
+
+        applyConversationSnapshot(snapshot)
+    }
+
+    private func applyConversationSnapshot(_ snapshot: ConversationSnapshot) {
+        loadedConversationID = snapshot.id
+        messages = snapshot.messages
+        draft = snapshot.draftText
+        pendingAttachments = snapshot.draftAttachments
+        selectedPhotoItems = []
+        generationError = nil
+        memoryAlertMessage = nil
+        toastMessage = nil
+        streamingMessageID = nil
+        isPinnedToBottom = true
+        isRestoringConversation = false
+    }
+
+    @MainActor
+    private func switchConversation(to conversationID: UUID) async {
+        persistConversationNow()
+        guard conversationStore.currentConversationID != conversationID else { return }
+        conversationStore.setCurrentConversation(id: conversationID)
+    }
+
+    @MainActor
+    private func startFreshConversation() async {
+        persistConversationNow()
+        let conversationID = conversationStore.startFreshConversation()
+        AppDiagnostics.shared.record(
+            "Fresh conversation started",
+            category: "ui",
+            metadata: ["conversationID": conversationID.uuidString]
+        )
+    }
+
+    private func scheduleConversationSave(delayMs: Int = 280) {
+        guard !isRestoringConversation else { return }
+
+        conversationSaveTask?.cancel()
+        conversationSaveTask = Task {
+            if delayMs > 0 {
+                do {
+                    try await Task.sleep(for: .milliseconds(delayMs))
+                } catch {
+                    return
+                }
+            }
+
+            await MainActor.run {
+                persistConversationNow()
+            }
+        }
+    }
+
+    private func persistConversationNow() {
+        guard !isRestoringConversation else { return }
+
+        let conversationID = conversationStore.saveConversation(
+            id: loadedConversationID,
+            messages: messages,
+            draftText: draft,
+            draftAttachments: pendingAttachments
+        )
+        loadedConversationID = conversationID
+        if conversationStore.currentConversationID == nil {
+            conversationStore.setCurrentConversation(id: conversationID)
+        }
     }
 
     private func toastView(message: String) -> some View {
@@ -636,7 +1094,7 @@ public struct ChatView: View {
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(AppTheme.messageBubbleBorder, lineWidth: 1)
+                .stroke(AppTheme.assistantBubbleBorder, lineWidth: 1)
         )
     }
 
@@ -647,6 +1105,7 @@ public struct ChatView: View {
 
             Button {
                 pendingAttachments.removeAll { $0.id == attachment.id }
+                scheduleConversationSave()
             } label: {
                 Image(systemName: "xmark.circle.fill")
                     .font(.system(size: 18, weight: .bold))
@@ -654,6 +1113,8 @@ public struct ChatView: View {
             }
             .buttonStyle(.plain)
             .offset(x: 6, y: -6)
+            .accessibilityLabel("Remove image")
+            .accessibilityHint("Removes this image from the draft.")
         }
         .padding(.top, 6)
         .padding(.trailing, 2)
@@ -703,6 +1164,7 @@ public struct ChatView: View {
 
         if !importedAttachments.isEmpty {
             pendingAttachments.append(contentsOf: importedAttachments)
+            scheduleConversationSave()
         }
 
         if failedCount > 0 {
@@ -742,10 +1204,7 @@ public struct ChatView: View {
     }
 
     private func storeAttachmentData(_ data: Data, fileExtension: String) throws -> URL {
-        let directory = FileManager.default
-            .urls(for: .cachesDirectory, in: .userDomainMask)
-            .first!
-            .appendingPathComponent("chat-attachments", isDirectory: true)
+        let directory = ConversationAttachmentStore.directoryURL()
 
         try FileManager.default.createDirectory(
             at: directory,
@@ -763,7 +1222,7 @@ public struct ChatView: View {
     private func submitDraft() {
         let trimmedText = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedText.isEmpty || !pendingAttachments.isEmpty else { return }
-        guard llmService.isModelLoaded || !supportsLocalModelRuntime else {
+        guard llmService.isTextModelReady || !supportsLocalModelRuntime else {
             AppDiagnostics.shared.record("Send blocked because model is not loaded", category: "ui")
             generationError = "The model is not loaded yet."
             return
@@ -829,6 +1288,7 @@ public struct ChatView: View {
         generationTask = Task {
             await streamReply(prompt: prompt, history: history, assistantID: assistantID)
         }
+        scheduleConversationSave(delayMs: 0)
     }
 
     private func conversationHistory(from messages: [ChatMessage]) -> [PromptMessageInput] {
@@ -848,8 +1308,7 @@ public struct ChatView: View {
         history: [PromptMessageInput],
         assistantID: String
     ) async {
-        var rawBuffer = ""
-        var lastFlush = ContinuousClock.now
+        var streamingPolicy = StreamingUpdatePolicy()
 
         defer {
             Task { @MainActor in
@@ -859,34 +1318,27 @@ public struct ChatView: View {
         }
 
         for await token in llmService.generate(prompt: prompt, history: history) {
-            rawBuffer.append(token)
-            let shouldStop = shouldStopStreaming(for: rawBuffer)
+            let update = streamingPolicy.append(token)
 
-            let now = ContinuousClock.now
-            let elapsed = now - lastFlush
-            let atWordBoundary = token.last?.isWhitespace == true || token.last == "\n"
-
-            // Flush every ~50ms or at word boundaries (after initial 20ms warmup)
-            if elapsed >= .milliseconds(50) || (atWordBoundary && elapsed >= .milliseconds(20)) {
-                let visibleText = sanitizedAssistantText(rawBuffer)
+            if let visibleText = update.visibleText {
                 await MainActor.run {
                     updateMessageText(id: assistantID, text: visibleText)
                     streamFlushTick &+= 1
                 }
-                lastFlush = now
             }
 
-            if shouldStop {
+            if update.shouldStop {
                 await llmService.stopGeneration()
                 break
             }
         }
 
         // Final flush — applies full sanitization and switches to markdown rendering
-        let finalText = finalizedAssistantText(rawBuffer)
+        let finalText = streamingPolicy.finalize()
         await MainActor.run {
             finalizeAssistantMessage(id: assistantID, text: finalText)
             streamFlushTick &+= 1
+            persistConversationNow()
         }
 
         if let lastError = llmService.lastError {
@@ -916,131 +1368,7 @@ public struct ChatView: View {
         }
 
         messages[index].text = text
-    }
-
-    // MARK: - Text sanitization
-
-    private func shouldStopStreaming(for text: String) -> Bool {
-        responseBoundaryMarkers.contains { text.contains($0) }
-    }
-
-    private func sanitizedAssistantText(_ text: String) -> String {
-        var cleaned = stripLeadingControlPreamble(from: text)
-        cleaned = stripThinkingBlocks(from: cleaned)
-
-        if let firstMarkerRange = firstBoundaryMarkerRange(in: cleaned) {
-            cleaned = String(cleaned[..<firstMarkerRange.lowerBound])
-        }
-
-        cleaned = cleaned
-            .replacingOccurrences(of: "<start_of_turn>", with: "")
-            .replacingOccurrences(of: "<end_of_turn>", with: "")
-            .replacingOccurrences(of: "<|start_of_turn|>", with: "")
-            .replacingOccurrences(of: "<|end_of_turn|>", with: "")
-            .replacingOccurrences(of: "<|turn>", with: "")
-            .replacingOccurrences(of: "<turn|>", with: "")
-            .replacingOccurrences(of: "<|channel>", with: "")
-            .replacingOccurrences(of: "<channel|>", with: "")
-            .replacingOccurrences(of: "<|think|>", with: "")
-            .replacingOccurrences(of: "<|tool>", with: "")
-            .replacingOccurrences(of: "<tool|>", with: "")
-            .replacingOccurrences(of: "<|tool_call>", with: "")
-            .replacingOccurrences(of: "<tool_call|>", with: "")
-            .replacingOccurrences(of: "<|tool_response>", with: "")
-            .replacingOccurrences(of: "<tool_response|>", with: "")
-            .replacingOccurrences(of: "<eos>", with: "")
-            .replacingOccurrences(of: "<bos>", with: "")
-
-        cleaned = stripLeadingLeakedRolePrefix(from: cleaned)
-        cleaned = trimTrailingControlPrefix(from: cleaned)
-
-        return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private func finalizedAssistantText(_ text: String) -> String {
-        sanitizedAssistantText(text)
-    }
-
-    private func firstBoundaryMarkerRange(in text: String) -> Range<String.Index>? {
-        responseBoundaryMarkers
-            .compactMap { marker in text.range(of: marker) }
-            .min(by: { $0.lowerBound < $1.lowerBound })
-    }
-
-    private func stripLeadingLeakedRolePrefix(from text: String) -> String {
-        let prefixes = [
-            "model\n",
-            "assistant\n",
-            "user\n",
-            "system\n",
-            "<|turn>model\n",
-            "<|turn>assistant\n",
-            "<|turn>user\n",
-            "<|turn>system\n",
-            "<start_of_turn>model\n",
-            "<start_of_turn>assistant\n",
-            "<start_of_turn>user\n",
-            "<|start_of_turn|>model\n",
-            "<|start_of_turn|>assistant\n",
-            "<|start_of_turn|>user\n"
-        ]
-
-        for prefix in prefixes where text.hasPrefix(prefix) {
-            return String(text.dropFirst(prefix.count))
-        }
-
-        return text
-    }
-
-    private func stripLeadingControlPreamble(from text: String) -> String {
-        var cleaned = text
-
-        while true {
-            let updated = stripLeadingLeakedRolePrefix(from: cleaned)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-
-            if updated == cleaned {
-                return cleaned
-            }
-
-            cleaned = updated
-        }
-    }
-
-    private func stripThinkingBlocks(from text: String) -> String {
-        guard text.contains("<|channel>") else {
-            return text
-        }
-
-        var cleaned = text
-
-        while let startRange = cleaned.range(of: "<|channel>") {
-            if let endRange = cleaned.range(of: "<channel|>", range: startRange.upperBound..<cleaned.endIndex) {
-                cleaned.removeSubrange(startRange.lowerBound..<endRange.upperBound)
-            } else {
-                cleaned.removeSubrange(startRange.lowerBound..<cleaned.endIndex)
-                break
-            }
-        }
-
-        return cleaned
-    }
-
-    private func trimTrailingControlPrefix(from text: String) -> String {
-        guard !text.isEmpty else { return text }
-
-        for marker in leakedControlMarkers {
-            guard marker.count > 1 else { continue }
-
-            for prefixLength in stride(from: marker.count - 1, through: 1, by: -1) {
-                let prefix = String(marker.prefix(prefixLength))
-                if text.hasSuffix(prefix) {
-                    return String(text.dropLast(prefixLength))
-                }
-            }
-        }
-
-        return text
+        persistConversationNow()
     }
 
     // MARK: - Conversation management
@@ -1058,6 +1386,7 @@ public struct ChatView: View {
         memoryAlertMessage = nil
         toastMessage = nil
         streamingMessageID = nil
+        persistConversationNow()
     }
 
     @MainActor
@@ -1074,6 +1403,7 @@ public struct ChatView: View {
                 .previewMessage(user: .user, text: sampleTranscript.user),
                 .previewMessage(user: .yemma, text: sampleTranscript.assistant)
             ]
+            persistConversationNow()
             return
         }
 
@@ -1089,10 +1419,11 @@ public struct ChatView: View {
                     text: "Simulator mode uses mocked replies. Run this debug scenario on a physical iPhone to judge real inference quality."
                 )
             ]
+            persistConversationNow()
             return
         }
 
-        guard llmService.isModelLoaded else {
+        guard llmService.isTextModelReady else {
             messages = [
                 .previewMessage(user: .user, text: prompt),
                 .previewMessage(
@@ -1100,6 +1431,7 @@ public struct ChatView: View {
                     text: "Load the local model first, then rerun this debug scenario."
                 )
             ]
+            persistConversationNow()
             return
         }
 
@@ -1126,9 +1458,7 @@ public struct ChatView: View {
     }
 
     private func triggerSendHaptic() {
-#if canImport(UIKit)
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-#endif
+        AppHaptics.softImpact()
     }
 
     private func isLowMemoryError(_ message: String) -> Bool {
@@ -1142,6 +1472,7 @@ public struct ChatView: View {
         generationTask = nil
         streamingMessageID = nil
         await llmService.stopGeneration()
+        persistConversationNow()
     }
 }
 
@@ -1149,6 +1480,7 @@ public struct ChatView: View {
 
 /// A small three-dot "thinking" animation inspired by ChatGPT/Claude iOS apps.
 private struct TypingDotsView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var phase: Int = 0
 
     private let dotSize: CGFloat = 7
@@ -1170,6 +1502,9 @@ private struct TypingDotsView: View {
     }
 
     private func dotOpacity(for index: Int) -> Double {
+        if reduceMotion {
+            return 0.8
+        }
         let offset = (phase - index + 3) % 3
         switch offset {
         case 0: return 1.0
@@ -1179,6 +1514,9 @@ private struct TypingDotsView: View {
     }
 
     private func dotScale(for index: Int) -> CGFloat {
+        if reduceMotion {
+            return 1.0
+        }
         let offset = (phase - index + 3) % 3
         switch offset {
         case 0: return 1.0
@@ -1188,6 +1526,7 @@ private struct TypingDotsView: View {
     }
 
     private func startAnimation() {
+        guard !reduceMotion else { return }
         Timer.scheduledTimer(withTimeInterval: 0.35, repeats: true) { _ in
             withAnimation(.easeInOut(duration: 0.3)) {
                 phase = (phase + 1) % 3
@@ -1195,6 +1534,31 @@ private struct TypingDotsView: View {
         }
     }
 }
+
+private struct ConversationBottomOffsetPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+private struct SharePayload: Identifiable {
+    let id = UUID()
+    let text: String
+}
+
+#if canImport(UIKit)
+private struct ActivityShareSheet: UIViewControllerRepresentable {
+    let activityItems: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+}
+#endif
 
 // MARK: - Preview helpers
 
@@ -1212,150 +1576,102 @@ private extension ChatMessage {
 }
 
 #if DEBUG
+private let previewConversationID = UUID()
+
+private func previewChatStore(
+    currentConversationID: UUID = previewConversationID,
+    title: String,
+    messages: [ChatMessage],
+    draftText: String = ""
+) -> ConversationStore {
+    ConversationStore.preview(
+        currentConversationID: currentConversationID,
+        conversations: [
+            ConversationSnapshot(
+                id: currentConversationID,
+                title: title,
+                messages: messages,
+                draftText: draftText,
+                draftAttachments: []
+            )
+        ]
+    )
+}
+
 private extension LLMService {
     static func previewLoaded() -> LLMService {
         let service = LLMService()
         service.isModelLoaded = true
         return service
     }
+
+    static func previewWarmShell() -> LLMService {
+        let service = LLMService()
+        service.isModelLoading = true
+        service.modelLoadStage = .loadingModel
+        return service
+    }
 }
 
 #Preview("Chat") {
-    ChatView(
-        initialMessages: [
-            .previewMessage(
-                user: .user,
-                text: "Plan me a focused three-day workout split for strength and cardio."
-            ),
-            .previewMessage(
-                user: .yemma,
-                text: "Here is a simple split: Day 1 push and intervals, Day 2 lower body and incline walking, Day 3 pull and steady-state cardio. Keep each session around 45 minutes."
-            ),
-            .previewMessage(
-                user: .user,
-                text: "Keep it beginner friendly and make the gym version optional."
+    ChatView()
+        .environment(LLMService.previewLoaded())
+        .environment(ModelDownloader())
+        .environment(
+            previewChatStore(
+                title: "Workout split",
+                messages: [
+                    .previewMessage(
+                        user: .user,
+                        text: "Plan me a focused three-day workout split for strength and cardio."
+                    ),
+                    .previewMessage(
+                        user: .yemma,
+                        text: "Here is a simple split: Day 1 push and intervals, Day 2 lower body and incline walking, Day 3 pull and steady-state cardio. Keep each session around 45 minutes."
+                    ),
+                    .previewMessage(
+                        user: .user,
+                        text: "Keep it beginner friendly and make the gym version optional."
+                    )
+                ]
             )
-        ]
-    )
-    .environment(LLMService.previewLoaded())
-    .environment(ModelDownloader())
+        )
+}
+
+#Preview("Warm Shell") {
+    ChatView()
+        .environment(LLMService.previewWarmShell())
+        .environment(ModelDownloader())
+        .environment(
+            previewChatStore(
+                title: "New chat",
+                messages: [],
+                draftText: "Draft a short thank-you note after an interview."
+            )
+        )
+}
+
+#Preview("Chat Dark Compact") {
+    ChatView()
+        .environment(LLMService.previewLoaded())
+        .environment(ModelDownloader())
+        .environment(
+            previewChatStore(
+                title: "Travel plans",
+                messages: [
+                    .previewMessage(
+                        user: .user,
+                        text: "Build me a two-day Honolulu itinerary with food, beach time, and one rainy-day backup."
+                    ),
+                    .previewMessage(
+                        user: .yemma,
+                        text: "Day 1 can stay centered around Kakaako, Ala Moana, and Waikiki. Day 2 can lean east side with Hanauma Bay timing, a casual lunch, and a museum backup if weather turns."
+                    )
+                ],
+                draftText: "Keep the budget moderate and avoid rental-car-only stops."
+            )
+        )
+        .preferredColorScheme(.dark)
+        .previewDevice("iPhone SE (3rd generation)")
 }
 #endif
-
-private struct ConversationsView: View {
-    @Environment(\.dismiss) private var dismiss
-
-    let messages: [ChatMessage]
-    let onStartFresh: () -> Void
-
-    private var conversationPreview: String {
-        let firstUserMessage = messages.first(where: \.user.isCurrentUser)
-        let firstUserText = firstUserMessage?.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let firstUserText, !firstUserText.isEmpty {
-            return firstUserText
-        }
-
-        if let firstUserMessage, !firstUserMessage.attachments.isEmpty {
-            return "Image prompt"
-        }
-
-        return "Hello"
-    }
-
-    var body: some View {
-        ZStack {
-            AppBackground()
-
-            VStack(spacing: 20) {
-                HStack {
-                    Spacer()
-                    Text("Conversations")
-                        .font(.system(size: 24, weight: .semibold, design: .rounded))
-                        .foregroundStyle(AppTheme.textPrimary)
-                    Spacer()
-                    CircleIconButton(systemName: "xmark", action: { dismiss() })
-                }
-                .padding(.horizontal, 20)
-                .padding(.top, 18)
-
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack(alignment: .top) {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Restart With Intention")
-                                .font(.system(size: 18, weight: .semibold, design: .rounded))
-                                .foregroundStyle(AppTheme.textPrimary)
-                            Text("Use Fresh chat to clear context before switching topics. The current conversation stays previewed below so you can jump back in and keep your place.")
-                                .font(.system(size: 15, weight: .medium, design: .rounded))
-                                .foregroundStyle(AppTheme.textSecondary)
-                        }
-
-                        Spacer()
-
-                        CircleIconButton(systemName: "xmark", filled: false, action: {})
-                            .allowsHitTesting(false)
-                    }
-                }
-                .padding(18)
-                .glassCard(cornerRadius: 24)
-                .padding(.horizontal, 16)
-
-                VStack(alignment: .leading, spacing: 14) {
-                    Text("All conversations")
-                        .font(.system(size: 18, weight: .semibold, design: .rounded))
-                        .foregroundStyle(AppTheme.textSecondary)
-
-                    VStack(spacing: 0) {
-                        Button {
-                            dismiss()
-                        } label: {
-                            conversationRow(title: conversationPreview, subtitle: messages.isEmpty ? "Start chatting" : "Current conversation")
-                        }
-
-                        Divider()
-                            .padding(.leading, 18)
-                            .overlay(AppTheme.separator)
-
-                        Button {
-                            onStartFresh()
-                        } label: {
-                            conversationRow(title: "Fresh chat", subtitle: "Clear current thread")
-                        }
-                    }
-                    .glassCard(cornerRadius: 24)
-                }
-                .padding(.horizontal, 16)
-
-                Spacer()
-
-                HStack {
-                    Image(systemName: "magnifyingglass")
-                    Text("Search")
-                    Spacer()
-                }
-                .font(.system(size: 18, weight: .medium, design: .rounded))
-                .foregroundStyle(AppTheme.textSecondary)
-                .padding(.horizontal, 18)
-                .padding(.vertical, 16)
-                .glassCard(cornerRadius: 24)
-                .padding(.horizontal, 24)
-                .padding(.bottom, 20)
-            }
-        }
-    }
-
-    private func conversationRow(title: String, subtitle: String) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title)
-                .font(.system(size: 18, weight: .semibold, design: .rounded))
-                .foregroundStyle(AppTheme.textPrimary)
-                .lineLimit(1)
-            Text(subtitle)
-                .font(.system(size: 15, weight: .medium, design: .rounded))
-                .foregroundStyle(AppTheme.textSecondary)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 18)
-        .padding(.vertical, 16)
-        .contentShape(Rectangle())
-    }
-}

@@ -48,7 +48,7 @@ final class ChatSessionController {
         guard !isImportingAttachments else { return false }
         let hasDraft = !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         guard hasDraft || !pendingAttachments.isEmpty else { return false }
-        return llmService.isModelLoaded || !supportsLocalModelRuntime
+        return llmService.isTextModelReady || !supportsLocalModelRuntime
     }
 
     var shouldShowTypingIndicator: Bool {
@@ -68,7 +68,7 @@ final class ChatSessionController {
     func submitDraft() {
         let trimmedText = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedText.isEmpty || !pendingAttachments.isEmpty else { return }
-        guard llmService.isModelLoaded || !supportsLocalModelRuntime else {
+        guard llmService.isTextModelReady || !supportsLocalModelRuntime else {
             AppDiagnostics.shared.record("Send blocked because model is not loaded", category: "ui")
             generationError = "The model is not loaded yet."
             return
@@ -138,10 +138,7 @@ final class ChatSessionController {
         history: [PromptMessageInput],
         assistantID: String
     ) async {
-        var assistantText = ""
-        // Throttle UI updates to ~20Hz to avoid O(n^2) sanitization + markdown re-parsing
-        let updateInterval: Double = 0.05
-        var lastUpdateTime = CFAbsoluteTimeGetCurrent()
+        var streamingPolicy = StreamingUpdatePolicy()
 
         streamingMessageID = assistantID
 
@@ -153,25 +150,19 @@ final class ChatSessionController {
         }
 
         for await token in llmService.generate(prompt: prompt, history: history) {
-            assistantText.append(token)
+            let update = streamingPolicy.append(token)
 
-            if StreamingRenderer.shouldStopStreaming(tailOf: assistantText) {
-                // Final UI update before stopping
-                let visibleText = StreamingRenderer.sanitize(assistantText)
+            if let visibleText = update.visibleText {
                 updateMessageText(id: assistantID, text: visibleText)
+            }
+
+            if update.shouldStop {
                 await llmService.stopGeneration()
                 break
             }
-
-            let now = CFAbsoluteTimeGetCurrent()
-            if now - lastUpdateTime >= updateInterval {
-                let visibleText = StreamingRenderer.sanitize(assistantText)
-                updateMessageText(id: assistantID, text: visibleText)
-                lastUpdateTime = now
-            }
         }
 
-        let finalText = StreamingRenderer.finalize(assistantText)
+        let finalText = streamingPolicy.finalize()
         finalizeAssistantMessage(id: assistantID, text: finalText)
 
         if let lastError = llmService.lastError {
@@ -238,7 +229,7 @@ final class ChatSessionController {
             return
         }
 
-        guard llmService.isModelLoaded else {
+        guard llmService.isTextModelReady else {
             messages = [
                 .previewMessage(user: .user, text: prompt),
                 .previewMessage(
@@ -347,10 +338,7 @@ final class ChatSessionController {
     }
 
     func storeAttachmentData(_ data: Data, fileExtension: String) throws -> URL {
-        let directory = FileManager.default
-            .urls(for: .cachesDirectory, in: .userDomainMask)
-            .first!
-            .appendingPathComponent("chat-attachments", isDirectory: true)
+        let directory = ConversationAttachmentStore.directoryURL()
 
         try FileManager.default.createDirectory(
             at: directory,
