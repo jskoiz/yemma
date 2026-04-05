@@ -33,3 +33,6 @@ xcuserdata/
 *.ipa
 *.dSYM
 *.xcarchive
+Yemma4/ThirdParty/litert_lm/*.a
+Yemma4/ThirdParty/litert_lm/*.dylib
+Yemma4/ThirdParty/litert_lm/include/
