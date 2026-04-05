@@ -43,6 +43,8 @@
 		71E76D65F8D9DDDB8EED04F7 /* AskImageHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5198412F573475C43B1CFD9 /* AskImageHomeView.swift */; };
 		10504A52C773B850ABD7A45B /* AskImageSessionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C6C7357C0318472FA74CE75 /* AskImageSessionView.swift */; };
 		B13A661DE5B1D67D41D49CE7 /* AskImageCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17D1F8E3AB73F47DB008D254 /* AskImageCoordinator.swift */; };
+		C4A1B20100000001 /* LiteRTModelCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4A1B20100000002 /* LiteRTModelCatalog.swift */; };
+		C4A1B20100000003 /* LiteRTModelDownloader.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4A1B20100000004 /* LiteRTModelDownloader.swift */; };
 
 		E1A00001 /* LiteRTLMBridge.mm in Sources */ = {isa = PBXBuildFile; fileRef = E1A00003 /* LiteRTLMBridge.mm */; };
 		E1A00004 /* LiteRTLMRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1A00005 /* LiteRTLMRuntime.swift */; };
@@ -83,6 +85,8 @@
 		654F9B9E0D8C0FF3A41FC5EE /* AskImageModelStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AskImageModelStore.swift; sourceTree = "<group>"; };
 		372FEA4E5F3042D9FA20D616 /* StubAskImageRuntime.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StubAskImageRuntime.swift; sourceTree = "<group>"; };
 		78A132E914214900F4F784B8 /* StubAskImageModelStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StubAskImageModelStore.swift; sourceTree = "<group>"; };
+		C4A1B20100000002 /* LiteRTModelCatalog.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LiteRTModelCatalog.swift; sourceTree = "<group>"; };
+		C4A1B20100000004 /* LiteRTModelDownloader.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LiteRTModelDownloader.swift; sourceTree = "<group>"; };
 		D5198412F573475C43B1CFD9 /* AskImageHomeView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AskImageHomeView.swift; sourceTree = "<group>"; };
 		4C6C7357C0318472FA74CE75 /* AskImageSessionView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AskImageSessionView.swift; sourceTree = "<group>"; };
 		17D1F8E3AB73F47DB008D254 /* AskImageCoordinator.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AskImageCoordinator.swift; sourceTree = "<group>"; };
@@ -206,6 +210,8 @@
 				E1A00005 /* LiteRTLMRuntime.swift */,
 				372FEA4E5F3042D9FA20D616 /* StubAskImageRuntime.swift */,
 				78A132E914214900F4F784B8 /* StubAskImageModelStore.swift */,
+				C4A1B20100000002 /* LiteRTModelCatalog.swift */,
+				C4A1B20100000004 /* LiteRTModelDownloader.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -352,6 +358,8 @@
 				B13A661DE5B1D67D41D49CE7 /* AskImageCoordinator.swift in Sources */,
 				E1A00001 /* LiteRTLMBridge.mm in Sources */,
 				E1A00004 /* LiteRTLMRuntime.swift in Sources */,
+				C4A1B20100000001 /* LiteRTModelCatalog.swift in Sources */,
+				C4A1B20100000003 /* LiteRTModelDownloader.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
