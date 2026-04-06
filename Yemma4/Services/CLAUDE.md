@@ -72,10 +72,10 @@ Manages downloading the Gemma 4 GGUF from Hugging Face.
 - Observable: `downloadProgress`, `isDownloading`, `isDownloaded`, `canResumeDownload`, `error`, `modelPath`
 
 ### Download Details
-- **URL:** `https://huggingface.co/bartowski/google_gemma-4-E4B-it-GGUF/resolve/main/google_gemma-4-E4B-it-Q4_K_M.gguf`
-- **Local filename:** `gemma-4-e4b-it-q4km.gguf`
+- **URL:** `https://huggingface.co/bartowski/google_gemma-4-E2B-it-GGUF/resolve/main/google_gemma-4-E2B-it-Q4_K_M.gguf`
+- **Local filename:** `gemma-4-e2b-it-q4km.gguf`
 - **Storage:** `FileManager.default.urls(for: .documentDirectory)`
-- **Resume data:** stored in Caches directory as `gemma-4-e4b-it-q4km.resume-data`
+- **Resume data:** stored in Caches directory as `gemma-4-e2b-it-q4km.resume-data`
 
 ### Key Methods
 - `validateDownloadedModel()` - Checks if model file exists on disk

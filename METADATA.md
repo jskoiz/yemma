@@ -9,9 +9,9 @@ Private AI on Your iPhone
 ## Description
 Yemma 4 is a fully private, on-device AI chat app for iPhone.
 
-It runs Gemma 4 E4B locally through llama.cpp, so your prompts and responses stay on your device. There is no account to create, no telemetry pipeline, and no cloud inference service in the middle of your conversations.
+It runs Gemma 4 E2B locally through llama.cpp, so your prompts and responses stay on your device. There is no account to create, no telemetry pipeline, and no cloud inference service in the middle of your conversations.
 
-After the initial model download, Yemma 4 works offline. The model uses an Apache 2.0 licensed GGUF build of Gemma 4 E4B and can be downloaded, stored, loaded, and deleted entirely on device.
+After the initial model download, Yemma 4 works offline. The model uses an Apache 2.0 licensed GGUF build of Gemma 4 E2B and can be downloaded, stored, loaded, and deleted entirely on device.
 
 ## Keywords
 AI, private, offline, LLM, chat, on-device, Gemma, local, no cloud
