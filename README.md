@@ -17,7 +17,7 @@
   <img alt="iOS 17+" src="https://img.shields.io/badge/iOS-17%2B-0A84FF?style=for-the-badge&logo=apple">
   <img alt="Swift 6.1" src="https://img.shields.io/badge/Swift-6.1-F05138?style=for-the-badge&logo=swift&logoColor=white">
   <img alt="On-device inference" src="https://img.shields.io/badge/Inference-On--Device-5E4AE3?style=for-the-badge">
-  <img alt="Gemma 4 E4B" src="https://img.shields.io/badge/Model-Gemma%204%20E4B-2E7D32?style=for-the-badge">
+  <img alt="Gemma 4 E2B" src="https://img.shields.io/badge/Model-Gemma%204%20E2B-2E7D32?style=for-the-badge">
 </p>
 
 <p align="center">
@@ -86,9 +86,9 @@ Runtime controls, debug probes, and diagnostics.
 
 ## Model Assets
 
-- Source: [unsloth/gemma-4-E4B-it-GGUF](https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF)
-- Model: [`gemma-4-E4B-it-Q4_K_M.gguf`](https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF/blob/main/gemma-4-E4B-it-Q4_K_M.gguf) (5.4 GB)
-- Vision projector: [`mmproj-F16.gguf`](https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF/blob/main/mmproj-F16.gguf) (~1.0 GB)
+- Source: [bartowski/google_gemma-4-E2B-it-GGUF](https://huggingface.co/bartowski/google_gemma-4-E2B-it-GGUF)
+- Model: [`google_gemma-4-E2B-it-Q4_K_M.gguf`](https://huggingface.co/bartowski/google_gemma-4-E2B-it-GGUF/blob/main/google_gemma-4-E2B-it-Q4_K_M.gguf) (3.5 GB)
+- Vision projector: [`mmproj-google_gemma-4-E2B-it-f16.gguf`](https://huggingface.co/bartowski/google_gemma-4-E2B-it-GGUF/blob/main/mmproj-google_gemma-4-E2B-it-f16.gguf) (~1.0 GB)
 
 ## Known Issues
 

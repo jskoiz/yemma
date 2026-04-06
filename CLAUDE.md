@@ -2,7 +2,7 @@
 
 ## What This Is
 
-Yemma 4 is a fully private, on-device LLM chat app for iPhone. It runs Google's Gemma 4 E4B model locally via `llama.cpp` with Metal GPU acceleration. No accounts, no cloud inference, no telemetry. All conversations stay on device and are not persisted to disk.
+Yemma 4 is a fully private, on-device LLM chat app for iPhone. It runs Google's Gemma 4 E2B model locally via `llama.cpp` with Metal GPU acceleration. No accounts, no cloud inference, no telemetry. All conversations stay on device and are not persisted to disk.
 
 ## Tech Stack
 
@@ -121,8 +121,8 @@ Uses mocked responses -- no model download needed. Useful for UI iteration.
 - Do not modify the entitlements file without understanding memory implications
 
 ### Model Details
-- Model: `google_gemma-4-E4B-it-Q4_K_M.gguf` from bartowski/google_gemma-4-E4B-it-GGUF
-- Local filename: `gemma-4-e4b-it-q4km.gguf`
+- Model: `google_gemma-4-E2B-it-Q4_K_M.gguf` from bartowski/google_gemma-4-E2B-it-GGUF
+- Local filename: `gemma-4-e2b-it-q4km.gguf`
 - Stored in: app's Documents directory
 - Context: 8192 tokens (default, user-configurable), batch size 512, 99 GPU layers (Metal)
 - Default sampling: top-k=64, top-p=0.95, temperature=0.7

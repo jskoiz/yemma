@@ -33,11 +33,6 @@ final class Yemma4AppDelegate: NSObject, UIApplicationDelegate {
             return
         }
 
-        if identifier == "\(Yemma4AppConfiguration.bundleIdentifier).litert-model-download" {
-            LiteRTBackgroundDownloadEvents.shared.setCompletionHandler(completionHandler)
-            return
-        }
-
         completionHandler()
     }
 }
@@ -64,9 +59,6 @@ public struct Yemma4App: App {
                 .environment(conversationStore)
                 .preferredColorScheme(AppearancePreference.from(appearancePreferenceRaw).colorScheme)
                 .tint(AppTheme.accent)
-                .task {
-                    AskImageTempFiles.pruneStaleFiles()
-                }
         }
     }
 }

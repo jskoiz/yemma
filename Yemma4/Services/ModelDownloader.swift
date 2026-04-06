@@ -59,17 +59,17 @@ public final class ModelDownloader {
     private static let downloadAssets: [LocalModelAsset] = [
         LocalModelAsset(
             kind: .model,
-            downloadURL: URL(string: "https://huggingface.co/bartowski/google_gemma-4-E4B-it-GGUF/resolve/main/google_gemma-4-E4B-it-Q4_K_M.gguf")!,
-            fileName: "gemma-4-e4b-it-q4km.gguf",
-            resumeDataFileName: "gemma-4-e4b-it-q4km.resume-data",
-            expectedBytes: 5_405_163_520
+            downloadURL: URL(string: "https://huggingface.co/bartowski/google_gemma-4-E2B-it-GGUF/resolve/main/google_gemma-4-E2B-it-Q4_K_M.gguf")!,
+            fileName: "gemma-4-e2b-it-q4km.gguf",
+            resumeDataFileName: "gemma-4-e2b-it-q4km.resume-data",
+            expectedBytes: 3_715_891_200
         ),
         LocalModelAsset(
             kind: .mmproj,
-            downloadURL: URL(string: "https://huggingface.co/bartowski/google_gemma-4-E4B-it-GGUF/resolve/main/mmproj-google_gemma-4-E4B-it-f16.gguf")!,
-            fileName: "gemma-4-e4b-it-mmproj-f16.gguf",
-            resumeDataFileName: "gemma-4-e4b-it-mmproj-f16.resume-data",
-            expectedBytes: 990_372_352
+            downloadURL: URL(string: "https://huggingface.co/bartowski/google_gemma-4-E2B-it-GGUF/resolve/main/mmproj-google_gemma-4-E2B-it-f16.gguf")!,
+            fileName: "gemma-4-e2b-it-mmproj-f16.gguf",
+            resumeDataFileName: "gemma-4-e2b-it-mmproj-f16.resume-data",
+            expectedBytes: 1_058_930_688
         ),
     ]
 

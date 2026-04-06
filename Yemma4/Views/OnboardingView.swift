@@ -74,21 +74,16 @@ public struct OnboardingView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 14) {
-                Image("BrandMark")
-                    .resizable()
-                    .renderingMode(.template)
-                    .interpolation(.high)
-                    .scaledToFit()
-                    .frame(width: 44, height: 44)
+            HStack(spacing: 12) {
+                Text("Y4")
+                    .font(.system(size: 26, weight: .bold, design: .serif))
                     .foregroundStyle(AppTheme.accent)
+                    .frame(width: 44, height: 44)
+                    .background(AppTheme.accent.opacity(0.12))
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
 
-                Image("BrandWordmark")
-                    .resizable()
-                    .renderingMode(.template)
-                    .interpolation(.high)
-                    .scaledToFit()
-                    .frame(height: 28)
+                Text("Yemma 4")
+                    .font(.system(size: 26, weight: .semibold, design: .serif))
                     .foregroundStyle(AppTheme.textPrimary)
                     .accessibilityLabel("Yemma 4")
             }
@@ -535,8 +530,8 @@ private extension ModelDownloader {
         downloader.error = error
 
         if isDownloaded {
-            downloader.modelPath = "/tmp/gemma-4-e4b-it-q4km.gguf"
-            downloader.mmprojPath = "/tmp/gemma-4-e4b-it-mmproj-f16.gguf"
+            downloader.modelPath = "/tmp/gemma-4-e2b-it-q4km.gguf"
+            downloader.mmprojPath = "/tmp/gemma-4-e2b-it-mmproj-f16.gguf"
         }
 
         return downloader
