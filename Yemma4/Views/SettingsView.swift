@@ -196,7 +196,8 @@ public struct SettingsView: View {
     private let repositoryURL = URL(string: "https://github.com/jskoiz/yemma")!
     private let licenseURL = URL(string: "https://github.com/jskoiz/yemma/blob/main/LICENSE")!
     private let metadataURL = URL(string: "https://github.com/jskoiz/yemma/blob/main/METADATA.md")!
-    private let supportURL = URL(string: "https://github.com/jskoiz/yemma/issues")!
+    private let privacyURL = URL(string: "https://yemma.chat/privacy/")!
+    private let supportURL = URL(string: "https://yemma.chat/support/")!
 
     public var body: some View {
         NavigationStack {
@@ -334,11 +335,19 @@ public struct SettingsView: View {
             )
             UtilitySectionSeparator()
             linkRow(
+                icon: "hand.raised.fill",
+                title: "Privacy policy",
+                detail: "What data stays local and how Yemma handles it.",
+                url: privacyURL,
+                accessibilityHint: "Opens the privacy policy in Safari."
+            )
+            UtilitySectionSeparator()
+            linkRow(
                 icon: "lifepreserver",
                 title: "Support and feedback",
-                detail: "Report bugs or ask for help.",
+                detail: "Support contact, troubleshooting, and privacy help.",
                 url: supportURL,
-                accessibilityHint: "Opens GitHub issues in Safari."
+                accessibilityHint: "Opens the support page in Safari."
             )
         }
     }
@@ -365,7 +374,7 @@ public struct SettingsView: View {
                 .font(AppTheme.Typography.utilityRowTitle)
                 .foregroundStyle(AppTheme.textPrimary)
 
-            Text("Runs on-device, keeps chats local, and never asks for an account.")
+            Text("Runs on-device, keeps chats and attachments local to this device, and does not send prompts or personal data to a third-party AI service.")
                 .font(AppTheme.Typography.utilityRowDetail)
                 .foregroundStyle(AppTheme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
