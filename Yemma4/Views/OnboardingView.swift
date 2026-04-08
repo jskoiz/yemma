@@ -93,12 +93,12 @@ public struct OnboardingView: View {
                 .foregroundStyle(AppTheme.textPrimary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Text("Download once. Then use Yemma on-device with no account.")
+            Text("Download once. Then run every chat on-device with no account and no prompts or personal data sent to a third-party AI service.")
                 .font(.system(size: 16, weight: .medium))
                 .foregroundStyle(AppTheme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Label("Private, on-device, no account.", systemImage: "lock.fill")
+            Label("Private, on-device, no cloud AI, no account.", systemImage: "lock.fill")
                 .font(AppTheme.Typography.utilityCaption)
                 .foregroundStyle(AppTheme.textSecondary)
         }
@@ -142,7 +142,7 @@ public struct OnboardingView: View {
         case .download:
             infoRow(
                 systemImage: "iphone",
-                title: "One-time download on this iPhone",
+                title: "One-time model download to this iPhone",
                 trailing: ByteCountFormatter.string(fromByteCount: modelDownloader.estimatedDownloadBytes, countStyle: .file)
             )
         case .downloading:
@@ -401,13 +401,13 @@ public struct OnboardingView: View {
         case .simulator:
             return "Use mock replies here. Run on a physical iPhone for real on-device inference."
         case .download:
-            return "First launch downloads Gemma 4 once, then it stays on this iPhone."
+            return "First launch downloads Gemma 4 once. After setup, prompts, images, and responses stay on this iPhone and are not sent to any third-party AI service."
         case .downloading:
-            return "Yemma is saving the model and vision files locally."
+            return "Yemma is downloading model files from Hugging Face and saving them locally on this iPhone."
         case .preparing:
             return "The files are here. Yemma is finishing local setup in the background."
         case .ready:
-            return "Everything is local and ready whenever you open Yemma."
+            return "Everything is local and ready whenever you open Yemma. Your chats stay on this iPhone unless you choose to share them yourself."
         case .failed:
             if hasModelPreparationError {
                 return "The download finished, but local preparation did not."

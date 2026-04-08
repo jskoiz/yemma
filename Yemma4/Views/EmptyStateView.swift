@@ -48,7 +48,7 @@ struct EmptyStateView: View {
                         .font(AppTheme.Typography.brandSection)
                         .foregroundStyle(AppTheme.textPrimary)
 
-                    Text("Private, on-device, no account.")
+                    Text("Private, on-device, no cloud AI, no account.")
                         .font(.system(size: 15, weight: .medium))
                         .foregroundStyle(AppTheme.textSecondary)
                 }
@@ -132,7 +132,7 @@ struct EmptyStateView: View {
             return modelLoadStageText
         }
 
-        return "Preparing your on-device model."
+        return "Preparing your local on-device model. Prompts stay on this device."
     }
 
     private var statusTextColor: Color {

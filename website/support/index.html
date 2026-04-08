@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Yemma 4 Support</title>
+  <meta name="description" content="Support page for Yemma 4. Get help with onboarding, model download, and privacy questions.">
+  <meta name="theme-color" content="#FAF8F5">
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://yemma.chat/support">
+  <meta property="og:title" content="Yemma 4 Support">
+  <meta property="og:description" content="Get help with onboarding, model download, and privacy questions.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://use.typekit.net/opv7nrx.css">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      font-family: 'Inter', -apple-system, sans-serif;
+      color: #111;
+      background:
+        radial-gradient(circle at top left, rgba(89, 58, 160, 0.08), transparent 34%),
+        radial-gradient(circle at bottom right, rgba(15, 118, 171, 0.09), transparent 30%),
+        #fff;
+      -webkit-font-smoothing: antialiased;
+      overflow-x: hidden;
+    }
+    a { color: inherit; }
+    .grid-bg {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background-image:
+        linear-gradient(to right, #ece8e3 1px, transparent 1px),
+        linear-gradient(to bottom, #ece8e3 1px, transparent 1px);
+      background-size: 22px 22px;
+      opacity: 0.45;
+      mask-image: radial-gradient(circle at 50% 25%, black 0%, transparent 76%);
+    }
+    .container { position: relative; z-index: 1; max-width: 920px; margin: 0 auto; padding: 0 24px; }
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      backdrop-filter: blur(16px);
+      background: rgba(255,255,255,0.72);
+      border-bottom: 1px solid rgba(232,232,232,0.9);
+    }
+    header .inner { display: flex; align-items: center; justify-content: space-between; min-height: 72px; }
+    .wordmark { font-family: 'orpheuspro', Georgia, serif; font-size: 20px; text-decoration: none; letter-spacing: -0.3px; }
+    .nav { display: flex; gap: 18px; flex-wrap: wrap; }
+    .nav a {
+      text-decoration: none;
+      font-size: 13px;
+      color: #555;
+    }
+    .nav a:hover { color: #111; }
+    main { padding: 72px 0 72px; }
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: #593AA0;
+      margin-bottom: 20px;
+    }
+    .eyebrow::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: #593AA0;
+    }
+    h1 {
+      margin: 0 0 18px;
+      font-family: 'orpheuspro', Georgia, serif;
+      font-size: clamp(38px, 6vw, 58px);
+      line-height: 1.05;
+      letter-spacing: -0.04em;
+    }
+    .lede {
+      max-width: 720px;
+      margin: 0 0 36px;
+      font-size: 17px;
+      line-height: 1.7;
+      color: #555;
+    }
+    .panel {
+      background: rgba(255,255,255,0.8);
+      border: 1px solid #e8e8e8;
+      border-radius: 18px;
+      padding: 28px;
+      box-shadow: 0 18px 60px rgba(0,0,0,0.05);
+      margin-bottom: 18px;
+    }
+    .panel h2 {
+      margin: 0 0 10px;
+      font-family: 'orpheuspro', Georgia, serif;
+      font-size: 24px;
+      letter-spacing: -0.03em;
+    }
+    .panel p, .panel li {
+      font-size: 15px;
+      line-height: 1.7;
+      color: #444;
+    }
+    .panel ul { margin: 12px 0 0; padding-left: 18px; }
+    .panel li + li { margin-top: 10px; }
+    .muted { color: #6b6b6b; }
+    .contact-card {
+      display: grid;
+      gap: 14px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .contact-item {
+      border: 1px solid #e8e8e8;
+      border-radius: 14px;
+      padding: 18px;
+      background: #fff;
+    }
+    .contact-item .label {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: #8b8b8b;
+      margin-bottom: 10px;
+    }
+    .contact-item a {
+      font-size: 16px;
+      font-weight: 600;
+      text-decoration: none;
+      color: #111;
+      word-break: break-word;
+    }
+    .contact-item a:hover { color: #593AA0; }
+    .callout {
+      background: rgba(89, 58, 160, 0.06);
+      border: 1px solid rgba(89, 58, 160, 0.15);
+    }
+    footer {
+      position: relative;
+      z-index: 1;
+      padding: 24px 0 36px;
+      color: #777;
+      font-size: 13px;
+    }
+    footer a { color: #555; text-decoration: none; }
+    footer a:hover { color: #111; }
+    .footer-row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      border-top: 1px solid #e8e8e8;
+      padding-top: 16px;
+    }
+    .footer-links { display: flex; gap: 12px; flex-wrap: wrap; }
+    @media (max-width: 640px) {
+      .container { padding: 0 18px; }
+      main { padding-top: 44px; }
+      header .inner { min-height: 64px; }
+      .panel { padding: 22px; border-radius: 16px; }
+      .contact-card { grid-template-columns: 1fr; }
+      .footer-row { align-items: flex-start; }
+    }
+  </style>
+</head>
+<body>
+  <div class="grid-bg"></div>
+  <header>
+    <div class="container inner">
+      <a class="wordmark" href="/">Yemma 4</a>
+      <nav class="nav" aria-label="Site">
+        <a href="/support/">Support</a>
+        <a href="/privacy/">Privacy</a>
+        <a href="https://github.com/jskoiz/yemma-4" target="_blank" rel="noopener">Source</a>
+      </nav>
+    </div>
+  </header>
+  <main>
+    <div class="container">
+      <div class="eyebrow">Support</div>
+      <h1>Help for setup, download, and privacy questions.</h1>
+      <p class="lede">
+        Yemma 4 is an on-device AI app. If something is broken, if the model download stalls, or if you need clarification for App Review, use the contact options below.
+      </p>
+
+      <section class="panel callout">
+        <h2>Quick contact</h2>
+        <div class="contact-card">
+          <div class="contact-item">
+            <div class="label">Email</div>
+            <a href="mailto:justin@avmillabs.com">justin@avmillabs.com</a>
+          </div>
+          <div class="contact-item">
+            <div class="label">GitHub</div>
+            <a href="https://github.com/jskoiz/yemma-4/issues" target="_blank" rel="noopener">github.com/jskoiz/yemma-4/issues</a>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>What to include</h2>
+        <ul>
+          <li>Your device model and iOS version.</li>
+          <li>Whether you are using the initial model download or an already downloaded model.</li>
+          <li>The exact screen, button, or message where the issue happens.</li>
+          <li>If relevant, a screenshot or short screen recording.</li>
+        </ul>
+      </section>
+
+      <section class="panel">
+        <h2>Common questions</h2>
+        <ul>
+          <li><strong>Does Yemma send my chats to a third-party AI service?</strong> No. Chat input and output are processed locally on the device.</li>
+          <li><strong>Why does the app download a model?</strong> The first launch downloads the model files needed for on-device inference.</li>
+          <li><strong>Can I delete my local data?</strong> Yes. You can delete downloaded models and conversation history from inside the app.</li>
+        </ul>
+      </section>
+
+      <section class="panel">
+        <h2>App Review note</h2>
+        <p class="muted">
+          For review questions, use the same email above and mention the submission ID from App Store Connect so we can respond quickly.
+        </p>
+      </section>
+    </div>
+  </main>
+  <footer>
+    <div class="container">
+      <div class="footer-row">
+        <div>Support for Yemma 4</div>
+        <div class="footer-links">
+          <a href="/">Home</a>
+          <a href="/privacy/">Privacy</a>
+          <a href="https://github.com/jskoiz/yemma-4" target="_blank" rel="noopener">Source</a>
+        </div>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>
