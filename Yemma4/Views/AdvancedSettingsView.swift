@@ -6,7 +6,6 @@ struct AdvancedSettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    @State private var needsReload = false
     @State private var diagnosticsCopied = false
     @State private var showEventLog = false
 
@@ -16,7 +15,6 @@ struct AdvancedSettingsView: View {
         self.onRunDebugScenario = onRunDebugScenario
     }
 
-    private let contextSizeOptions: [UInt32] = [2048, 4096, 8192, 16384, 32768]
     private let maxTokenOptions: [Int] = [256, 512, 1024, 2048, 4096]
 
     var body: some View {
@@ -27,14 +25,10 @@ struct AdvancedSettingsView: View {
                 VStack(spacing: AppTheme.Layout.sectionSpacing) {
                     header
 
-                    if needsReload {
-                        reloadBanner
-                    }
-
                     overviewSection
                     inferenceSection
-                    diagnosticsSection
 #if DEBUG
+                    diagnosticsSection
                     if onRunDebugScenario != nil {
                         debugSection
                     }
@@ -45,6 +39,9 @@ struct AdvancedSettingsView: View {
                 .padding(.top, 20)
                 .padding(.bottom, 28)
             }
+        }
+        .task {
+            await diagnostics.loadPersistedEventsIfNeeded()
         }
     }
 
@@ -60,7 +57,7 @@ struct AdvancedSettingsView: View {
             .accessibilityLabel("Back")
             .accessibilityHint("Returns to the main settings screen.")
             Spacer()
-            Text("Advanced")
+            Text("Model settings")
                 .font(AppTheme.Typography.utilityTitle)
                 .foregroundStyle(AppTheme.textPrimary)
             Spacer()
@@ -72,25 +69,8 @@ struct AdvancedSettingsView: View {
         .padding(.horizontal, 4)
     }
 
-    private var reloadBanner: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "arrow.triangle.2.circlepath")
-                .font(.body.weight(.semibold))
-                .foregroundStyle(AppTheme.accent)
-
-            Text("Reload the model to apply context or flash attention changes.")
-                .font(AppTheme.Typography.utilityRowTitle)
-                .foregroundStyle(AppTheme.textPrimary)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, AppTheme.Layout.rowHorizontalPadding)
-        .padding(.vertical, 14)
-        .groupedCard(cornerRadius: AppTheme.Radius.medium)
-        .accessibilityElement(children: .combine)
-    }
-
     private var overviewSection: some View {
-        UtilitySection("Overview") {
+        UtilitySection("Model at a glance") {
             infoRow(
                 icon: "bolt.circle",
                 title: "Response style",
@@ -98,26 +78,22 @@ struct AdvancedSettingsView: View {
             )
             UtilitySectionSeparator()
             infoRow(
-                icon: "text.alignleft",
-                title: "Context window",
-                detail: contextSizeLabel(llmService.contextSize)
+                icon: "cube.transparent",
+                title: "Runtime",
+                detail: "Gemma 4 MLX"
             )
             UtilitySectionSeparator()
             infoRow(
-                icon: "bolt",
-                title: "Flash attention",
-                detail: llmService.flashAttention ? "On" : "Off"
+                icon: "photo.on.rectangle",
+                title: "Prompt route",
+                detail: "Chat multimodal"
             )
         }
     }
 
     private var inferenceSection: some View {
-        UtilitySection("Runtime Controls") {
+        UtilitySection("Model controls") {
             temperatureRow
-            UtilitySectionSeparator()
-            contextSizeRow
-            UtilitySectionSeparator()
-            flashAttentionRow
             UtilitySectionSeparator()
             maxResponseTokensRow
         }
@@ -147,7 +123,7 @@ struct AdvancedSettingsView: View {
             )
             .tint(AppTheme.accent)
 
-            Text("Lower values stay focused. Higher values improvise more.")
+            Text("Lower values stay focused. Higher values feel more open-ended.")
                 .font(AppTheme.Typography.utilityCaption)
                 .foregroundStyle(AppTheme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -155,98 +131,6 @@ struct AdvancedSettingsView: View {
         .utilityRowPadding()
         .accessibilityElement(children: .contain)
         .accessibilityHint("Adjusts how inventive the model sounds.")
-    }
-
-    private var contextSizeRow: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                Label("Context Window", systemImage: "text.alignleft")
-                    .font(AppTheme.Typography.utilityRowTitle)
-                    .foregroundStyle(AppTheme.textPrimary)
-
-                Spacer()
-
-                Text(contextSizeLabel(llmService.contextSize))
-                    .font(AppTheme.Typography.utilityRowDetail)
-                    .foregroundStyle(AppTheme.textSecondary)
-            }
-
-            Menu {
-                ForEach(contextSizeOptions, id: \.self) { size in
-                    Button(contextSizeLabel(size)) {
-                        guard llmService.contextSize != size else { return }
-                        llmService.contextSize = size
-                        needsReload = true
-                        AppHaptics.selection()
-                        diagnostics.record(
-                            "Context window changed",
-                            category: "settings",
-                            metadata: [
-                                "contextSize": size,
-                                "reloadRequired": true
-                            ]
-                        )
-                    }
-                }
-            } label: {
-                HStack {
-                    Text(contextSizeLabel(llmService.contextSize))
-                        .font(AppTheme.Typography.utilityRowTitle)
-                        .foregroundStyle(AppTheme.textPrimary)
-                    Spacer()
-                    Image(systemName: "chevron.up.chevron.down")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(AppTheme.textSecondary)
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
-                .background(AppTheme.controlFill)
-                .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.small, style: .continuous))
-            }
-            .buttonStyle(.plain)
-
-            Text("Higher values use more memory. Requires model reload.")
-                .font(AppTheme.Typography.utilityCaption)
-                .foregroundStyle(AppTheme.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .utilityRowPadding()
-        .accessibilityElement(children: .contain)
-        .accessibilityHint("Changes how much recent conversation the model can keep in memory.")
-    }
-
-    private var flashAttentionRow: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Toggle(isOn: Binding(
-                get: { llmService.flashAttention },
-                set: {
-                    guard llmService.flashAttention != $0 else { return }
-                    llmService.flashAttention = $0
-                    needsReload = true
-                    AppHaptics.selection()
-                    diagnostics.record(
-                        "Flash attention changed",
-                        category: "settings",
-                        metadata: [
-                            "enabled": $0,
-                            "reloadRequired": true
-                        ]
-                    )
-                }
-            )) {
-                Label("Flash Attention", systemImage: "bolt")
-                    .font(AppTheme.Typography.utilityRowTitle)
-                    .foregroundStyle(AppTheme.textPrimary)
-            }
-            .tint(AppTheme.accent)
-
-            Text("Hardware-accelerated attention. Improves speed on supported devices. Requires model reload.")
-                .font(AppTheme.Typography.utilityCaption)
-                .foregroundStyle(AppTheme.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .utilityRowPadding()
-        .accessibilityElement(children: .contain)
     }
 
     private var maxResponseTokensRow: some View {
@@ -537,7 +421,6 @@ struct AdvancedSettingsView: View {
         UtilitySection("Reset") {
             Button {
                 llmService.resetAdvancedSettings()
-                needsReload = true
                 AppHaptics.selection()
                 diagnostics.record("Advanced settings reset", category: "settings")
             } label: {
@@ -553,13 +436,6 @@ struct AdvancedSettingsView: View {
             }
             .buttonStyle(.plain)
         }
-    }
-
-    private func contextSizeLabel(_ size: UInt32) -> String {
-        if size >= 1024 {
-            return "\(size / 1024)K"
-        }
-        return "\(size)"
     }
 
     private func tokenLabel(_ count: Int) -> String {

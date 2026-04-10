@@ -75,6 +75,9 @@ struct ConversationBrowserSheet: View {
                 .padding(.bottom, 28)
             }
         }
+        .task {
+            await conversationStore.loadIndexIfNeeded()
+        }
         .alert(
             "Rename Chat",
             isPresented: Binding(

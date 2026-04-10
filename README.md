@@ -30,10 +30,13 @@
   <a href="#structure">Structure</a> ·
   <a href="#inference">Inference</a> ·
   <a href="#model-assets">Model Assets</a> ·
+  <a href="docs/mlx-migration-strategy.md">MLX Migration Plan</a> ·
   <a href="#known-issues">Known Issues</a>
 </p>
 
 This repo contains the iOS app, landing page, and brand assets.
+
+The current shipping runtime uses `llama.cpp`. The planned migration to a single-file MLX Gemma 4 runtime is documented in [docs/mlx-migration-strategy.md](docs/mlx-migration-strategy.md).
 
 ## Features
 

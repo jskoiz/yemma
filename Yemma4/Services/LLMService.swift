@@ -1,7 +1,10 @@
 import Foundation
 import Observation
-import LlamaSwift
-import os
+import MLX
+import MLXLMCommon
+import MLXVLM
+import OSLog
+import Tokenizers
 
 struct PromptImageAsset: Hashable, Sendable {
     let id: String
@@ -27,9 +30,9 @@ enum ModelLoadStage: Sendable {
         case .idle:
             return "Waiting to prepare the model."
         case .preparingRuntime:
-            return "Preparing the local runtime."
+            return "Preparing the MLX runtime."
         case .loadingModel:
-            return "Loading the model into memory."
+            return "Loading the Gemma 4 model bundle."
         case .activatingModel:
             return "Finalizing the local chat engine."
         case .ready:
@@ -38,39 +41,50 @@ enum ModelLoadStage: Sendable {
             return "Model preparation failed."
         }
     }
+
+    var compactStatusText: String {
+        switch self {
+        case .idle:
+            return "Waiting"
+        case .preparingRuntime:
+            return "Preparing runtime"
+        case .loadingModel:
+            return "Loading bundle"
+        case .activatingModel:
+            return "Activating"
+        case .ready:
+            return "Ready"
+        case .failed:
+            return "Preparation failed"
+        }
+    }
 }
 
 enum LLMServiceError: LocalizedError {
+    case unsupportedPlatform
     case modelNotLoaded
-    case multimodalRuntimeUnavailable
     case modelLoadFailed(path: String)
-    case contextCreationFailed(path: String)
-    case samplerCreationFailed
-    case tokenizationFailed
-    case promptTooLong(tokenCount: Int, limit: Int)
-    case decodeFailed(status: Int32)
-    case tokenConversionFailed
+    case tokenizerFailed(Error)
+    case assetValidationFailed(Error)
+    case processorFailed(Error)
+    case generationFailed(Error)
 
     var errorDescription: String? {
         switch self {
+        case .unsupportedPlatform:
+            return "MLX does not run on the iOS Simulator. Run Yemma on a physical iPhone."
         case .modelNotLoaded:
-            return "No model is loaded."
-        case .multimodalRuntimeUnavailable:
-            return "The multimodal runtime is not available for image input."
+            return "No MLX model bundle is loaded."
         case let .modelLoadFailed(path):
-            return "Failed to load the GGUF model at \(path)."
-        case let .contextCreationFailed(path):
-            return "Failed to create a llama context for \(path)."
-        case .samplerCreationFailed:
-            return "Failed to create the sampler chain."
-        case .tokenizationFailed:
-            return "Failed to tokenize the prompt."
-        case let .promptTooLong(tokenCount, limit):
-            return "This conversation is too long for the model context (\(tokenCount) tokens, limit \(limit)). Start a new chat or shorten your message."
-        case let .decodeFailed(status):
-            return "llama_decode returned error status \(status)."
-        case .tokenConversionFailed:
-            return "Failed to convert a token to text."
+            return "Failed to load the MLX model bundle at \(path)."
+        case let .tokenizerFailed(error):
+            return "Tokenizer setup failed.\n\n\(error.localizedDescription)"
+        case let .assetValidationFailed(error):
+            return "Model asset validation failed.\n\n\(error.localizedDescription)"
+        case let .processorFailed(error):
+            return "Image/text preprocessing failed.\n\n\(error.localizedDescription)"
+        case let .generationFailed(error):
+            return "Generation failed.\n\n\(error.localizedDescription)"
         }
     }
 }
@@ -111,7 +125,7 @@ enum ResponseStylePreset: String, CaseIterable, Identifiable, Sendable {
         case .balanced:
             return 0.7
         case .detailed:
-            return 0.8
+            return 0.9
         }
     }
 
@@ -122,7 +136,7 @@ enum ResponseStylePreset: String, CaseIterable, Identifiable, Sendable {
         case .balanced:
             return 1024
         case .detailed:
-            return 2048
+            return 1536
         }
     }
 
@@ -134,21 +148,261 @@ enum ResponseStylePreset: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+private struct Gemma4ConversationMessage: Sendable {
+    let role: String
+    let content: String
+    let imageURLs: [URL]
+}
+
+private enum Gemma4InputRoute: String, Sendable {
+    case chat
+}
+
+private struct FirstTokenCandidate: Sendable {
+    let tokenID: Int
+    let logit: Float
+    let rawDecoded: String
+    let cleanedDecoded: String
+}
+
+private struct FirstTokenTrace: Sendable {
+    let sampledTokenID: Int
+    let sampledRawDecoded: String
+    let sampledCleanedDecoded: String
+    let candidates: [FirstTokenCandidate]
+}
+
+private enum MLXRuntimeEnvironment {
+    static let lock = NSLock()
+    nonisolated(unsafe) static var didPrepare = false
+}
+
+final class Gemma4HiddenChannelBudgetProcessor: LogitProcessor, @unchecked Sendable {
+    private var baseProcessor: LogitProcessor?
+    private let channelStartTokenID: Int?
+    private let channelEndTokenID: Int?
+    private let hiddenChannelTokenBudget: Int
+
+    private var isInsideHiddenChannel = false
+    private var hiddenChannelTokenCount = 0
+
+    init(
+        tokenizer: any MLXLMCommon.Tokenizer,
+        hiddenChannelTokenBudget: Int,
+        baseProcessor: LogitProcessor? = nil
+    ) {
+        self.baseProcessor = baseProcessor
+        self.channelStartTokenID = tokenizer.convertTokenToId("<|channel>")
+        self.channelEndTokenID = tokenizer.convertTokenToId("<channel|>")
+        self.hiddenChannelTokenBudget = hiddenChannelTokenBudget
+    }
+
+    func prompt(_ prompt: MLXArray) {
+        resetState()
+        baseProcessor?.prompt(prompt)
+    }
+
+    func process(logits: MLXArray) -> MLXArray {
+        let processedLogits = baseProcessor?.process(logits: logits) ?? logits
+
+        let vocabularySize = processedLogits.shape.last ?? 0
+        guard let forcedValues = forcedChannelEndLogits(vocabularySize: vocabularySize) else {
+            return processedLogits
+        }
+
+        return MLXArray(forcedValues)
+            .reshaped(processedLogits.shape)
+            .asType(processedLogits.dtype)
+    }
+
+    func didSample(token: MLXArray) {
+        let tokenID = token.item(Int.self)
+
+        defer {
+            baseProcessor?.didSample(token: token)
+        }
+
+        didSample(tokenID: tokenID)
+    }
+
+    func resetState() {
+        isInsideHiddenChannel = false
+        hiddenChannelTokenCount = 0
+    }
+
+    private func didSample(tokenID: Int) {
+        guard let channelStartTokenID, let channelEndTokenID else {
+            return
+        }
+
+        if tokenID == channelStartTokenID {
+            isInsideHiddenChannel = true
+            hiddenChannelTokenCount = 0
+            return
+        }
+
+        guard isInsideHiddenChannel else {
+            return
+        }
+
+        if tokenID == channelEndTokenID {
+            isInsideHiddenChannel = false
+            hiddenChannelTokenCount = 0
+            return
+        }
+
+        hiddenChannelTokenCount += 1
+    }
+
+    private func forcedChannelEndLogits(vocabularySize: Int) -> [Float]? {
+        guard isInsideHiddenChannel,
+            hiddenChannelTokenCount >= hiddenChannelTokenBudget,
+            let channelEndTokenID,
+            vocabularySize > channelEndTokenID
+        else {
+            return nil
+        }
+
+        var forcedValues = Array(repeating: Float(-1_000_000), count: vocabularySize)
+        forcedValues[channelEndTokenID] = 0
+        return forcedValues
+    }
+}
+
+private struct Gemma4ResponseTokenParser {
+    private enum State {
+        case normal
+        case suppressing(untilTokenID: Int)
+    }
+
+    private static let suppressedBlocks = [
+        ("<|channel>", "<channel|>"),
+        ("<|tool_call>", "<tool_call|>"),
+        ("<|tool>", "<tool|>"),
+        ("<|tool_response>", "<tool_response|>"),
+    ]
+
+    private static let oneShotControlTokens = [
+        "<bos>",
+        "<|turn>",
+        "<turn|>",
+        "<|image>",
+        "<image|>",
+        "<|audio>",
+        "<audio|>",
+        "<channel|>",
+        "<tool|>",
+        "<tool_call|>",
+        "<tool_response|>",
+        "<|image|>",
+        "<|audio|>",
+        "<|video|>",
+        "<|think|>",
+    ]
+
+    private let tokenizer: any MLXLMCommon.Tokenizer
+    private let suppressedBlockTokenIDs: [Int: Int]
+    private let oneShotControlTokenIDs: Set<Int>
+    private var state = State.normal
+    private var detokenizer: MLXLMCommon.NaiveStreamingDetokenizer
+    private var tokenPreview: [String] = []
+    private(set) var totalTokenCount = 0
+    private(set) var visibleChunkCount = 0
+    private(set) var visibleCharacterCount = 0
+
+    init(tokenizer: any MLXLMCommon.Tokenizer) {
+        self.tokenizer = tokenizer
+        self.detokenizer = MLXLMCommon.NaiveStreamingDetokenizer(
+            tokenizer: tokenizer,
+            skipSpecialTokens: true
+        )
+        self.suppressedBlockTokenIDs = Dictionary(
+            uniqueKeysWithValues: Self.suppressedBlocks.compactMap { start, end in
+                guard
+                    let startID = tokenizer.convertTokenToId(start),
+                    let endID = tokenizer.convertTokenToId(end)
+                else {
+                    return nil
+                }
+                return (startID, endID)
+            }
+        )
+        self.oneShotControlTokenIDs = Set(
+            Self.oneShotControlTokens.compactMap { tokenizer.convertTokenToId($0) }
+        )
+    }
+
+    mutating func append(tokenID: Int) -> String? {
+        totalTokenCount += 1
+
+        if tokenPreview.count < 24 {
+            tokenPreview.append(Self.describeToken(tokenID, tokenizer: tokenizer))
+        }
+
+        switch state {
+        case .normal:
+            if let endTokenID = suppressedBlockTokenIDs[tokenID] {
+                state = .suppressing(untilTokenID: endTokenID)
+                return nil
+            }
+
+            if oneShotControlTokenIDs.contains(tokenID) {
+                return nil
+            }
+
+            detokenizer.append(token: tokenID)
+            guard let chunk = detokenizer.next(), !chunk.isEmpty else {
+                return nil
+            }
+
+            visibleChunkCount += 1
+            visibleCharacterCount += chunk.count
+            return chunk
+
+        case let .suppressing(untilTokenID):
+            if tokenID == untilTokenID {
+                state = .normal
+            }
+            return nil
+        }
+    }
+
+    var tokenPreviewSummary: String {
+        tokenPreview.joined(separator: " | ")
+    }
+
+    private static func describeToken(
+        _ tokenID: Int,
+        tokenizer: any MLXLMCommon.Tokenizer
+    ) -> String {
+        let raw = tokenizer.convertIdToToken(tokenID)
+            ?? tokenizer.decode(tokenIds: [tokenID], skipSpecialTokens: false)
+        let cleaned = tokenizer.decode(tokenIds: [tokenID], skipSpecialTokens: true)
+        let rawText = sanitizedTokenText(raw)
+        let cleanedText = sanitizedTokenText(cleaned)
+        if rawText == cleanedText {
+            return "\(tokenID) '\(rawText)'"
+        }
+        return "\(tokenID) raw='\(rawText)' clean='\(cleanedText)'"
+    }
+
+    private static func sanitizedTokenText(_ text: String) -> String {
+        let normalized = text
+            .replacingOccurrences(of: "\n", with: "\\n")
+            .replacingOccurrences(of: "\r", with: "\\r")
+            .replacingOccurrences(of: "\t", with: "\\t")
+        return normalized.isEmpty ? "<empty>" : normalized
+    }
+}
+
 @Observable
 final class LLMService: @unchecked Sendable {
     var isModelLoaded = false
     var isModelLoading = false
     var isVisionReady = false
-    var isVisionLoading = false
     var isGenerating = false
     var temperature: Double {
         didSet { UserDefaults.standard.set(temperature, forKey: "llm_temperature") }
-    }
-    var contextSize: UInt32 {
-        didSet { UserDefaults.standard.set(Int(contextSize), forKey: "llm_contextSize") }
-    }
-    var flashAttention: Bool {
-        didSet { UserDefaults.standard.set(flashAttention, forKey: "llm_flashAttention") }
     }
     var maxResponseTokens: Int {
         didSet { UserDefaults.standard.set(maxResponseTokens, forKey: "llm_maxResponseTokens") }
@@ -161,41 +415,29 @@ final class LLMService: @unchecked Sendable {
     }
 
     static let defaultTemperature: Double = 0.7
-    static let defaultContextSize: UInt32 = 8192
-    static let defaultFlashAttention: Bool = true
     static let defaultMaxResponseTokens: Int = 1024
 
-    @ObservationIgnored private var model: OpaquePointer?
-    @ObservationIgnored private var context: OpaquePointer?
-    @ObservationIgnored private var vocab: OpaquePointer?
-    @ObservationIgnored private var multimodalRuntime: YemmaMultimodalRuntime?
+    @ObservationIgnored private var modelContainer: ModelContainer?
     @ObservationIgnored private var loadedModelPath: String?
-    @ObservationIgnored private var loadedMMProjPath: String?
     @ObservationIgnored private var generationTask: Task<Void, Never>?
-    @ObservationIgnored private var generationGroup: DispatchGroup?
-    @ObservationIgnored private var visionPreparationTask: Task<YemmaMultimodalRuntime, Error>?
-    @ObservationIgnored private var visionPreparationID: UInt64 = 0
     @ObservationIgnored private let stateLock = NSLock()
-    @ObservationIgnored private var samplerConfig = SamplerConfig.defaults
-    /// Tokens from the last successful generation (prompt + response) used for KV cache reuse.
-    @ObservationIgnored private var cachedPromptTokens: [llama_token] = []
-
-    @ObservationIgnored private static let backendInitialized: Void = {
-        llama_backend_init()
-    }()
+    @ObservationIgnored private let logger = Logger(
+        subsystem: Yemma4AppConfiguration.bundleIdentifier,
+        category: "LLMService"
+    )
 
     init() {
         let defaults = UserDefaults.standard
         temperature = defaults.object(forKey: "llm_temperature") as? Double ?? Self.defaultTemperature
-        contextSize = UInt32(defaults.object(forKey: "llm_contextSize") as? Int ?? Int(Self.defaultContextSize))
-        flashAttention = defaults.object(forKey: "llm_flashAttention") as? Bool ?? Self.defaultFlashAttention
         maxResponseTokens = defaults.object(forKey: "llm_maxResponseTokens") as? Int ?? Self.defaultMaxResponseTokens
+    }
+
+    deinit {
+        stopGenerationSynchronously()
     }
 
     func resetAdvancedSettings() {
         temperature = Self.defaultTemperature
-        contextSize = Self.defaultContextSize
-        flashAttention = Self.defaultFlashAttention
         maxResponseTokens = Self.defaultMaxResponseTokens
     }
 
@@ -215,240 +457,261 @@ final class LLMService: @unchecked Sendable {
         maxResponseTokens = preset.maxResponseTokens
     }
 
-    deinit {
-        stopGenerationSynchronously()
-        freeLoadedModel()
-    }
-
-    func loadModel(from path: String, mmprojPath: String) async throws {
+    func loadModel(from path: String) async throws {
         let resolvedPath = (path as NSString).expandingTildeInPath
-        let resolvedMMProjPath = (mmprojPath as NSString).expandingTildeInPath
-        let loadStart = Date()
+
+        if withLock({ loadedModelPath == resolvedPath && modelContainer != nil && isModelLoaded }) {
+            return
+        }
+
         await stopGeneration()
         await MainActor.run {
             isModelLoading = true
-            isVisionReady = false
-            isVisionLoading = false
             modelLoadStage = .preparingRuntime
             lastError = nil
         }
+
         AppDiagnostics.shared.record(
-            "Loading model",
+            "Preparing MLX model bundle",
             category: "model",
-            metadata: [
-                "path": resolvedPath,
-                "mmprojPath": resolvedMMProjPath
-            ]
+            metadata: ["path": resolvedPath]
         )
 
         do {
-            let contextSize = self.contextSize
-            let flashAttention = self.flashAttention
-            let preparedResources = try await Task.detached(priority: .utility) { [weak self] in
-                let backendStart = Date()
-                Self.ensureBackendInitialized()
-                let backendInitMs = Int(Date().timeIntervalSince(backendStart) * 1000)
-                AppDiagnostics.shared.record(
-                    "Model runtime prepared",
-                    category: "model",
-                    metadata: [
-                        "path": resolvedPath,
-                        "mmprojPath": resolvedMMProjPath,
-                        "backendInitMs": backendInitMs
-                    ]
-                )
-
-                await self?.setModelLoadStage(.loadingModel)
-
-                // Log model file info
-                if let fileAttrs = try? FileManager.default.attributesOfItem(atPath: resolvedPath),
-                   let fileSize = fileAttrs[.size] as? Int64 {
-                    let fileSizeMB = Int(fileSize / (1024 * 1024))
-                    let fileURL = URL(fileURLWithPath: resolvedPath)
-                    let sha256 = ModelIntegrityCache.cachedSHA256(for: fileURL) ?? "not-cached"
-                    AppDiagnostics.shared.record(
-                        "Model file info",
-                        category: "model",
-                        metadata: [
-                            "fileSizeMB": fileSizeMB,
-                            "sha256": sha256,
-                            "sha256Source": sha256 == "not-cached" ? "cache-miss" : "cached"
-                        ]
-                    )
-                }
-
-                let memoryBeforeMB = Self.availableMemoryMB()
-                AppDiagnostics.shared.record(
-                    "Memory before model load",
-                    category: "model",
-                    metadata: ["availableMemoryMB": memoryBeforeMB]
-                )
-
-                let resourceLoadStart = Date()
-                let loadedResources = try Self.loadTextResources(
-                    modelPath: resolvedPath,
-                    contextSize: contextSize,
-                    flashAttention: flashAttention
-                )
-                let resourceLoadMs = Int(Date().timeIntervalSince(resourceLoadStart) * 1000)
-
-                let memoryAfterMB = Self.availableMemoryMB()
-                AppDiagnostics.shared.record(
-                    "Memory after model load",
-                    category: "model",
-                    metadata: ["availableMemoryMB": memoryAfterMB]
-                )
-
-                AppDiagnostics.shared.record(
-                    "Model weights loaded",
-                    category: "model",
-                    metadata: [
-                        "path": resolvedPath,
-                        "mmprojPath": resolvedMMProjPath,
-                        "resourceLoadMs": resourceLoadMs
-                    ]
-                )
-
-                return PreparedResources(
-                    loadedResources: loadedResources,
-                    backendInitMs: backendInitMs,
-                    resourceLoadMs: resourceLoadMs
-                )
+            let loaded = try await Task.detached(priority: .userInitiated) {
+                try await Self.loadContainer(at: URL(fileURLWithPath: resolvedPath))
             }.value
 
-            await setModelLoadStage(.activatingModel)
-
-            let oldResources: (model: OpaquePointer?, context: OpaquePointer?, multimodalRuntime: YemmaMultimodalRuntime?, visionTask: Task<YemmaMultimodalRuntime, Error>?) = withLock {
-                let old = (
-                    model: model,
-                    context: context,
-                    multimodalRuntime: multimodalRuntime,
-                    visionTask: visionPreparationTask
-                )
-                model = preparedResources.loadedResources.model
-                context = preparedResources.loadedResources.context
-                vocab = preparedResources.loadedResources.vocab
-                multimodalRuntime = nil
-                loadedModelPath = resolvedPath
-                loadedMMProjPath = resolvedMMProjPath
-                samplerConfig = preparedResources.loadedResources.samplerConfig
-                visionPreparationTask = nil
-                visionPreparationID = 0
-                cachedPromptTokens = []
-                return old
+            await MainActor.run {
+                modelLoadStage = .activatingModel
             }
 
-            Self.releaseResources(
-                model: oldResources.model,
-                context: oldResources.context,
-                multimodalRuntime: oldResources.multimodalRuntime,
-                visionTask: oldResources.visionTask,
-                reason: "model_reload"
-            )
+            withLock {
+                modelContainer = loaded
+                loadedModelPath = resolvedPath
+            }
 
             await MainActor.run {
-                temperature = preparedResources.loadedResources.samplerConfig.temperature
                 isModelLoaded = true
                 isModelLoading = false
-                isVisionReady = false
-                isVisionLoading = false
+                isVisionReady = true
                 modelLoadStage = .ready
                 lastError = nil
             }
 
-            let loadDurationMs = Int(Date().timeIntervalSince(loadStart) * 1000)
             AppDiagnostics.shared.record(
-                "Model loaded",
+                "MLX model bundle loaded",
                 category: "model",
-                metadata: [
-                    "path": resolvedPath,
-                    "mmprojPath": resolvedMMProjPath,
-                    "context": llama_n_ctx(preparedResources.loadedResources.context),
-                    "batch": llama_n_batch(preparedResources.loadedResources.context),
-                    "temperature": preparedResources.loadedResources.samplerConfig.temperature,
-                    "topK": preparedResources.loadedResources.samplerConfig.topK,
-                    "topP": preparedResources.loadedResources.samplerConfig.topP,
-                    "loadMs": loadDurationMs,
-                    "backendInitMs": preparedResources.backendInitMs,
-                    "resourceLoadMs": preparedResources.resourceLoadMs,
-                    "visionEagerInit": false,
-                    "threads": preparedResources.loadedResources.threadCounts.decode,
-                    "batchThreads": preparedResources.loadedResources.threadCounts.batch
-                ]
+                metadata: ["path": resolvedPath]
             )
         } catch {
+            logger.error("MLX model load failed: \(error.localizedDescription, privacy: .public)")
             await publishLoadFailure(error)
             throw error
         }
     }
 
     func generate(prompt: PromptMessageInput, history: [PromptMessageInput]) -> AsyncStream<String> {
-        Self.ensureBackendInitialized()
+        if !Yemma4AppConfiguration.supportsLocalModelRuntime {
+            return makeSimulatorStream(prompt: prompt, history: history)
+        }
 
-#if targetEnvironment(simulator)
-        return makeSimulatorStream(prompt: prompt, history: history)
-#else
-        let completionGroup = CompletionGroupBox()
-        completionGroup.enter()
+        let container = withLock { modelContainer }
+        guard let container else {
+            lastError = LLMServiceError.modelNotLoaded.localizedDescription
+            return AsyncStream { continuation in
+                continuation.finish()
+            }
+        }
 
-        let previousCached = withLock { cachedPromptTokens }
+        let conversation = Self.promptMessagesForGemma4(from: history + [prompt])
+        let promptRoute: Gemma4InputRoute = .chat
+        let promptMode = conversation.contains { !$0.imageURLs.isEmpty } ? "multimodal" : "text-only"
+        let conversationImageCount = conversation.reduce(into: 0) { $0 += $1.imageURLs.count }
+        let roleSummary = "[\(conversation.map(\.role).joined(separator: ","))]"
+        let latestUserPrompt = conversation.last(where: { Self.chatRole(for: $0.role) == .user })?.content ?? ""
+
+        AppDiagnostics.shared.record(
+            "Generation requested",
+            category: "generation",
+            metadata: [
+                "messages": conversation.count,
+                "images": conversationImageCount,
+                "route": promptRoute.rawValue,
+                "mode": promptMode
+            ]
+        )
+        AppDiagnostics.shared.record(
+            "Prompt route",
+            category: "generation",
+            metadata: [
+                "route": promptRoute.rawValue,
+                "promptMessages": conversation.count,
+                "imageAttachments": conversationImageCount
+            ]
+        )
+        AppDiagnostics.shared.record(
+            "UserInput route",
+            category: "generation",
+            metadata: [
+                "route": promptRoute.rawValue,
+                "roles": roleSummary,
+                "latestUser": latestUserPrompt,
+                "messageCount": conversation.count,
+                "images": conversationImageCount,
+                "videos": 0
+            ]
+        )
+        logger.debug(
+            "UserInput route=\(promptRoute.rawValue, privacy: .public) mode=\(promptMode, privacy: .public) messages=\(conversation.count, privacy: .public)"
+        )
 
         let stream = AsyncStream<String> { continuation in
-            let continuationBox = StreamContinuationBox(continuation)
             let task = Task {
                 do {
-                    let requiresVision = !prompt.images.isEmpty || history.contains(where: { !$0.images.isEmpty })
-                    let currentResources = try await self.prepareGenerationResources(requiresVision: requiresVision)
-                    let formattedPrompt = Self.formatPrompt(
-                        prompt: prompt,
-                        history: history,
-                        model: currentResources.model
-                    )
-                    let generationConfig = self.withLock {
-                        samplerConfig.withTemperatureOverride(temperature)
+                    let parameters = self.generationParameters(for: conversation)
+                    let rawTokenStream = try await container.perform { context in
+                        let lmInput: LMInput
+                        do {
+                            let userInput = Self.makeGemma4UserInput(from: conversation)
+                            lmInput = try await context.processor.prepare(input: userInput)
+                        } catch {
+                            throw LLMServiceError.processorFailed(error)
+                        }
+
+                        let tokenShape = lmInput.text.tokens.shape.map(String.init).joined(separator: "x")
+                        let imageShape = lmInput.image?.pixels.shape.map(String.init).joined(separator: "x") ?? "none"
+                        AppDiagnostics.shared.record(
+                            "Prepared input",
+                            category: "generation",
+                            metadata: [
+                                "tokens": tokenShape,
+                                "image": imageShape
+                            ]
+                        )
+                        if let imagePixels = lmInput.image?.pixels {
+                            AppDiagnostics.shared.record(
+                                "Multimodal image tensor",
+                                category: "generation",
+                                metadata: ["summary": Self.summarizeImageTensor(imagePixels)]
+                            )
+                        }
+
+                        if promptMode == "multimodal"
+                            && Yemma4AutomationConfiguration.current.multimodalFirstTokenTraceEnabled
+                        {
+                            do {
+                                let firstTokenTrace = try Self.computeFirstTokenTrace(
+                                    context: context,
+                                    input: lmInput,
+                                    parameters: parameters,
+                                    processorOverride: self.makeLogitProcessor(
+                                        parameters: parameters,
+                                        tokenizer: context.tokenizer,
+                                        hasImages: lmInput.image != nil
+                                    )
+                                )
+                                AppDiagnostics.shared.record(
+                                    "Multimodal first-token trace",
+                                    category: "generation",
+                                    metadata: [
+                                        "summary": Self.summarizeFirstTokenTrace(firstTokenTrace)
+                                    ]
+                                )
+                            } catch {
+                                AppDiagnostics.shared.record(
+                                    "Multimodal first-token trace failed",
+                                    category: "generation",
+                                    metadata: ["error": error.localizedDescription]
+                                )
+                            }
+                        }
+
+                        let processor = self.makeLogitProcessor(
+                            parameters: parameters,
+                            tokenizer: context.tokenizer,
+                            hasImages: lmInput.image != nil
+                        )
+                        let sampler = parameters.sampler()
+                        let iterator = try TokenIterator(
+                            input: lmInput,
+                            model: context.model,
+                            cache: context.model.newCache(parameters: parameters),
+                            processor: processor,
+                            sampler: sampler,
+                            prefillStepSize: parameters.prefillStepSize,
+                            maxTokens: parameters.maxTokens
+                        )
+                        return generateTokenTask(
+                            promptTokenCount: lmInput.text.tokens.size,
+                            modelConfiguration: context.configuration,
+                            tokenizer: context.tokenizer,
+                            iterator: iterator,
+                            includeStopToken: true
+                        )
                     }
 
-                    AppDiagnostics.shared.record(
-                        "Generation requested",
-                        category: "generation",
-                        metadata: [
-                            "historyCount": history.count,
-                            "promptChars": prompt.text.count,
-                            "promptImages": prompt.images.count,
-                            "historyImages": history.reduce(into: 0) { count, message in
-                                count += message.images.count
-                            },
-                            "temperature": generationConfig.temperature,
-                            "topK": generationConfig.topK,
-                            "topP": generationConfig.topP,
-                            "visionReady": currentResources.multimodalRuntime != nil
-                        ]
-                    )
+                    let tokenStream = rawTokenStream.0
+                    let completionTask = rawTokenStream.1
+                    var parser: Gemma4ResponseTokenParser? = nil
 
-                    let job = GenerationJob(
-                        service: self,
-                        formattedPrompt: formattedPrompt,
-                        context: currentResources.context,
-                        vocab: currentResources.vocab,
-                        multimodalRuntime: currentResources.multimodalRuntime,
-                        samplerConfig: generationConfig,
-                        maxGeneratedTokens: self.maxResponseTokens,
-                        continuation: continuationBox,
-                        completionGroup: completionGroup,
-                        previousCachedTokens: previousCached
-                    )
-                    await Self.runGeneration(job)
+                    for await generation in tokenStream {
+                        if Task.isCancelled {
+                            break
+                        }
+
+                        switch generation {
+                        case let .token(tokenID):
+                            if parser == nil {
+                                let tokenizer = await container.tokenizer
+                                parser = Gemma4ResponseTokenParser(tokenizer: tokenizer)
+                            }
+                            if let chunk = parser?.append(tokenID: tokenID), !chunk.isEmpty {
+                                continuation.yield(chunk)
+                            }
+
+                        case let .info(info):
+                            AppDiagnostics.shared.record(
+                                "Generation finished",
+                                category: "generation",
+                                metadata: [
+                                    "promptTokens": info.promptTokenCount,
+                                    "generationTokens": info.generationTokenCount,
+                                    "tokensPerSecond": String(format: "%.1f", info.tokensPerSecond),
+                                    "stopReason": String(describing: info.stopReason)
+                                ]
+                            )
+                            if let parser {
+                                if Yemma4AutomationConfiguration.current.rawTokenLoggingEnabled {
+                                    logger.debug(
+                                        "Gemma4 raw stream mode=\(promptMode, privacy: .public) tokens=\(parser.totalTokenCount, privacy: .public) visibleChunks=\(parser.visibleChunkCount, privacy: .public) visibleChars=\(parser.visibleCharacterCount, privacy: .public) preview=[\(parser.tokenPreviewSummary, privacy: .public)]"
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    if Task.isCancelled {
+                        completionTask.cancel()
+                    }
+                    _ = await completionTask.result
                 } catch {
-                    completionGroup.leave()
-                    await self.setLastError(error.localizedDescription)
-                    await self.finishGeneration()
-                    continuationBox.finish()
+                    if !Task.isCancelled {
+                        await self.setLastError(error.localizedDescription)
+                        AppDiagnostics.shared.record(
+                            "Generation failed",
+                            category: "generation",
+                            metadata: ["error": error.localizedDescription]
+                        )
+                    }
                 }
+
+                await self.finishGeneration()
+                continuation.finish()
             }
 
             self.withLock {
                 generationTask = task
-                generationGroup = completionGroup.group
             }
 
             Task { @MainActor [weak self] in
@@ -462,75 +725,286 @@ final class LLMService: @unchecked Sendable {
         }
 
         return stream
-#endif
     }
 
     func stopGeneration() async {
-        let taskAndGroup = takeGenerationHandles()
-        taskAndGroup.task?.cancel()
-        if let group = taskAndGroup.group {
-            await Self.waitForGroup(group)
-        }
+        let task = takeGenerationTask()
+        task?.cancel()
+        _ = await task?.result
         await MainActor.run {
             isGenerating = false
         }
     }
 
     func stopGenerationSynchronously() {
-        let taskAndGroup = takeGenerationHandles()
-        taskAndGroup.task?.cancel()
-        taskAndGroup.group?.wait()
+        let task = takeGenerationTask()
+        task?.cancel()
         isGenerating = false
     }
 
-    /// Invalidates the KV cache prefix so the next generation does a full rebuild.
     func clearCachedPrefix() {
-        withLock { cachedPromptTokens = [] }
+        // MLX generation rebuilds from structured chat each turn. There is no local KV prefix cache to reset here.
+    }
+
+    @MainActor
+    func signalLoadingIntent() {
+        guard !isModelLoading else {
+            return
+        }
+
+        isModelLoading = true
+        modelLoadStage = .preparingRuntime
+        lastError = nil
+    }
+
+    func unloadModel() async {
+        await stopGeneration()
+        withLock {
+            modelContainer = nil
+            loadedModelPath = nil
+        }
+        await MainActor.run {
+            isModelLoaded = false
+            isModelLoading = false
+            isVisionReady = false
+            modelLoadStage = .idle
+            lastError = nil
+        }
+        AppDiagnostics.shared.record("MLX model unloaded", category: "model")
+    }
+
+    private func finishGeneration() async {
+        withLock {
+            generationTask = nil
+        }
+        await MainActor.run {
+            isGenerating = false
+        }
+    }
+
+    private func publishLoadFailure(_ error: Error) async {
+        let hasLoadedModel = withLock { modelContainer != nil }
+
+        await MainActor.run {
+            lastError = error.localizedDescription
+            isModelLoaded = hasLoadedModel
+            isVisionReady = hasLoadedModel
+            isModelLoading = false
+            modelLoadStage = hasLoadedModel ? .ready : .failed
+        }
+    }
+
+    private func setLastError(_ message: String) async {
+        await MainActor.run {
+            lastError = message
+            isGenerating = false
+        }
+    }
+}
+
+private extension LLMService {
+    static let hiddenChannelTokenBudget = 48
+    static let recommendedMultimodalMaxTokens = 256
+
+    static func loadContainer(at modelDirectory: URL) async throws -> ModelContainer {
+        try await prepareMLXRuntimeInBackground()
+        Memory.cacheLimit = 20 * 1024 * 1024
+
+        do {
+            let validatedDirectory = try ModelDirectoryValidator.validatedDirectory(at: modelDirectory)
+            AppDiagnostics.shared.record(
+                "Validated MLX model directory before load",
+                category: "model",
+                metadata: [
+                    "path": validatedDirectory.location.path,
+                    "processorConfig": validatedDirectory.processorConfigFileName,
+                    "weightFiles": validatedDirectory.weightFileNames.count,
+                    "indexedWeightFiles": validatedDirectory.indexedWeightFileNames.count
+                ]
+            )
+            if try Gemma4MLXSupport.normalizeAssetContractIfNeeded(validatedDirectory) {
+                AppDiagnostics.shared.record(
+                    "Normalized Gemma 4 config for compatibility",
+                    category: "model",
+                    metadata: [
+                        "path": validatedDirectory.configURL.path,
+                        "injectedKey": "pad_token_id"
+                    ]
+                )
+            }
+            try Gemma4MLXSupport.validateAssetContract(validatedDirectory)
+        } catch {
+            throw LLMServiceError.assetValidationFailed(error)
+        }
+
+        let tokenizerLoader = SwiftTokenizersLoader(
+            willLoad: {
+                AppDiagnostics.shared.record("Loading tokenizer...", category: "model")
+            },
+            didLoad: {
+                AppDiagnostics.shared.record("Loading model weights...", category: "model")
+            }
+        )
+
+        let context = try await VLMModelFactory.shared._load(
+            configuration: .init(directory: modelDirectory),
+            tokenizerLoader: tokenizerLoader
+        )
+        return ModelContainer(context: context)
+    }
+
+    func generationParameters(for messages: [Gemma4ConversationMessage]) -> GenerateParameters {
+        if messages.contains(where: { !$0.imageURLs.isEmpty }) {
+            return GenerateParameters(
+                maxTokens: min(maxResponseTokens, Self.recommendedMultimodalMaxTokens),
+                temperature: 0
+            )
+        }
+
+        return GenerateParameters(
+            maxTokens: maxResponseTokens,
+            temperature: Float(temperature),
+            topP: 0.95,
+            topK: 64
+        )
+    }
+
+    func makeLogitProcessor(
+        parameters: GenerateParameters,
+        tokenizer: any MLXLMCommon.Tokenizer,
+        hasImages: Bool
+    ) -> LogitProcessor? {
+        let baseProcessor = parameters.processor()
+        guard hasImages else {
+            return baseProcessor
+        }
+
+        return Gemma4HiddenChannelBudgetProcessor(
+            tokenizer: tokenizer,
+            hiddenChannelTokenBudget: Self.hiddenChannelTokenBudget,
+            baseProcessor: baseProcessor
+        )
+    }
+
+    static func promptMessagesForGemma4(from messages: [PromptMessageInput]) -> [Gemma4ConversationMessage] {
+        let promptMessages = messages.compactMap { message -> Gemma4ConversationMessage? in
+            let imageURLs = message.images.map { URL(fileURLWithPath: $0.filePath) }
+            let trimmedText = message.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedText.isEmpty || !imageURLs.isEmpty else {
+                return nil
+            }
+
+            return Gemma4ConversationMessage(
+                role: message.role,
+                content: message.text,
+                imageURLs: imageURLs
+            )
+        }
+
+        guard let latestImageIndex = promptMessages.lastIndex(where: { !$0.imageURLs.isEmpty }) else {
+            return promptMessages
+        }
+
+        let leadingNonImageMessages = Array(promptMessages.prefix(while: { $0.imageURLs.isEmpty }))
+        let trailingMessages = Array(promptMessages[latestImageIndex...])
+        let normalizedMessages = leadingNonImageMessages + trailingMessages
+
+        guard let normalizedLatestImageIndex = normalizedMessages.lastIndex(where: { !$0.imageURLs.isEmpty }) else {
+            return normalizedMessages
+        }
+
+        return normalizedMessages.enumerated().map { index, message in
+            let trimmedContent = message.content.trimmingCharacters(in: .whitespacesAndNewlines)
+            let normalizedContent: String
+            if index == normalizedLatestImageIndex,
+                Self.chatRole(for: message.role) == .user,
+                trimmedContent.isEmpty
+            {
+                normalizedContent = Gemma4MLXSupport.defaultImagePrompt
+            } else {
+                normalizedContent = message.content
+            }
+
+            let normalizedImages =
+                index == normalizedLatestImageIndex ? Array(message.imageURLs.prefix(1)) : []
+
+            return Gemma4ConversationMessage(
+                role: message.role,
+                content: normalizedContent,
+                imageURLs: normalizedImages
+            )
+        }
+    }
+
+    static func makeGemma4UserInput(
+        from messages: [Gemma4ConversationMessage]
+    ) -> UserInput {
+        UserInput(
+            chat: messages.map { message in
+                Chat.Message(
+                    role: chatRole(for: message.role),
+                    content: message.content,
+                    images: message.imageURLs.map(UserInput.Image.url)
+                )
+            },
+            additionalContext: Gemma4MLXSupport.templateContext
+        )
+    }
+
+    static func chatRole(for role: String) -> Chat.Message.Role {
+        switch role.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "assistant", "model":
+            return .assistant
+        case "system", "developer":
+            return .system
+        default:
+            return .user
+        }
+    }
+
+    func withLock<T>(_ body: () -> T) -> T {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return body()
+    }
+
+    func takeGenerationTask() -> Task<Void, Never>? {
+        withLock {
+            let task = generationTask
+            generationTask = nil
+            return task
+        }
     }
 
     func makeSimulatorStream(prompt: PromptMessageInput, history: [PromptMessageInput]) -> AsyncStream<String> {
         let transcriptCount = history.count + 1
         let response = """
-        Simulator mode reply: the local UI loop is working, and the model file is present.
+        Simulator mode reply: the local UI loop is working, but MLX inference still requires a physical iPhone.
 
         Prompt received: \(prompt.text.isEmpty ? "[image only]" : prompt.text)
 
         Conversation turns in memory: \(transcriptCount)
 
         Attached images in this turn: \(prompt.images.count)
-
-        Real Gemma inference still needs a physical iPhone. Use the simulator for UI, download state, settings, and chat-shell iteration.
         """
 
         return AsyncStream { continuation in
-            let chunks = response.map(String.init)
             let task = Task { [weak self] in
-                guard let self else {
-                    continuation.finish()
-                    return
-                }
-
-                for chunk in chunks {
+                for chunk in response.map(String.init) {
                     if Task.isCancelled {
                         break
                     }
 
                     continuation.yield(chunk)
-
-                    do {
-                        try await Task.sleep(for: .milliseconds(14))
-                    } catch {
-                        break
-                    }
+                    try? await Task.sleep(for: .milliseconds(14))
                 }
 
-                await self.finishGeneration()
+                await self?.finishGeneration()
                 continuation.finish()
             }
 
-            self.withLock {
+            withLock {
                 generationTask = task
-                generationGroup = nil
             }
 
             Task { @MainActor [weak self] in
@@ -543,1192 +1017,259 @@ final class LLMService: @unchecked Sendable {
             }
         }
     }
-}
 
-private extension LLMService {
-    static let mediaPromptMarker = "<__media__>"
-
-    struct ModelLoadThreadCounts: Sendable {
-        let decode: Int32
-        let batch: Int32
-    }
-
-    struct FormattedPrompt: Sendable {
-        let text: String
-        let images: [PromptImageAsset]
-    }
-
-    struct LoadedTextResources: @unchecked Sendable {
-        let model: OpaquePointer
-        let context: OpaquePointer
-        let vocab: OpaquePointer
-        let samplerConfig: SamplerConfig
-        let threadCounts: ModelLoadThreadCounts
-    }
-
-    struct GenerationResources: @unchecked Sendable {
-        let model: OpaquePointer
-        let context: OpaquePointer
-        let vocab: OpaquePointer
-        let multimodalRuntime: YemmaMultimodalRuntime?
-    }
-
-    struct PreparedResources: @unchecked Sendable {
-        let loadedResources: LoadedTextResources
-        let backendInitMs: Int
-        let resourceLoadMs: Int
-    }
-
-    static func ensureBackendInitialized() {
-        _ = backendInitialized
-    }
-
-    static func thermalStateLabel() -> String {
-        switch ProcessInfo.processInfo.thermalState {
-        case .nominal: return "nominal"
-        case .fair: return "fair"
-        case .serious: return "serious"
-        case .critical: return "critical"
-        @unknown default: return "unknown"
+    static func summarizeImageTensor(_ pixels: MLXArray) -> String {
+        let values = pixels.asArray(Float.self)
+        guard !values.isEmpty else {
+            return "shape=\(pixels.shape.map(String.init).joined(separator: "x")) empty"
         }
+
+        let planeSize = max(1, pixels.dim(2) * pixels.dim(3))
+        let firstRed = values[0]
+        let firstGreen = values.indices.contains(planeSize) ? values[planeSize] : firstRed
+        let firstBlue = values.indices.contains(planeSize * 2) ? values[planeSize * 2] : firstGreen
+        let minValue = values.min() ?? 0
+        let maxValue = values.max() ?? 0
+        let shape = pixels.shape.map(String.init).joined(separator: "x")
+
+        return
+            "shape=\(shape) dtype=\(String(describing: pixels.dtype)) range=[\(formatLogit(minValue)),\(formatLogit(maxValue))] firstRGB=[\(formatLogit(firstRed)),\(formatLogit(firstGreen)),\(formatLogit(firstBlue))]"
     }
 
-    static func availableMemoryMB() -> Int {
-        Int(os_proc_available_memory() / (1024 * 1024))
+    static func formatLogit(_ value: Float) -> String {
+        String(format: "%.3f", value)
     }
 
-    static func recommendedThreadCounts() -> ModelLoadThreadCounts {
-        let activeCores = max(1, ProcessInfo.processInfo.activeProcessorCount)
-        let decodeThreads = max(1, activeCores - 2)
-        let batchThreads = max(1, min(4, decodeThreads))
-        return ModelLoadThreadCounts(
-            decode: Int32(decodeThreads),
-            batch: Int32(batchThreads)
+    static func summarizeFirstTokenTrace(_ trace: FirstTokenTrace) -> String {
+        let sampledDescription = describeFirstTokenCandidate(
+            tokenID: trace.sampledTokenID,
+            rawDecoded: trace.sampledRawDecoded,
+            cleanedDecoded: trace.sampledCleanedDecoded
+        )
+        let candidates = trace.candidates.map { candidate in
+            "\(candidate.tokenID):\(formatLogit(candidate.logit)):\(describeFirstTokenCandidate(tokenID: candidate.tokenID, rawDecoded: candidate.rawDecoded, cleanedDecoded: candidate.cleanedDecoded))"
+        }.joined(separator: " | ")
+        return "sample=\(sampledDescription) topK=[\(candidates)]"
+    }
+
+    static func computeFirstTokenTrace(
+        context: ModelContext,
+        input: LMInput,
+        parameters: GenerateParameters,
+        processorOverride: LogitProcessor? = nil,
+        topK: Int = 5
+    ) throws -> FirstTokenTrace {
+        var processor = processorOverride ?? parameters.processor()
+        processor?.prompt(input.text.tokens)
+
+        let cache = context.model.newCache(parameters: parameters)
+        let prepared = try context.model.prepare(
+            input,
+            cache: cache,
+            windowSize: parameters.prefillStepSize
+        )
+
+        let logits: MLXArray
+        switch prepared {
+        case .logits(let output):
+            logits = output.logits
+        case .tokens(let tokens):
+            let output = context.model(
+                tokens[text: .newAxis],
+                cache: cache.isEmpty ? nil : cache,
+                state: nil
+            )
+            logits = output.logits
+        }
+
+        var nextTokenLogits = logits[0..., -1, 0...]
+        nextTokenLogits = processor?.process(logits: nextTokenLogits) ?? nextTokenLogits
+
+        let sampler = parameters.sampler()
+        let sampledToken = sampler.sample(logits: nextTokenLogits)
+        processor?.didSample(token: sampledToken)
+
+        let sampledTokenID = sampledToken.item(Int.self)
+        let sampledRawDecoded = context.tokenizer.decode(
+            tokenIds: [sampledTokenID],
+            skipSpecialTokens: false
+        )
+        let sampledCleanedDecoded = context.tokenizer.decode(
+            tokenIds: [sampledTokenID],
+            skipSpecialTokens: true
+        )
+
+        let vocabularySize = nextTokenLogits.dim(-1)
+        let candidateCount = Swift.max(1, Swift.min(topK, vocabularySize))
+        var indices = argPartition(-nextTokenLogits, kth: candidateCount - 1, axis: -1)[
+            .ellipsis, ..<candidateCount
+        ]
+        var values = takeAlong(nextTokenLogits, indices, axis: -1)
+        let order = argSort(-values, axis: -1)
+        indices = takeAlong(indices, order, axis: -1)
+        values = takeAlong(values, order, axis: -1)
+        eval(indices, values)
+
+        let tokenIDs = indices.flattened().asArray(Int.self)
+        let logitsValues = values.flattened().asArray(Float.self)
+        let candidates = zip(tokenIDs, logitsValues).map { tokenID, logit in
+            FirstTokenCandidate(
+                tokenID: tokenID,
+                logit: logit,
+                rawDecoded: context.tokenizer.decode(
+                    tokenIds: [tokenID],
+                    skipSpecialTokens: false
+                ),
+                cleanedDecoded: context.tokenizer.decode(
+                    tokenIds: [tokenID],
+                    skipSpecialTokens: true
+                )
+            )
+        }
+
+        return FirstTokenTrace(
+            sampledTokenID: sampledTokenID,
+            sampledRawDecoded: sampledRawDecoded,
+            sampledCleanedDecoded: sampledCleanedDecoded,
+            candidates: candidates
         )
     }
 
-    static func loadTextResources(
-        modelPath: String,
-        contextSize: UInt32 = defaultContextSize,
-        flashAttention: Bool = defaultFlashAttention
-    ) throws -> LoadedTextResources {
-        var modelParams = llama_model_default_params()
-#if targetEnvironment(simulator)
-        modelParams.n_gpu_layers = 0
-#else
-        modelParams.n_gpu_layers = 99
-#endif
-
-        var contextParams = llama_context_default_params()
-        contextParams.n_ctx = contextSize
-        contextParams.n_batch = 512
-        contextParams.n_ubatch = 512
-        contextParams.flash_attn_type = flashAttention ? LLAMA_FLASH_ATTN_TYPE_ENABLED : LLAMA_FLASH_ATTN_TYPE_DISABLED
-
-        let threadCounts = recommendedThreadCounts()
-        contextParams.n_threads = threadCounts.decode
-        contextParams.n_threads_batch = threadCounts.batch
-
-        guard let newModel = modelPath.withCString({ llama_model_load_from_file($0, modelParams) }) else {
-            throw LLMServiceError.modelLoadFailed(path: modelPath)
+    static func describeFirstTokenCandidate(
+        tokenID: Int,
+        rawDecoded: String,
+        cleanedDecoded: String
+    ) -> String {
+        let raw = sanitizedTokenText(rawDecoded)
+        let cleaned = sanitizedTokenText(cleanedDecoded)
+        if raw == cleaned {
+            return "\(tokenID) '\(raw)'"
         }
-
-        guard let newContext = llama_init_from_model(newModel, contextParams) else {
-            llama_model_free(newModel)
-            throw LLMServiceError.contextCreationFailed(path: modelPath)
-        }
-
-        guard let newVocab = llama_model_get_vocab(newModel) else {
-            llama_free(newContext)
-            llama_model_free(newModel)
-            throw LLMServiceError.contextCreationFailed(path: modelPath)
-        }
-
-        return LoadedTextResources(
-            model: newModel,
-            context: newContext,
-            vocab: newVocab,
-            samplerConfig: samplerConfig(for: newModel),
-            threadCounts: threadCounts
-        )
+        return "\(tokenID) raw='\(raw)' clean='\(cleaned)'"
     }
 
-    final class CompletionGroupBox: @unchecked Sendable {
-        let group = DispatchGroup()
-
-        func enter() {
-            group.enter()
-        }
-
-        func leave() {
-            group.leave()
-        }
+    static func sanitizedTokenText(_ text: String) -> String {
+        text
+            .replacingOccurrences(of: "\n", with: "\\n")
+            .replacingOccurrences(of: "\r", with: "\\r")
+            .replacingOccurrences(of: "\t", with: "\\t")
     }
 
-    final class GenerationJob: @unchecked Sendable {
-        weak var service: LLMService?
-        let formattedPrompt: FormattedPrompt
-        let context: OpaquePointer
-        let vocab: OpaquePointer
-        let multimodalRuntime: YemmaMultimodalRuntime?
-        let samplerConfig: SamplerConfig
-        let maxGeneratedTokens: Int
-        let continuation: StreamContinuationBox<String>
-        let completionGroup: CompletionGroupBox
-        let previousCachedTokens: [llama_token]
-
-        init(
-            service: LLMService,
-            formattedPrompt: FormattedPrompt,
-            context: OpaquePointer,
-            vocab: OpaquePointer,
-            multimodalRuntime: YemmaMultimodalRuntime?,
-            samplerConfig: SamplerConfig,
-            maxGeneratedTokens: Int,
-            continuation: StreamContinuationBox<String>,
-            completionGroup: CompletionGroupBox,
-            previousCachedTokens: [llama_token] = []
-        ) {
-            self.service = service
-            self.formattedPrompt = formattedPrompt
-            self.context = context
-            self.vocab = vocab
-            self.multimodalRuntime = multimodalRuntime
-            self.samplerConfig = samplerConfig
-            self.maxGeneratedTokens = maxGeneratedTokens
-            self.continuation = continuation
-            self.completionGroup = completionGroup
-            self.previousCachedTokens = previousCachedTokens
-        }
+    static func prepareMLXRuntimeInBackground() async throws {
+        try await Task.detached(priority: .userInitiated) {
+            try prepareMLXRuntimeIfNeeded()
+        }.value
     }
 
-    struct SamplerConfig: Sendable {
-        var topK: Int32
-        var topP: Float
-        var minP: Float
-        var temperature: Double
+    static func prepareMLXRuntimeIfNeeded() throws {
+        MLXRuntimeEnvironment.lock.lock()
+        defer { MLXRuntimeEnvironment.lock.unlock() }
 
-        static let defaults = SamplerConfig(
-            topK: 64,
-            topP: 0.95,
-            minP: 0.0,
-            temperature: 0.7
-        )
-
-        func withTemperatureOverride(_ value: Double) -> SamplerConfig {
-            var copy = self
-            copy.temperature = value
-            return copy
-        }
-    }
-
-    final class StreamContinuationBox<Element: Sendable>: @unchecked Sendable {
-        private let continuation: AsyncStream<Element>.Continuation
-
-        init(_ continuation: AsyncStream<Element>.Continuation) {
-            self.continuation = continuation
-        }
-
-        func yield(_ value: Element) {
-            continuation.yield(value)
-        }
-
-        func finish() {
-            continuation.finish()
-        }
-    }
-
-    static func runGeneration(_ job: GenerationJob) async {
-        defer {
-            job.completionGroup.leave()
-        }
-
-        guard let service = job.service else {
-            job.continuation.finish()
+        if MLXRuntimeEnvironment.didPrepare {
             return
         }
 
+        guard let source = bundledMetalLibraryURL() else {
+            throw LLMServiceError.modelLoadFailed(path: "default.metallib")
+        }
+
+        let fileManager = FileManager.default
+        let runtimeDirectory = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first?
+            .appending(path: "mlx-runtime", directoryHint: .isDirectory)
+            ?? fileManager.temporaryDirectory.appending(path: "mlx-runtime", directoryHint: .isDirectory)
+
+        try fileManager.createDirectory(at: runtimeDirectory, withIntermediateDirectories: true)
+
+        let runtimeMetalLib = runtimeDirectory.appending(path: "default.metallib")
+        if !fileManager.fileExists(atPath: runtimeMetalLib.path) {
+            try? fileManager.removeItem(at: runtimeMetalLib)
+            try fileManager.copyItem(at: source, to: runtimeMetalLib)
+        }
+
+        guard fileManager.changeCurrentDirectoryPath(runtimeDirectory.path) else {
+            throw LLMServiceError.modelLoadFailed(path: runtimeDirectory.path)
+        }
+
+        MLXRuntimeEnvironment.didPrepare = true
+    }
+
+    static func bundledMetalLibraryURL() -> URL? {
+        let directCandidates: [URL?] = [
+            Bundle.main.url(
+                forResource: "default",
+                withExtension: "metallib",
+                subdirectory: "mlx-swift_Cmlx.bundle"
+            ),
+            Bundle.main.resourceURL?.appending(path: "mlx-swift_Cmlx.bundle/default.metallib"),
+        ]
+
+        for candidate in directCandidates {
+            if let candidate, FileManager.default.fileExists(atPath: candidate.path) {
+                return candidate
+            }
+        }
+
+        let bundles = Bundle.allBundles + Bundle.allFrameworks
+        for bundle in bundles where bundle.bundleURL.lastPathComponent == "mlx-swift_Cmlx.bundle" {
+            if let candidate = bundle.url(forResource: "default", withExtension: "metallib"),
+                FileManager.default.fileExists(atPath: candidate.path)
+            {
+                return candidate
+            }
+        }
+
+        return nil
+    }
+}
+
+private struct SwiftTokenizersLoader: TokenizerLoader {
+    var willLoad: @Sendable () -> Void = {}
+    var didLoad: @Sendable () -> Void = {}
+
+    func load(from directory: URL) async throws -> any MLXLMCommon.Tokenizer {
+        willLoad()
+        let tokenizer = try await AutoTokenizer.from(modelFolder: directory)
+        didLoad()
+        return TokenizersAdapter(upstream: tokenizer)
+    }
+}
+
+private struct TokenizersAdapter: MLXLMCommon.Tokenizer, @unchecked Sendable {
+    let upstream: any Tokenizers.Tokenizer
+
+    func encode(text: String, addSpecialTokens: Bool) -> [Int] {
+        upstream.encode(text: text, addSpecialTokens: addSpecialTokens)
+    }
+
+    func decode(tokenIds: [Int], skipSpecialTokens: Bool) -> String {
+        upstream.decode(tokens: tokenIds, skipSpecialTokens: skipSpecialTokens)
+    }
+
+    func convertTokenToId(_ token: String) -> Int? {
+        upstream.convertTokenToId(token)
+    }
+
+    func convertIdToToken(_ id: Int) -> String? {
+        upstream.convertIdToToken(id)
+    }
+
+    var bosToken: String? { upstream.bosToken }
+    var eosToken: String? { upstream.eosToken }
+    var unknownToken: String? { upstream.unknownToken }
+
+    func applyChatTemplate(
+        messages: [[String: any Sendable]],
+        tools: [[String: any Sendable]]?,
+        additionalContext: [String: any Sendable]?
+    ) throws -> [Int] {
         do {
-            AppDiagnostics.shared.record(
-                "Thermal state at generation start",
-                category: "generation",
-                metadata: ["thermalState": thermalStateLabel()]
+            return try upstream.applyChatTemplate(
+                messages: messages,
+                tools: tools,
+                additionalContext: additionalContext
             )
-
-            let generationStartTime = Date()
-
-            let sampler = try Self.makeSampler(config: job.samplerConfig)
-            defer { llama_sampler_free(sampler) }
-
-            let contextLimit = max(1, Int(llama_n_ctx(job.context)))
-            let promptPositionLimit = max(1, contextLimit - job.maxGeneratedTokens)
-            let promptTokenCount: Int
-            let promptPositionCount: Int
-            var nextPosition: Int32
-            var allPromptTokens: [llama_token] = []
-
-            if job.formattedPrompt.images.isEmpty {
-                let promptTokens = try Self.tokenize(job.formattedPrompt.text, vocab: job.vocab)
-                promptTokenCount = promptTokens.count
-                promptPositionCount = promptTokens.count
-
-                guard promptPositionCount <= promptPositionLimit else {
-                    throw LLMServiceError.promptTooLong(tokenCount: promptPositionCount, limit: promptPositionLimit)
-                }
-
-                // KV cache reuse: find how many tokens match the cached prefix
-                let cached = job.previousCachedTokens
-                var commonPrefixLen = 0
-                if !cached.isEmpty {
-                    let limit = min(cached.count, promptTokens.count)
-                    while commonPrefixLen < limit && cached[commonPrefixLen] == promptTokens[commonPrefixLen] {
-                        commonPrefixLen += 1
-                    }
-                }
-
-                if commonPrefixLen > 0 {
-                    // Trim KV cache entries after the common prefix
-                    let memory = llama_get_memory(job.context)
-                    let removed = llama_memory_seq_rm(memory, 0, Int32(commonPrefixLen), -1)
-
-                    if removed {
-                        let newTokens = Array(promptTokens[commonPrefixLen...])
-                        if !newTokens.isEmpty {
-                            try Self.decodeFromPosition(tokens: newTokens, startPosition: Int32(commonPrefixLen), context: job.context)
-                        }
-
-                        AppDiagnostics.shared.record(
-                            "KV cache reused",
-                            category: "generation",
-                            metadata: [
-                                "cachedTokens": cached.count,
-                                "commonPrefix": commonPrefixLen,
-                                "newTokensDecoded": promptTokens.count - commonPrefixLen
-                            ]
-                        )
-                    } else {
-                        // Partial removal failed, fall back to full rebuild
-                        Self.resetContextMemory(job.context)
-                        try Self.decode(tokens: promptTokens, context: job.context)
-                    }
-                } else {
-                    // Full rebuild: no usable cached prefix
-                    Self.resetContextMemory(job.context)
-                    try Self.decode(tokens: promptTokens, context: job.context)
-                }
-
-                allPromptTokens = promptTokens
-                nextPosition = Int32(promptTokens.count)
-            } else {
-                // Multimodal path: always do full rebuild (image embeddings can't be prefix-matched)
-                Self.resetContextMemory(job.context)
-                service.withLock { service.cachedPromptTokens = [] }
-                guard let multimodalRuntime = job.multimodalRuntime else {
-                    throw LLMServiceError.multimodalRuntimeUnavailable
-                }
-
-                var tokenCount = Int32(0)
-                var positionCount = Int32(0)
-                var evaluatedPosition = Int32(0)
-                let promptImages = job.formattedPrompt.images.map {
-                    YemmaPromptImageInput(identifier: $0.id, filePath: $0.filePath)
-                }
-
-                try multimodalRuntime.evaluatePrompt(
-                    job.formattedPrompt.text,
-                    images: promptImages,
-                    context: UnsafeMutableRawPointer(job.context),
-                    promptPositionLimit: Int32(promptPositionLimit),
-                    promptTokenCount: &tokenCount,
-                    promptPositionCount: &positionCount,
-                    nPast: 0,
-                    nBatch: Int32(llama_n_batch(job.context)),
-                    newNPast: &evaluatedPosition
-                )
-
-                promptTokenCount = Int(tokenCount)
-                promptPositionCount = Int(positionCount)
-                nextPosition = evaluatedPosition
-            }
-
-            AppDiagnostics.shared.record(
-                "Prompt tokenized",
-                category: "generation",
-                metadata: [
-                    "promptTokens": promptTokenCount,
-                    "promptPositions": promptPositionCount,
-                    "contextLimit": contextLimit,
-                    "promptPositionLimit": promptPositionLimit,
-                    "promptImages": job.formattedPrompt.images.count
-                ]
-            )
-            var emittedTokenCount = 0
-            var generatedTokens: [llama_token] = []
-
-            while !Task.isCancelled {
-                guard emittedTokenCount < job.maxGeneratedTokens else {
-                    break
-                }
-                guard nextPosition < Int32(contextLimit) else {
-                    break
-                }
-
-                let nextToken = llama_sampler_sample(sampler, job.context, -1)
-
-                if llama_vocab_is_eog(job.vocab, nextToken) {
-                    break
-                }
-
-                llama_sampler_accept(sampler, nextToken)
-                generatedTokens.append(nextToken)
-
-                let piece = try Self.tokenText(for: nextToken, vocab: job.vocab)
-                if !piece.isEmpty {
-                    job.continuation.yield(piece)
-                }
-
-                try Self.decodeSingleToken(
-                    token: nextToken,
-                    position: nextPosition,
-                    context: job.context
-                )
-                nextPosition += 1
-                emittedTokenCount += 1
-                if nextPosition >= Int32(contextLimit) {
-                    break
-                }
-            }
-
-            // Update the cached prefix for next generation's KV cache reuse.
-            // Only cache for text-only prompts; multimodal prompts clear the cache above.
-            if !allPromptTokens.isEmpty && !Task.isCancelled {
-                let fullSequence = allPromptTokens + generatedTokens
-                service.withLock { service.cachedPromptTokens = fullSequence }
-            } else if Task.isCancelled {
-                // KV cache may be in a partial state after cancellation
-                service.withLock { service.cachedPromptTokens = [] }
-            }
-
-            let generationDuration = Date().timeIntervalSince(generationStartTime)
-            let tokensPerSec = generationDuration > 0
-                ? Double(emittedTokenCount) / generationDuration
-                : 0
-            let contextFillPercent = contextLimit > 0
-                ? Double(nextPosition) / Double(contextLimit) * 100
-                : 0
-
-            AppDiagnostics.shared.record(
-                "Generation finished",
-                category: "generation",
-                metadata: [
-                    "emittedTokens": emittedTokenCount,
-                    "finalPosition": nextPosition,
-                    "contextLimit": contextLimit,
-                    "tokensPerSec": String(format: "%.1f", tokensPerSec),
-                    "contextFillPercent": String(format: "%.1f", contextFillPercent),
-                    "thermalState": thermalStateLabel()
-                ]
-            )
-        } catch {
-            // Invalidate cache on error -- KV cache state may be inconsistent
-            service.withLock { service.cachedPromptTokens = [] }
-            if !Task.isCancelled {
-                AppDiagnostics.shared.record(
-                    "Generation failed",
-                    category: "generation",
-                    metadata: ["error": error.localizedDescription]
-                )
-                await service.setLastError(error.localizedDescription)
-            }
-        }
-
-        await service.finishGeneration()
-        job.continuation.finish()
-    }
-
-    func finishGeneration() async {
-        withLock {
-            generationTask = nil
-            generationGroup = nil
-        }
-
-        await MainActor.run {
-            isGenerating = false
-        }
-    }
-
-    func setLastError(_ message: String) async {
-        await MainActor.run {
-            lastError = message
-            isGenerating = false
-        }
-        AppDiagnostics.shared.record("Service error recorded", category: "generation", metadata: ["error": message])
-    }
-
-    func setModelLoadStage(_ stage: ModelLoadStage) async {
-        await MainActor.run {
-            modelLoadStage = stage
-        }
-    }
-
-    func publishLoadFailure(_ error: Error) async {
-        let currentState = withLock {
-            (
-                hasTextModel: model != nil && context != nil && vocab != nil,
-                hasVisionRuntime: multimodalRuntime != nil
-            )
-        }
-
-        await MainActor.run {
-            lastError = error.localizedDescription
-            isModelLoaded = currentState.hasTextModel
-            isVisionReady = currentState.hasVisionRuntime
-            isVisionLoading = false
-            modelLoadStage = currentState.hasTextModel ? .ready : .failed
-            isModelLoading = false
-        }
-    }
-
-}
-
-// MARK: - Model lifecycle (internal)
-
-extension LLMService {
-    /// Sets loading state immediately so the UI can reflect "preparing"
-    /// before the heavy model load begins. Call from ContentView before
-    /// yielding to the render loop.
-    @MainActor
-    func signalLoadingIntent() {
-        guard !isModelLoading else { return }
-        isModelLoading = true
-        isVisionLoading = false
-        modelLoadStage = .preparingRuntime
-        lastError = nil
-    }
-
-    /// Unloads the model from memory and resets load state.
-    /// Safe to call even when no model is loaded.
-    func unloadModel() async {
-        await stopGeneration()
-        freeLoadedModel()
-        await MainActor.run {
-            isModelLoading = false
-            isVisionReady = false
-            isVisionLoading = false
-            modelLoadStage = .idle
-            lastError = nil
-        }
-        AppDiagnostics.shared.record("Model unloaded", category: "model")
-    }
-}
-
-private extension LLMService {
-    func freeLoadedModel() {
-        let resources = withLock {
-            let current = (
-                model: model,
-                context: context,
-                multimodalRuntime: multimodalRuntime,
-                visionTask: visionPreparationTask
-            )
-            model = nil
-            context = nil
-            vocab = nil
-            multimodalRuntime = nil
-            loadedModelPath = nil
-            loadedMMProjPath = nil
-            visionPreparationTask = nil
-            visionPreparationID = 0
-            isModelLoaded = false
-            isVisionReady = false
-            isVisionLoading = false
-            cachedPromptTokens = []
-            return current
-        }
-
-        Self.releaseResources(
-            model: resources.model,
-            context: resources.context,
-            multimodalRuntime: resources.multimodalRuntime,
-            visionTask: resources.visionTask,
-            reason: "model_unload"
-        )
-    }
-
-    static func freeResources(
-        model: OpaquePointer?,
-        context: OpaquePointer?,
-        multimodalRuntime: YemmaMultimodalRuntime?
-    ) {
-        _ = multimodalRuntime
-
-        if let context {
-            llama_free(context)
-        }
-
-        if let model {
-            llama_model_free(model)
-        }
-    }
-
-    static func releaseResources(
-        model: OpaquePointer?,
-        context: OpaquePointer?,
-        multimodalRuntime: YemmaMultimodalRuntime?,
-        visionTask: Task<YemmaMultimodalRuntime, Error>?,
-        reason: String
-    ) {
-        guard let visionTask else {
-            freeResources(model: model, context: context, multimodalRuntime: multimodalRuntime)
-            return
-        }
-
-        visionTask.cancel()
-        AppDiagnostics.shared.record(
-            "Deferring resource cleanup until vision task settles",
-            category: "model",
-            metadata: ["reason": reason]
-        )
-
-        Task.detached(priority: .utility) {
-            _ = await visionTask.result
-            freeResources(model: model, context: context, multimodalRuntime: multimodalRuntime)
-            AppDiagnostics.shared.record(
-                "Deferred resource cleanup finished",
-                category: "model",
-                metadata: ["reason": reason]
-            )
-        }
-    }
-
-    func withLock<T>(_ body: () throws -> T) rethrows -> T {
-        stateLock.lock()
-        defer { stateLock.unlock() }
-        return try body()
-    }
-
-    func takeGenerationHandles() -> (task: Task<Void, Never>?, group: DispatchGroup?) {
-        withLock {
-            let pair = (task: generationTask, group: generationGroup)
-            generationTask = nil
-            generationGroup = nil
-            return pair
-        }
-    }
-
-    func prepareGenerationResources(requiresVision: Bool) async throws -> GenerationResources {
-        if requiresVision {
-            try await ensureVisionRuntimeLoaded()
-        }
-
-        let resources = try withLock { () throws -> GenerationResources in
-            guard
-                isModelLoaded,
-                let model,
-                let context,
-                let vocab
-            else {
-                throw LLMServiceError.modelNotLoaded
-            }
-
-            return GenerationResources(
-                model: model,
-                context: context,
-                vocab: vocab,
-                multimodalRuntime: multimodalRuntime
-            )
-        }
-
-        if requiresVision, resources.multimodalRuntime == nil {
-            throw LLMServiceError.multimodalRuntimeUnavailable
-        }
-
-        return resources
-    }
-
-    func ensureVisionRuntimeLoaded() async throws {
-        enum VisionLoadWork {
-            case alreadyReady
-            case prepare(
-                task: Task<YemmaMultimodalRuntime, Error>,
-                taskID: UInt64,
-                model: OpaquePointer,
-                mmprojPath: String,
-                startedNow: Bool
-            )
-            case unavailable
-        }
-
-        let work = withLock { () -> VisionLoadWork in
-            if multimodalRuntime != nil {
-                return .alreadyReady
-            }
-
-            guard let model, let mmprojPath = loadedMMProjPath else {
-                return .unavailable
-            }
-
-            if let visionPreparationTask {
-                return .prepare(
-                    task: visionPreparationTask,
-                    taskID: visionPreparationID,
-                    model: model,
-                    mmprojPath: mmprojPath,
-                    startedNow: false
-                )
-            }
-
-            visionPreparationID &+= 1
-            let taskID = visionPreparationID
-            let task = Task.detached(priority: .utility) {
-                let loadStart = Date()
-                let runtime = try YemmaMultimodalRuntime(
-                    mmProjPath: mmprojPath,
-                    model: UnsafeMutableRawPointer(model)
-                )
-                let loadMs = Int(Date().timeIntervalSince(loadStart) * 1000)
-                AppDiagnostics.shared.record(
-                    "Vision runtime prepared",
-                    category: "model",
-                    metadata: [
-                        "mmprojPath": mmprojPath,
-                        "loadMs": loadMs
-                    ]
-                )
-                return runtime
-            }
-            visionPreparationTask = task
-            return .prepare(
-                task: task,
-                taskID: taskID,
-                model: model,
-                mmprojPath: mmprojPath,
-                startedNow: true
-            )
-        }
-
-        switch work {
-        case .alreadyReady:
-            return
-        case .unavailable:
-            throw LLMServiceError.multimodalRuntimeUnavailable
-        case let .prepare(task, taskID, model, mmprojPath, startedNow):
-            if startedNow {
-                await MainActor.run {
-                    isVisionLoading = true
-                    lastError = nil
-                }
-                AppDiagnostics.shared.record(
-                    "Preparing vision runtime",
-                    category: "model",
-                    metadata: [
-                        "mmprojPath": mmprojPath,
-                        "modelPath": loadedModelPath ?? "unknown"
-                    ]
-                )
-            }
-
-            do {
-                let runtime = try await task.value
-                let didStoreRuntime = withLock {
-                    if visionPreparationID == taskID {
-                        visionPreparationTask = nil
-                        if multimodalRuntime == nil, self.model == model, loadedMMProjPath == mmprojPath {
-                            multimodalRuntime = runtime
-                        }
-                    }
-                    return multimodalRuntime != nil
-                }
-
-                await MainActor.run {
-                    isVisionLoading = false
-                    isVisionReady = didStoreRuntime
-                    if didStoreRuntime {
-                        lastError = nil
-                    }
-                }
-            } catch {
-                withLock {
-                    if visionPreparationID == taskID {
-                        visionPreparationTask = nil
-                    }
-                }
-
-                await MainActor.run {
-                    isVisionLoading = false
-                    isVisionReady = multimodalRuntime != nil
-                    lastError = error.localizedDescription
-                }
-
-                AppDiagnostics.shared.record(
-                    "Vision runtime preparation failed",
-                    category: "model",
-                    metadata: [
-                        "mmprojPath": mmprojPath,
-                        "error": error.localizedDescription
-                    ]
-                )
-                throw error
-            }
-        }
-    }
-
-    static func waitForGroup(_ group: DispatchGroup) async {
-        await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                group.wait()
-                continuation.resume()
-            }
-        }
-    }
-
-    static func formatPrompt(
-        prompt: PromptMessageInput,
-        history: [PromptMessageInput],
-        model: OpaquePointer
-    ) -> FormattedPrompt {
-        let conversation = history + [prompt]
-        let serializedConversation = conversation.map {
-            (
-                role: $0.role,
-                content: serializedContent(for: $0)
-            )
-        }
-        let images = conversation.flatMap(\.images)
-
-        if let templatedPrompt = tryApplyChatTemplate(conversation: serializedConversation, model: model) {
-            return FormattedPrompt(text: templatedPrompt, images: images)
-        }
-
-        if let gemmaPrompt = tryApplyGemma4Template(conversation: conversation, model: model) {
-            return gemmaPrompt
-        }
-
-        var pieces = ["<bos>"]
-        pieces.reserveCapacity((serializedConversation.count * 2) + 2)
-
-        for message in serializedConversation {
-            let role = serializedRole(message.role)
-            pieces.append("<|turn>\(role)\n\(message.content)<turn|>\n")
-        }
-
-        pieces.append("<|turn>model\n")
-        return FormattedPrompt(text: pieces.joined(), images: images)
-    }
-
-    static func serializedContent(for message: PromptMessageInput) -> String {
-        let baseText = templateRole(message.role) == "assistant"
-            ? stripThinkingBlocks(from: message.text)
-            : message.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let markerSection = Array(
-            repeating: mediaPromptMarker,
-            count: message.images.count
-        )
-        .joined(separator: "\n")
-
-        switch (markerSection.isEmpty, baseText.isEmpty) {
-        case (true, _):
-            return baseText
-        case (false, true):
-            return markerSection
-        case (false, false):
-            return markerSection + "\n" + baseText
-        }
-    }
-
-    static func tryApplyChatTemplate(
-        conversation: [(role: String, content: String)],
-        model: OpaquePointer
-    ) -> String? {
-        guard let templatePointer = llama_model_chat_template(model, nil) else {
-            AppDiagnostics.shared.record(
-                "Model chat template unavailable",
-                category: "generation"
-            )
-            return nil
-        }
-
-        var rolePointers: [UnsafeMutablePointer<CChar>?] = []
-        var contentPointers: [UnsafeMutablePointer<CChar>?] = []
-        var messages: [llama_chat_message] = []
-        rolePointers.reserveCapacity(conversation.count)
-        contentPointers.reserveCapacity(conversation.count)
-        messages.reserveCapacity(conversation.count)
-
-        for message in conversation {
-            let role = strdup(templateRole(message.role))
-            let content = strdup(message.content)
-
-            rolePointers.append(role)
-            contentPointers.append(content)
-            messages.append(
-                llama_chat_message(
-                    role: UnsafePointer(role),
-                    content: UnsafePointer(content)
-                )
-            )
-        }
-
-        defer {
-            rolePointers.forEach { free($0) }
-            contentPointers.forEach { free($0) }
-        }
-
-        var capacity = max(
-            512,
-            (conversation.reduce(into: 0) { partialResult, message in
-                partialResult += message.role.utf8.count + message.content.utf8.count
-            } * 2) + 128
-        )
-
-        while true {
-            var buffer = [CChar](repeating: 0, count: capacity)
-            let length = llama_chat_apply_template(
-                templatePointer,
-                messages,
-                messages.count,
-                true,
-                &buffer,
-                Int32(buffer.count)
-            )
-
-            if length < 0 {
-                AppDiagnostics.shared.record(
-                    "Chat template application failed",
-                    category: "generation",
-                    metadata: ["messageCount": conversation.count]
-                )
-                return nil
-            }
-
-            if Int(length) < buffer.count {
-                let prompt = String(cString: buffer)
-                AppDiagnostics.shared.record(
-                    "Applied model chat template",
-                    category: "generation",
-                    metadata: [
-                        "messageCount": conversation.count,
-                        "formattedChars": prompt.count
-                    ]
-                )
-                return prompt
-            }
-
-            capacity = Int(length) + 1
-        }
-    }
-
-    static func isGemma4Template(_ template: String) -> Bool {
-        template.contains("<start_of_turn>") && template.contains("<end_of_turn>")
-    }
-
-    static func tryApplyGemma4Template(
-        conversation: [PromptMessageInput],
-        model: OpaquePointer
-    ) -> FormattedPrompt? {
-        guard let templatePointer = llama_model_chat_template(model, nil) else {
-            return nil
-        }
-
-        let template = String(cString: templatePointer)
-        guard isGemma4Template(template) else {
-            return nil
-        }
-
-        var pieces: [String] = []
-        pieces.reserveCapacity((conversation.count * 2) + 2)
-
-        for message in conversation {
-            let role = gemmaRole(message.role)
-            let content = serializedContent(for: message)
-            pieces.append("<start_of_turn>\(role)\n\(content)<end_of_turn>\n")
-        }
-
-        pieces.append("<start_of_turn>model\n")
-        let prompt = pieces.joined()
-        let images = conversation.flatMap(\.images)
-
-        AppDiagnostics.shared.record(
-            "Applied Gemma 4 chat template manually",
-            category: "generation",
-            metadata: [
-                "messageCount": conversation.count,
-                "formattedChars": prompt.count
-            ]
-        )
-
-        return FormattedPrompt(text: prompt, images: images)
-    }
-
-    static func gemmaRole(_ role: String) -> String {
-        let lowercased = role.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        switch lowercased {
-        case "assistant", "model":
-            return "model"
-        case "system", "developer":
-            return "user"
-        default:
-            return "user"
-        }
-    }
-
-    static func resetContextMemory(_ context: OpaquePointer) {
-        let memory = llama_get_memory(context)
-        llama_memory_clear(memory, true)
-    }
-
-    static func templateRole(_ role: String) -> String {
-        let lowercased = role.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        switch lowercased {
-        case "assistant", "model":
-            return "model"
-        case "system", "developer":
-            return "system"
-        default:
-            return "user"
-        }
-    }
-
-    static func serializedRole(_ role: String) -> String {
-        let lowercased = role.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        switch lowercased {
-        case "assistant", "model":
-            return "model"
-        case "system", "developer":
-            return "system"
-        default:
-            return "user"
-        }
-    }
-
-    static func stripThinkingBlocks(from text: String) -> String {
-        guard text.contains("<|channel>") else {
-            return text.trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-
-        var cleaned = text
-
-        while let startRange = cleaned.range(of: "<|channel>") {
-            if let endRange = cleaned.range(of: "<channel|>", range: startRange.upperBound..<cleaned.endIndex) {
-                cleaned.removeSubrange(startRange.lowerBound..<endRange.upperBound)
-            } else {
-                cleaned.removeSubrange(startRange.lowerBound..<cleaned.endIndex)
-                break
-            }
-        }
-
-        return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    static func makeSampler(config: SamplerConfig) throws -> UnsafeMutablePointer<llama_sampler> {
-        let params = llama_sampler_chain_default_params()
-
-        guard let sampler = llama_sampler_chain_init(params) else {
-            throw LLMServiceError.samplerCreationFailed
-        }
-
-        guard let topK = llama_sampler_init_top_k(config.topK) else {
-            llama_sampler_free(sampler)
-            throw LLMServiceError.samplerCreationFailed
-        }
-        llama_sampler_chain_add(sampler, topK)
-
-        guard let topP = llama_sampler_init_top_p(config.topP, 1) else {
-            llama_sampler_free(sampler)
-            throw LLMServiceError.samplerCreationFailed
-        }
-        llama_sampler_chain_add(sampler, topP)
-
-        guard let minP = llama_sampler_init_min_p(config.minP, 1) else {
-            llama_sampler_free(sampler)
-            throw LLMServiceError.samplerCreationFailed
-        }
-        llama_sampler_chain_add(sampler, minP)
-
-        guard let temp = llama_sampler_init_temp(Float(config.temperature)) else {
-            llama_sampler_free(sampler)
-            throw LLMServiceError.samplerCreationFailed
-        }
-        llama_sampler_chain_add(sampler, temp)
-
-        guard let dist = llama_sampler_init_dist(UInt32.random(in: UInt32.min...UInt32.max)) else {
-            llama_sampler_free(sampler)
-            throw LLMServiceError.samplerCreationFailed
-        }
-        llama_sampler_chain_add(sampler, dist)
-
-        return sampler
-    }
-
-    static func samplerConfig(for model: OpaquePointer) -> SamplerConfig {
-        var config = SamplerConfig.defaults
-
-        if let topK = modelMetadataValue(forKey: "general.sampling.top_k", model: model).flatMap(Int32.init) {
-            config.topK = max(1, topK)
-        }
-
-        if let topP = modelMetadataValue(forKey: "general.sampling.top_p", model: model).flatMap(Float.init) {
-            config.topP = min(max(topP, 0), 1)
-        }
-
-        if let temperature = modelMetadataValue(forKey: "general.sampling.temp", model: model).flatMap(Double.init) {
-            config.temperature = max(0, temperature)
-        }
-
-        AppDiagnostics.shared.record(
-            "Loaded sampler defaults from model metadata",
-            category: "model",
-            metadata: [
-                "topK": config.topK,
-                "topP": config.topP,
-                "temperature": config.temperature
-            ]
-        )
-
-        return config
-    }
-
-    static func modelMetadataValue(forKey key: String, model: OpaquePointer) -> String? {
-        var capacity = 128
-
-        while true {
-            var buffer = [CChar](repeating: 0, count: capacity)
-            let length = key.withCString { keyCString in
-                llama_model_meta_val_str(model, keyCString, &buffer, buffer.count)
-            }
-
-            if length < 0 {
-                return nil
-            }
-
-            if length < capacity {
-                return String(cString: buffer)
-            }
-
-            capacity = Int(length) + 1
-        }
-    }
-
-    static func tokenize(
-        _ text: String,
-        vocab: OpaquePointer
-    ) throws -> [llama_token] {
-        var capacity = max(256, text.utf8.count + 32)
-
-        while true {
-            var tokens = [llama_token](repeating: 0, count: capacity)
-            let tokenCount = text.withCString { cString in
-                llama_tokenize(
-                    vocab,
-                    cString,
-                    Int32(text.utf8.count),
-                    &tokens,
-                    Int32(tokens.count),
-                    true,
-                    true
-                )
-            }
-
-            if tokenCount >= 0 {
-                return Array(tokens.prefix(Int(tokenCount)))
-            }
-
-            capacity = max(capacity * 2, Int(-tokenCount) + 8)
-            if capacity > 1_000_000 {
-                throw LLMServiceError.tokenizationFailed
-            }
-        }
-    }
-
-    static func decode(tokens: [llama_token], context: OpaquePointer) throws {
-        try decodeFromPosition(tokens: tokens, startPosition: 0, context: context)
-    }
-
-    /// Decodes tokens into the context starting at the given KV cache position.
-    static func decodeFromPosition(tokens: [llama_token], startPosition: Int32, context: OpaquePointer) throws {
-        guard !tokens.isEmpty else {
-            return
-        }
-
-        let batchLimit = max(1, Int(llama_n_batch(context)))
-        let totalTokens = tokens.count
-        var startIndex = 0
-
-        while startIndex < totalTokens {
-            let endIndex = min(startIndex + batchLimit, totalTokens)
-            let batchTokens = endIndex - startIndex
-            var batch = llama_batch_init(Int32(batchTokens), 0, 1)
-            defer { llama_batch_free(batch) }
-
-            batch.n_tokens = Int32(batchTokens)
-
-            for batchIndex in 0..<batchTokens {
-                let globalIndex = startIndex + batchIndex
-                batch.token[batchIndex] = tokens[globalIndex]
-                batch.pos[batchIndex] = startPosition + Int32(globalIndex)
-                batch.n_seq_id[batchIndex] = 1
-
-                if let seqIds = batch.seq_id, let seqId = seqIds[batchIndex] {
-                    seqId[0] = 0
-                }
-
-                // Only compute logits for the very last token of the entire sequence
-                batch.logits[batchIndex] = (globalIndex == totalTokens - 1) ? 1 : 0
-            }
-
-            let status = llama_decode(context, batch)
-            guard status == 0 else {
-                throw LLMServiceError.decodeFailed(status: status)
-            }
-
-            startIndex = endIndex
-        }
-    }
-
-    static func decodeSingleToken(
-        token: llama_token,
-        position: Int32,
-        context: OpaquePointer
-    ) throws {
-        var batch = llama_batch_init(1, 0, 1)
-        defer { llama_batch_free(batch) }
-
-        batch.n_tokens = 1
-        batch.token[0] = token
-        batch.pos[0] = position
-        batch.n_seq_id[0] = 1
-
-        if let seqIds = batch.seq_id, let seqId = seqIds[0] {
-            seqId[0] = 0
-        }
-
-        batch.logits[0] = 1
-
-        let status = llama_decode(context, batch)
-        guard status == 0 else {
-            throw LLMServiceError.decodeFailed(status: status)
-        }
-    }
-
-    static func tokenText(
-        for token: llama_token,
-        vocab: OpaquePointer
-    ) throws -> String {
-        var capacity = 64
-
-        while true {
-            var buffer = [CChar](repeating: 0, count: capacity)
-            let length = llama_token_to_piece(vocab, token, &buffer, Int32(buffer.count), 0, false)
-
-            if length >= 0 {
-                let bytes = buffer.prefix(Int(length)).map { UInt8(bitPattern: $0) }
-                return String(decoding: bytes, as: UTF8.self)
-            }
-
-            capacity = max(capacity * 2, Int(-length) + 1)
-            if capacity > 8_192 {
-                throw LLMServiceError.tokenConversionFailed
-            }
+        } catch Tokenizers.TokenizerError.missingChatTemplate {
+            throw MLXLMCommon.TokenizerError.missingChatTemplate
         }
     }
 }

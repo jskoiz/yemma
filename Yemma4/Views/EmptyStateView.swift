@@ -35,6 +35,11 @@ struct EmptyStateView: View {
     let isModelLoading: Bool
     let supportsLocalModelRuntime: Bool
     let modelLoadStageText: String
+    var statusDetailText: String?
+    var statusProgress: Double?
+    var statusIsFailure: Bool = false
+    var primarySetupActionTitle: String?
+    var onPrimarySetupAction: (() -> Void)?
     var starters: [ChatStarter] = []
     var onSelectStarter: (ChatStarter) -> Void = { _ in }
 
@@ -75,13 +80,38 @@ struct EmptyStateView: View {
     }
 
     private var statusBanner: some View {
-        HStack(spacing: 10) {
-            Image(systemName: supportsLocalModelRuntime ? "bolt.circle.fill" : "desktopcomputer")
-                .font(.system(size: 14, weight: .semibold))
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Image(systemName: statusSystemImage)
+                    .font(.system(size: 14, weight: .semibold))
 
-            Text(statusText)
-                .font(AppTheme.Typography.utilityCaption)
-                .fixedSize(horizontal: false, vertical: true)
+                Text(statusText)
+                    .font(AppTheme.Typography.utilityCaption)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if let statusDetailText {
+                Text(statusDetailText)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if let statusProgress {
+                ProgressView(value: min(max(statusProgress, 0), 1))
+                    .tint(statusTextColor)
+            }
+
+            if let primarySetupActionTitle, let onPrimarySetupAction {
+                Button(primarySetupActionTitle, action: onPrimarySetupAction)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(AppTheme.accentForeground)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(AppTheme.accent)
+                    .clipShape(Capsule())
+                    .buttonStyle(.plain)
+            }
         }
         .foregroundStyle(statusTextColor)
         .padding(.horizontal, 12)
@@ -128,19 +158,31 @@ struct EmptyStateView: View {
             return "Simulator mode with mock replies."
         }
 
-        if isModelLoading {
-            return modelLoadStageText
+        return modelLoadStageText
+    }
+
+    private var statusSystemImage: String {
+        if !supportsLocalModelRuntime {
+            return "desktopcomputer"
         }
 
-        return "Preparing your local on-device model. Prompts stay on this device."
+        return statusIsFailure ? "exclamationmark.triangle.fill" : "bolt.circle.fill"
     }
 
     private var statusTextColor: Color {
-        supportsLocalModelRuntime ? AppTheme.accent : AppTheme.textPrimary
+        if !supportsLocalModelRuntime {
+            return AppTheme.textPrimary
+        }
+
+        return statusIsFailure ? AppTheme.destructive : AppTheme.accent
     }
 
     private var statusBackground: Color {
-        supportsLocalModelRuntime ? AppTheme.accentSoft : AppTheme.controlFill
+        if !supportsLocalModelRuntime {
+            return AppTheme.controlFill
+        }
+
+        return statusIsFailure ? AppTheme.destructive.opacity(0.12) : AppTheme.accentSoft
     }
 }
 
@@ -153,6 +195,7 @@ struct EmptyStateView: View {
             isModelLoading: true,
             supportsLocalModelRuntime: true,
             modelLoadStageText: ModelLoadStage.loadingModel.statusText,
+            statusDetailText: "Finishing the local engine setup.",
             starters: ChatStarter.defaults
         )
         .padding(.horizontal, 16)
@@ -195,6 +238,7 @@ struct EmptyStateView: View {
             isModelLoading: true,
             supportsLocalModelRuntime: true,
             modelLoadStageText: ModelLoadStage.loadingModel.statusText,
+            statusDetailText: "Finishing the local engine setup.",
             starters: ChatStarter.defaults
         )
         .padding(.horizontal, 16)
