@@ -2,6 +2,13 @@ import Observation
 import SwiftUI
 
 struct AppBackground: View {
+    enum Atmosphere {
+        case none
+        case full
+    }
+
+    var atmosphere: Atmosphere = .full
+
     var body: some View {
         ZStack {
             LinearGradient(
@@ -10,17 +17,19 @@ struct AppBackground: View {
                 endPoint: .bottomTrailing
             )
 
-            Circle()
-                .fill(AppTheme.coolGlow)
-                .frame(width: 360, height: 360)
-                .blur(radius: 70)
-                .offset(x: -120, y: -240)
+            if atmosphere == .full {
+                Circle()
+                    .fill(AppTheme.coolGlow)
+                    .frame(width: 360, height: 360)
+                    .blur(radius: 70)
+                    .offset(x: -120, y: -240)
 
-            Circle()
-                .fill(AppTheme.warmGlow)
-                .frame(width: 300, height: 300)
-                .blur(radius: 70)
-                .offset(x: 150, y: -150)
+                Circle()
+                    .fill(AppTheme.warmGlow)
+                    .frame(width: 300, height: 300)
+                    .blur(radius: 70)
+                    .offset(x: 150, y: -150)
+            }
 
             LinearGradient(
                 colors: [
@@ -74,51 +83,28 @@ struct PillButtonStyle: ButtonStyle {
 }
 
 public struct ContentView: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(ModelDownloader.self) private var modelDownloader
     @Environment(LLMService.self) private var llmService
 
     private let supportsLocalModelRuntime = Yemma4AppConfiguration.supportsLocalModelRuntime
+    private let forceOnboardingOnSimulator = Yemma4DebugOptions.forceOnboardingOnSimulator
     @State private var modelLoadError: String?
     @State private var loadedModelSignature: String?
-    @State private var hasValidatedLocalModel = false
+    @State private var launchValidatedModelPath: String?
     @State private var isShowingOnboardingPreview = false
     @State private var didRecordShellVisible = false
     @State private var didRecordTextReady = false
     @State private var didRecordVisionReady = false
+    @State private var smokeAutomation = Gemma4SmokeAutomation()
 
     public init() {}
 
     public var body: some View {
-        ZStack {
-            if shouldShowChat {
-                ChatView(
-                    onShowOnboarding: {
-                        isShowingOnboardingPreview = true
-                    }
-                )
-                    .transition(
-                        reduceMotion
-                            ? .opacity
-                            : .opacity.combined(with: .move(edge: .trailing))
-                    )
-            } else {
-                OnboardingView(
-                    onContinue: canContinueFromOnboarding ? {
-                        isShowingOnboardingPreview = false
-                    } : nil,
-                    onRetryModelLoad: modelDownloader.isDownloaded ? {
-                        Task { await loadModelIfNeeded(force: true) }
-                    } : nil
-                )
-                    .transition(
-                        reduceMotion
-                            ? .opacity
-                            : .opacity.combined(with: .move(edge: .leading))
-                    )
-            }
-        }
+        currentRootScreen
         .onAppear {
+            if launchValidatedModelPath == nil {
+                launchValidatedModelPath = modelDownloader.modelPath
+            }
             AppDiagnostics.shared.record(
                 "startup: view_appeared",
                 category: "startup",
@@ -127,12 +113,30 @@ public struct ContentView: View {
             recordStartupMilestonesIfNeeded()
         }
         .task {
-            guard !hasValidatedLocalModel else { return }
-            hasValidatedLocalModel = true
-            await Task.yield()
-            await modelDownloader.validateDownloadedModel()
+            AppDiagnostics.shared.record(
+                "startup: launch_validation_deferred",
+                category: "startup",
+                metadata: [
+                    "cachedModelPath": modelDownloader.modelPath ?? "nil",
+                    "elapsedMs": StartupTiming.elapsedMs()
+                ]
+            )
         }
-        .task(id: "\(modelDownloader.modelPath ?? "")|\(modelDownloader.mmprojPath ?? "")") {
+        .task(id: modelDownloader.modelPath ?? "") {
+            guard let modelPath = modelDownloader.modelPath else { return }
+            await Task.yield()
+            guard !Task.isCancelled else { return }
+            guard modelPath != launchValidatedModelPath else { return }
+            guard !llmService.isTextModelReady && !llmService.isModelLoading else {
+                await loadModelIfNeeded()
+                return
+            }
+
+            if supportsLocalModelRuntime, modelDownloader.isDownloaded {
+                // Let the shell become interactive before the heavy local warmup starts.
+                try? await Task.sleep(for: .seconds(1.5))
+            }
+            guard !Task.isCancelled else { return }
             await loadModelIfNeeded()
         }
         .onChange(of: shouldShowChat) { _, _ in
@@ -144,10 +148,6 @@ public struct ContentView: View {
         .onChange(of: llmService.isVisionReady) { _, _ in
             recordStartupMilestonesIfNeeded()
         }
-        .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: modelDownloader.isDownloaded)
-        .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: llmService.isModelLoaded)
-        .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: llmService.isModelLoading)
-        .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: isShowingOnboardingPreview)
         .alert(
             "Unable to Load Model",
             isPresented: Binding(
@@ -166,16 +166,57 @@ public struct ContentView: View {
         }
     }
 
+    @ViewBuilder
+    private var currentRootScreen: some View {
+        if shouldShowChat {
+            ChatView(
+                onShowOnboarding: {
+                    isShowingOnboardingPreview = true
+                },
+                onRetryModelLoad: modelDownloader.isDownloaded ? {
+                    Task { await loadModelIfNeeded(force: true) }
+                } : nil
+            )
+        } else {
+            OnboardingView(
+                supportsLocalModelRuntime: supportsLocalSetupExperience,
+                onContinue: canContinueFromOnboarding ? {
+                    isShowingOnboardingPreview = false
+                } : nil,
+                onRetryModelLoad: modelDownloader.isDownloaded ? {
+                    Task { await loadModelIfNeeded(force: true) }
+                } : nil
+            )
+        }
+    }
+
     private var shouldShowChat: Bool {
-        !isShowingOnboardingPreview && (hasWarmShell || !supportsLocalModelRuntime)
+        guard !forceOnboardingOnSimulator else { return false }
+        return !isShowingOnboardingPreview && (canOpenChatShell || !supportsLocalModelRuntime)
     }
 
     private var canContinueFromOnboarding: Bool {
-        hasWarmShell || !supportsLocalModelRuntime
+        guard !forceOnboardingOnSimulator else { return false }
+        return canOpenChatShell || !supportsLocalModelRuntime
     }
 
-    private var hasWarmShell: Bool {
-        modelDownloader.isDownloaded && !hasModelPreparationError
+    private var supportsLocalSetupExperience: Bool {
+        supportsLocalModelRuntime || forceOnboardingOnSimulator
+    }
+
+    private var canOpenChatShell: Bool {
+        supportsLocalModelRuntime
+            && (
+                modelDownloader.isDownloaded
+                    || llmService.isModelLoading
+                    || llmService.isTextModelReady
+            )
+    }
+
+    private var isSetupComplete: Bool {
+        supportsLocalModelRuntime
+            && modelDownloader.isDownloaded
+            && llmService.isTextModelReady
     }
 
     private var hasModelPreparationError: Bool {
@@ -231,14 +272,11 @@ public struct ContentView: View {
             return
         }
 
-        guard
-            let modelPath = modelDownloader.modelPath,
-            let mmprojPath = modelDownloader.mmprojPath
-        else {
+        guard let modelPath = modelDownloader.modelPath else {
             return
         }
 
-        let signature = "\(modelPath)|\(mmprojPath)"
+        let signature = modelPath
         guard force || loadedModelSignature != signature || (!llmService.isModelLoaded && !llmService.isModelLoading) else { return }
 
         do {
@@ -246,7 +284,7 @@ public struct ContentView: View {
             // before the heavy work begins — prevents the "Download model" flash.
             llmService.signalLoadingIntent()
             await Task.yield()
-            try await llmService.loadModel(from: modelPath, mmprojPath: mmprojPath)
+            try await llmService.loadModel(from: modelPath)
 
             await MainActor.run {
                 loadedModelSignature = signature
@@ -256,6 +294,8 @@ public struct ContentView: View {
             await MainActor.run {
                 recordStartupMilestonesIfNeeded()
             }
+
+            await smokeAutomation.runIfNeeded(llmService: llmService)
         } catch {
             await MainActor.run {
                 loadedModelSignature = nil

@@ -190,6 +190,8 @@ final class ConversationStore {
     private let storageRootOverride: URL?
     // Protects persisted store mutations so file I/O helpers remain safe if they are ever reused off the main actor.
     private let ioLock = NSLock()
+    @ObservationIgnored private var hasLoadedConversationIndex = false
+    @ObservationIgnored private var isLoadingConversationIndex = false
 
     private static let indexFileName = "index.json"
     private static let conversationFileName = "conversation.json"
@@ -203,7 +205,6 @@ final class ConversationStore {
         self.fileManager = fileManager
         self.defaults = defaults
         self.storageRootOverride = storageRootOverride
-        loadIndex()
         if let rawID = defaults.string(forKey: Self.currentConversationDefaultsKey),
            let conversationID = UUID(uuidString: rawID) {
             currentConversationID = conversationID
@@ -266,6 +267,20 @@ final class ConversationStore {
             draftText: conversation.draftText,
             draftAttachments: conversation.draftAttachments
         )
+    }
+
+    func loadConversationAsync(id: UUID) async -> ConversationSnapshot? {
+        let conversationURL = conversationURL(for: id)
+        return await Task.detached(priority: .utility) {
+            ConversationSnapshotLoader.load(from: conversationURL)
+        }.value
+    }
+
+    func loadIndexIfNeeded() async {
+        guard !hasLoadedConversationIndex else { return }
+        guard !isLoadingConversationIndex else { return }
+        isLoadingConversationIndex = true
+        await loadIndexAsync()
     }
 
     @discardableResult
@@ -429,20 +444,26 @@ final class ConversationStore {
         conversationDirectory(for: id).appendingPathComponent(Self.conversationFileName)
     }
 
-    private func loadIndex() {
-        ioLock.lock()
-        defer { ioLock.unlock() }
+    private func loadIndexAsync() async {
+        let decoded = await Task.detached(priority: .utility) { [indexURL] in
+            let decoder = JSONDecoder()
+            guard let data = try? Data(contentsOf: indexURL) else {
+                return [ConversationMetadata]()
+            }
 
-        guard let data = try? Data(contentsOf: indexURL) else {
-            conversations = []
-            return
-        }
+            do {
+                return try decoder.decode([ConversationMetadata].self, from: data)
+            } catch {
+                return [ConversationMetadata]()
+            }
+        }.value
 
-        do {
-            let decoded = try Self.decoder.decode([ConversationMetadata].self, from: data)
+        await MainActor.run {
+            ioLock.lock()
+            defer { ioLock.unlock() }
             conversations = decoded.sorted(by: Self.sortConversations)
-        } catch {
-            conversations = []
+            hasLoadedConversationIndex = true
+            isLoadingConversationIndex = false
         }
     }
 
@@ -589,6 +610,27 @@ final class ConversationStore {
         decoder.dateDecodingStrategy = .iso8601
         return decoder
     }()
+}
+
+private enum ConversationSnapshotLoader {
+    static func load(from conversationURL: URL) -> ConversationSnapshot? {
+        guard let data = try? Data(contentsOf: conversationURL) else {
+            return nil
+        }
+
+        let decoder = JSONDecoder()
+        guard let conversation = try? decoder.decode(PersistedConversation.self, from: data) else {
+            return nil
+        }
+
+        return ConversationSnapshot(
+            id: conversation.id,
+            title: conversation.title,
+            messages: conversation.messages.map { $0.makeMessage() },
+            draftText: conversation.draftText,
+            draftAttachments: conversation.draftAttachments
+        )
+    }
 }
 
 #if DEBUG

@@ -1,28 +1,9 @@
 import Foundation
 import Observation
-import CryptoKit
+@preconcurrency import Hub
 
 public struct LocalModelResources: Sendable {
-    public let modelPath: String
-    public let mmprojPath: String
-}
-
-private enum LocalModelAssetKind: String, Sendable {
-    case model
-    case mmproj
-}
-
-private struct LocalModelAsset: Sendable {
-    let kind: LocalModelAssetKind
-    let downloadURL: URL
-    let fileName: String
-    let resumeDataFileName: String
-    let expectedBytes: Int64
-}
-
-private struct ValidationResult: Sendable {
-    let isDownloaded: Bool
-    let localPath: String?
+    public let modelDirectoryPath: String
 }
 
 @MainActor
@@ -34,939 +15,504 @@ public final class ModelDownloader {
     public var canResumeDownload: Bool = false
     public var error: String?
     public var modelPath: String?
-    public var mmprojPath: String?
     public var estimatedSecondsRemaining: Double?
+    public var currentDownloadSpeedBytesPerSecond: Double?
 
     private var downloadStartDate: Date?
     private var downloadStartProgress: Double = 0
+    private var lastSpeedSampleDate: Date?
+    private var lastSpeedSampleBytes: Int64 = 0
+    private var currentDownloadedBytes: Int64 = 0
+    private var currentEstimatedBytes: Int64 = Gemma4MLXSupport.approximateDownloadBytes
+    private var currentDownloadLocation: URL?
+
+    private let fileManager: FileManager
+    private let defaults: UserDefaults
+    private let makeHub: @Sendable () -> HubApi
+    @ObservationIgnored private var cachedHub: HubApi?
+    @ObservationIgnored private var progressMonitorTask: Task<Void, Never>?
+
+    private static let persistedModelPathKey = "com.avmillabs.yemma4.modelDownloader.modelPath"
+
+    private struct DownloadResolution: Sendable {
+        let location: URL
+        let validation: ValidatedModelDirectory
+        let directorySize: Int64
+    }
+
+    public init(
+        fileManager: FileManager = .default,
+        hubFactory: @escaping @Sendable () -> HubApi = { .shared },
+        defaults: UserDefaults = .standard
+    ) {
+        self.fileManager = fileManager
+        self.defaults = defaults
+        self.makeHub = hubFactory
+        restorePersistedState()
+    }
 
     public var localResources: LocalModelResources? {
-        guard
-            isDownloaded,
-            let modelPath,
-            let mmprojPath
-        else {
+        guard isDownloaded, let modelPath else {
             return nil
         }
 
-        return LocalModelResources(modelPath: modelPath, mmprojPath: mmprojPath)
+        return LocalModelResources(modelDirectoryPath: modelPath)
     }
 
     public var estimatedDownloadBytes: Int64 {
-        Self.totalExpectedBytes
+        max(currentEstimatedBytes, currentDownloadedBytes)
     }
 
-    private static let downloadAssets: [LocalModelAsset] = [
-        LocalModelAsset(
-            kind: .model,
-            downloadURL: URL(string: "https://huggingface.co/bartowski/google_gemma-4-E2B-it-GGUF/resolve/main/google_gemma-4-E2B-it-Q4_K_M.gguf")!,
-            fileName: "gemma-4-e2b-it-q4km.gguf",
-            resumeDataFileName: "gemma-4-e2b-it-q4km.resume-data",
-            expectedBytes: 3_715_891_200
-        ),
-        LocalModelAsset(
-            kind: .mmproj,
-            downloadURL: URL(string: "https://huggingface.co/bartowski/google_gemma-4-E2B-it-GGUF/resolve/main/mmproj-google_gemma-4-E2B-it-f16.gguf")!,
-            fileName: "gemma-4-e2b-it-mmproj-f16.gguf",
-            resumeDataFileName: "gemma-4-e2b-it-mmproj-f16.resume-data",
-            expectedBytes: 1_058_930_688
-        ),
-    ]
-
-    private static let totalExpectedBytes = downloadAssets.reduce(into: Int64(0)) { total, asset in
-        total += asset.expectedBytes
+    public var downloadedBytes: Int64 {
+        return currentDownloadedBytes
     }
 
-    private let fileManager: FileManager
-    private let backgroundDownloadSession: BackgroundModelDownloadSession
-    private var activeAssetKind: LocalModelAssetKind?
+    public var remainingDownloadBytes: Int64 {
+        max(estimatedDownloadBytes - currentDownloadedBytes, 0)
+    }
 
-    public init(fileManager: FileManager = .default) {
-        self.fileManager = fileManager
-        self.backgroundDownloadSession = .shared
+    public var activeDownloadLabel: String {
+        if isDownloaded {
+            return "Model bundle is ready"
+        }
+
+        if isDownloading {
+            return "Downloading the Gemma 4 MLX model"
+        }
+
+        return "Waiting to download"
+    }
+
+    public var activeDownloadDetail: String {
+        if isDownloaded {
+            return "Everything is saved on this iPhone."
+        }
+
+        if isDownloading {
+            return "One-time setup"
+        }
+
+        return "Yemma needs a one-time local model download before chat is ready."
     }
 
     public func validateDownloadedModel() async {
         guard Yemma4AppConfiguration.supportsLocalModelRuntime else {
-            isDownloading = false
-            isDownloaded = false
-            canResumeDownload = false
-            downloadProgress = 0
-            modelPath = nil
-            mmprojPath = nil
-            activeAssetKind = nil
-            error = Self.unsupportedRuntimeMessage
+            resetForUnsupportedRuntime()
             AppDiagnostics.shared.record(
-                "Skipped local model validation on unsupported runtime",
+                "Skipped local MLX model validation on unsupported runtime",
                 category: "download"
             )
             return
         }
 
-        refreshLocalState()
-        let restoredDownload = await observeBackgroundDownloadIfNeeded()
+        let hub = hubClient()
+        let validation: (ValidatedModelDirectory, Int64)? = await Task.detached(priority: .utility) {
+            let repositoryIDs = [Gemma4MLXSupport.repositoryID] + Gemma4MLXSupport.legacyRepositoryIDs
+            for repositoryID in repositoryIDs {
+                let location = hub.localRepoLocation(Hub.Repo(id: repositoryID))
+                guard let validatedDirectory = try? ModelDirectoryValidator.validatedDirectory(at: location) else {
+                    continue
+                }
 
-        if !isDownloading {
-            downloadProgress = aggregatedProgress()
+                return (validatedDirectory, Gemma4MLXSupport.directorySize(at: location))
+            }
+
+            return nil
+        }.value
+
+        if let validation {
+            self.modelPath = validation.0.location.path
+            isDownloaded = true
+            isDownloading = false
+            canResumeDownload = false
+            downloadProgress = 1
+            currentEstimatedBytes = validation.1
+            currentDownloadedBytes = validation.1
+            error = nil
+            persistState(modelPath: validation.0.location.path)
+        } else {
+            modelPath = nil
+            isDownloaded = false
+            isDownloading = false
+            canResumeDownload = false
+            downloadProgress = 0
+            currentDownloadedBytes = 0
+            currentEstimatedBytes = Gemma4MLXSupport.approximateDownloadBytes
+            error = nil
+            clearPersistedState()
         }
 
         AppDiagnostics.shared.record(
-            "Validated local model state",
+            "Validated local MLX model state",
             category: "download",
             metadata: [
                 "isDownloaded": isDownloaded,
-                "modelPath": modelPath ?? "nil",
-                "mmprojPath": mmprojPath ?? "nil",
-                "canResume": canResumeDownload,
-                "restoredDownload": restoredDownload
+                "modelPath": modelPath ?? "nil"
             ]
         )
     }
 
     public func downloadModel() async {
         guard Yemma4AppConfiguration.supportsLocalModelRuntime else {
-            isDownloading = false
-            isDownloaded = false
-            canResumeDownload = false
-            downloadProgress = 0
-            modelPath = nil
-            mmprojPath = nil
-            activeAssetKind = nil
-            error = Self.unsupportedRuntimeMessage
+            resetForUnsupportedRuntime()
             AppDiagnostics.shared.record(
-                "Blocked model download on unsupported runtime",
+                "Blocked local MLX model download on unsupported runtime",
                 category: "download"
             )
             return
         }
 
         if isDownloading {
-            _ = await observeBackgroundDownloadIfNeeded()
             return
         }
 
-        refreshLocalState()
-        error = nil
-        AppDiagnostics.shared.record("Starting model download flow", category: "download")
+        let hub = hubClient()
 
-        if let localResources {
-            downloadProgress = 1
+        do {
+            if let cachedDirectory = await firstValidModelDirectoryAsync(using: hub) {
+                finishWithCachedDownload(cachedDirectory)
+                return
+            }
+
+            await purgeStaleDownloadDirectories(using: hub)
+            prepareForDownload(using: hub)
+
             AppDiagnostics.shared.record(
-                "Model assets already present",
+                "Starting MLX model bundle download",
                 category: "download",
-                metadata: [
-                    "modelPath": localResources.modelPath,
-                    "mmprojPath": localResources.mmprojPath
-                ]
+                metadata: ["repository": Gemma4MLXSupport.repositoryID]
             )
-            return
-        }
 
-        guard let nextAsset = nextPendingAsset() else {
-            isDownloading = false
-            return
-        }
+            let resolution = try await Task.detached(priority: .userInitiated) {
+                try await Self.performDownload(
+                    hub: hub,
+                    progressHandler: { progress, speed in
+                        Task { @MainActor [weak self] in
+                            self?.apply(progress: progress, speed: speed)
+                        }
+                    }
+                )
+            }.value
 
-        await startDownload(for: nextAsset)
+            finishSuccessfulDownload(resolution)
+        } catch {
+            finishFailedDownload(error)
+        }
     }
 
     public func deleteModel() {
-        var lastError: Error?
-
-        for asset in Self.downloadAssets {
-            for url in [localFileURL(for: asset), resumeDataURL(for: asset)] {
-                do {
-                    if fileManager.fileExists(atPath: url.path) {
-                        try fileManager.removeItem(at: url)
-                    }
-                } catch {
-                    lastError = error
-                }
+        do {
+            let hub = hubClient()
+            for cachedDirectory in allKnownModelDirectories(using: hub) where fileManager.fileExists(atPath: cachedDirectory.path) {
+                try fileManager.removeItem(at: cachedDirectory)
             }
-            ModelIntegrityCache.clearCachedDigest(for: localFileURL(for: asset))
-        }
-
-        activeAssetKind = nil
-
-        if let lastError {
-            error = Self.describe(lastError)
-            AppDiagnostics.shared.record("Model delete failed", category: "download", metadata: ["error": error ?? "unknown"])
-        } else {
-            error = nil
-            AppDiagnostics.shared.record("Deleted local model files", category: "download")
-        }
-
-        refreshLocalState()
-    }
-
-    private var documentsDirectory: URL {
-        fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
-    }
-
-    private var cachesDirectory: URL {
-        fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first!
-    }
-
-    private func localFileURL(for asset: LocalModelAsset) -> URL {
-        documentsDirectory.appendingPathComponent(asset.fileName)
-    }
-
-    private func resumeDataURL(for asset: LocalModelAsset) -> URL {
-        cachesDirectory.appendingPathComponent(asset.resumeDataFileName)
-    }
-
-    private func refreshLocalState() {
-        let modelAsset = asset(.model)
-        let mmprojAsset = asset(.mmproj)
-        let modelResult = ModelDownloaderIO.validateLocalFile(
-            fileManager: fileManager,
-            fileURL: localFileURL(for: modelAsset),
-            expectedBytes: modelAsset.expectedBytes
-        )
-        let mmprojResult = ModelDownloaderIO.validateLocalFile(
-            fileManager: fileManager,
-            fileURL: localFileURL(for: mmprojAsset),
-            expectedBytes: mmprojAsset.expectedBytes
-        )
-
-        modelPath = modelResult.localPath
-        mmprojPath = mmprojResult.localPath
-        isDownloaded = modelResult.isDownloaded && mmprojResult.isDownloaded
-
-        if !isDownloading {
-            downloadProgress = aggregatedProgress()
-        }
-
-        if let pendingAsset = nextPendingAsset() {
-            canResumeDownload = ModelDownloaderIO.loadResumeDataIfAvailable(
-                fileManager: fileManager,
-                resumeDataURL: resumeDataURL(for: pendingAsset)
-            ) != nil
-        } else {
+            stopProgressMonitor()
+            modelPath = nil
+            isDownloaded = false
+            isDownloading = false
             canResumeDownload = false
+            downloadProgress = 0
+            currentDownloadedBytes = 0
+            currentEstimatedBytes = Gemma4MLXSupport.approximateDownloadBytes
+            error = nil
+            clearPersistedState()
+            AppDiagnostics.shared.record("Deleted local MLX model bundle", category: "download")
+        } catch {
+            self.error = describe(error)
+            AppDiagnostics.shared.record(
+                "MLX model delete failed",
+                category: "download",
+                metadata: ["error": self.error ?? "unknown"]
+            )
         }
     }
 
-    private func asset(_ kind: LocalModelAssetKind) -> LocalModelAsset {
-        Self.downloadAssets.first(where: { $0.kind == kind })!
+    private func resetForUnsupportedRuntime() {
+        stopProgressMonitor()
+        isDownloading = false
+        isDownloaded = false
+        canResumeDownload = false
+        downloadProgress = 0
+        modelPath = nil
+        currentDownloadedBytes = 0
+        currentEstimatedBytes = Gemma4MLXSupport.approximateDownloadBytes
+        estimatedSecondsRemaining = nil
+        currentDownloadSpeedBytesPerSecond = nil
+        currentDownloadLocation = nil
+        error = Self.unsupportedRuntimeMessage
+        clearPersistedState()
     }
 
-    private func nextPendingAsset() -> LocalModelAsset? {
-        Self.downloadAssets.first { asset in
-            !fileManager.fileExists(atPath: localFileURL(for: asset).path)
-        }
+    private func prepareForDownload(using hub: HubApi) {
+        stopProgressMonitor()
+        isDownloading = true
+        isDownloaded = false
+        canResumeDownload = false
+        error = nil
+        downloadProgress = 0
+        currentDownloadedBytes = 0
+        currentEstimatedBytes = Gemma4MLXSupport.approximateDownloadBytes
+        startETA()
+        currentDownloadLocation = hub.localRepoLocation(Hub.Repo(id: Gemma4MLXSupport.repositoryID))
+        startProgressMonitor()
     }
 
-    private func aggregatedProgress(
-        activeAsset: LocalModelAsset? = nil,
-        activeProgress: Double = 0
-    ) -> Double {
-        var downloadedBytes: Int64 = 0
+    private func finishWithCachedDownload(_ cachedDirectory: (ValidatedModelDirectory, Int64)) {
+        stopProgressMonitor()
+        modelPath = cachedDirectory.0.location.path
+        isDownloaded = true
+        isDownloading = false
+        downloadProgress = 1
+        currentEstimatedBytes = cachedDirectory.1
+        currentDownloadedBytes = currentEstimatedBytes
+        error = nil
+        resetETA()
+        persistState(modelPath: cachedDirectory.0.location.path)
+    }
 
-        for asset in Self.downloadAssets {
-            if let activeAsset, activeAsset.kind == asset.kind {
-                downloadedBytes += Int64(Double(asset.expectedBytes) * min(max(activeProgress, 0), 1))
-                continue
-            }
+    private func finishSuccessfulDownload(_ resolution: DownloadResolution) {
+        stopProgressMonitor()
+        modelPath = resolution.location.path
+        isDownloaded = true
+        isDownloading = false
+        downloadProgress = 1
+        currentEstimatedBytes = resolution.directorySize
+        currentDownloadedBytes = resolution.directorySize
+        error = nil
+        resetETA()
+        persistState(modelPath: resolution.location.path)
+        AppDiagnostics.shared.record(
+            "MLX model bundle download completed",
+            category: "download",
+            metadata: [
+                "path": resolution.location.path,
+                "bytes": resolution.directorySize,
+                "processorConfig": resolution.validation.processorConfigFileName,
+                "weightFiles": resolution.validation.weightFileNames.count,
+                "indexedWeightFiles": resolution.validation.indexedWeightFileNames.count
+            ]
+        )
+    }
 
-            if fileManager.fileExists(atPath: localFileURL(for: asset).path) {
-                downloadedBytes += asset.expectedBytes
-            }
+    private func finishFailedDownload(_ error: Error) {
+        let message = describe(error)
+        stopProgressMonitor()
+        self.error = message
+        isDownloading = false
+        resetETA()
+        AppDiagnostics.shared.record(
+            "MLX model bundle download failed",
+            category: "download",
+            metadata: ["error": message]
+        )
+    }
+
+    private func apply(progress: Progress, speed: Double?) {
+        let totalUnitCount = max(progress.totalUnitCount, 0)
+
+        if let speed, speed > 0 {
+            currentDownloadSpeedBytesPerSecond = speed
         }
 
-        guard Self.totalExpectedBytes > 0 else { return 0 }
-        return min(1, max(0, Double(downloadedBytes) / Double(Self.totalExpectedBytes)))
+        if totalUnitCount > 0 {
+            currentEstimatedBytes = max(currentEstimatedBytes, totalUnitCount)
+        } else if currentDownloadLocation == nil && progress.fractionCompleted.isFinite {
+            downloadProgress = min(max(progress.fractionCompleted, 0), 1)
+        }
+
+        updateETA()
     }
 
     private func updateETA() {
-        guard let startDate = downloadStartDate, downloadProgress > downloadStartProgress else {
+        guard let speed = currentDownloadSpeedBytesPerSecond, speed > 0 else {
             estimatedSecondsRemaining = nil
             return
         }
 
-        let elapsed = Date().timeIntervalSince(startDate)
-        guard elapsed > 2 else {
+        let remainingBytes = max(currentEstimatedBytes - currentDownloadedBytes, 0)
+        guard remainingBytes > 0 else {
             estimatedSecondsRemaining = nil
             return
         }
 
-        let progressSinceStart = downloadProgress - downloadStartProgress
-        guard progressSinceStart > 0, downloadProgress < 1 else {
-            estimatedSecondsRemaining = nil
-            return
-        }
-
-        let rate = progressSinceStart / elapsed
-        let remaining = (1 - downloadProgress) / rate
-        estimatedSecondsRemaining = remaining
+        estimatedSecondsRemaining = Double(remainingBytes) / speed
     }
 
     private func resetETA() {
         downloadStartDate = nil
         downloadStartProgress = 0
         estimatedSecondsRemaining = nil
+        currentDownloadSpeedBytesPerSecond = nil
+        lastSpeedSampleDate = nil
+        lastSpeedSampleBytes = currentDownloadedBytes
+        currentDownloadLocation = nil
     }
 
     private func startETA() {
         downloadStartDate = Date()
         downloadStartProgress = downloadProgress
         estimatedSecondsRemaining = nil
+        currentDownloadSpeedBytesPerSecond = nil
+        lastSpeedSampleDate = Date()
+        lastSpeedSampleBytes = currentDownloadedBytes
     }
 
-    private func startDownload(for asset: LocalModelAsset) async {
-        activeAssetKind = asset.kind
-        isDownloading = true
-        canResumeDownload = false
-        error = nil
-        downloadProgress = aggregatedProgress(activeAsset: asset, activeProgress: 0)
-        startETA()
-
-        let resumeData = ModelDownloaderIO.loadResumeDataIfAvailable(
-            fileManager: fileManager,
-            resumeDataURL: resumeDataURL(for: asset)
-        )
-
-        let startResult = await backgroundDownloadSession.startOrReconnect(
-            downloadURL: asset.downloadURL,
-            destinationURL: localFileURL(for: asset),
-            resumeData: resumeData,
-            progressHandler: { [weak self] progress in
-                Task { @MainActor [weak self] in
-                    self?.downloadProgress = self?.aggregatedProgress(activeAsset: asset, activeProgress: progress) ?? progress
-                    self?.updateETA()
-                }
-            },
-            completionHandler: { [weak self] result in
-                Task { @MainActor [weak self] in
-                    await self?.handleBackgroundDownloadCompletion(result, for: asset)
-                }
-            }
-        )
-
-        switch startResult {
-        case let .started(progress), let .reconnected(progress):
-            downloadProgress = aggregatedProgress(activeAsset: asset, activeProgress: progress)
-            startETA()
-            isDownloading = true
-            canResumeDownload = false
-            AppDiagnostics.shared.record(
-                "Background download active",
-                category: "download",
-                metadata: [
-                    "mode": startResult.modeLabel,
-                    "asset": asset.kind.rawValue,
-                    "progress": progress
-                ]
-            )
-        case .completed:
-            await handleSuccessfulAssetDownload(asset)
-        case .idle:
-            isDownloading = false
-            activeAssetKind = nil
-        }
-    }
-
-    private func observeBackgroundDownloadIfNeeded() async -> Bool {
-        guard let asset = nextPendingAsset() else {
-            isDownloading = false
-            activeAssetKind = nil
-            return false
-        }
-
-        activeAssetKind = asset.kind
-        let status = await backgroundDownloadSession.observeExistingDownload(
-            downloadURL: asset.downloadURL,
-            destinationURL: localFileURL(for: asset),
-            progressHandler: { [weak self] progress in
-                Task { @MainActor [weak self] in
-                    self?.downloadProgress = self?.aggregatedProgress(activeAsset: asset, activeProgress: progress) ?? progress
-                    self?.updateETA()
-                }
-            },
-            completionHandler: { [weak self] result in
-                Task { @MainActor [weak self] in
-                    await self?.handleBackgroundDownloadCompletion(result, for: asset)
-                }
-            }
-        )
-
-        switch status {
-        case let .started(progress), let .reconnected(progress):
-            isDownloading = true
-            canResumeDownload = false
-            error = nil
-            downloadProgress = aggregatedProgress(activeAsset: asset, activeProgress: progress)
-            startETA()
-            return true
-        case .completed:
-            await handleSuccessfulAssetDownload(asset)
-            return false
-        case .idle:
-            isDownloading = false
-            activeAssetKind = nil
-            return false
-        }
-    }
-
-    private func handleSuccessfulAssetDownload(_ asset: LocalModelAsset) async {
-        ModelDownloaderIO.clearResumeData(fileManager: fileManager, resumeDataURL: resumeDataURL(for: asset))
-        activeAssetKind = nil
-        error = nil
-        refreshLocalState()
-
-        AppDiagnostics.shared.record(
-            "Model asset download completed",
-            category: "download",
-            metadata: [
-                "asset": asset.kind.rawValue,
-                "path": localFileURL(for: asset).path
-            ]
-        )
-
-        if let nextAsset = nextPendingAsset() {
-            await startDownload(for: nextAsset)
+    private func startProgressMonitor() {
+        guard let downloadLocation = currentDownloadLocation else {
             return
         }
 
-        isDownloading = false
-        canResumeDownload = false
-        downloadProgress = 1
-        resetETA()
-        cacheIntegrityMetadataForDownloadedAssets()
-    }
+        progressMonitorTask = Task { [weak self] in
+            while !Task.isCancelled {
+                let sampledBytes = await Task.detached(priority: .utility) {
+                    guard FileManager.default.fileExists(atPath: downloadLocation.path) else {
+                        return Int64(0)
+                    }
 
-    private func cacheIntegrityMetadataForDownloadedAssets() {
-        let assetsToCache = Self.downloadAssets.map { asset in
-            (asset, localFileURL(for: asset))
-        }
+                    return Gemma4MLXSupport.directorySize(at: downloadLocation)
+                }.value
 
-        Task.detached(priority: .utility) {
-            for (asset, fileURL) in assetsToCache {
-                try? ModelIntegrityCache.cacheDigestIfNeeded(
-                    for: fileURL,
-                    expectedBytes: asset.expectedBytes,
-                    assetName: asset.kind.rawValue
-                )
+                guard !Task.isCancelled else {
+                    return
+                }
+
+                self?.applyDiskUsageSample(sampledBytes)
+                try? await Task.sleep(for: .milliseconds(750))
             }
         }
     }
 
-    private func handleBackgroundDownloadCompletion(
-        _ result: BackgroundDownloadCompletion,
-        for asset: LocalModelAsset
-    ) async {
-        switch result {
-        case .success:
-            await handleSuccessfulAssetDownload(asset)
-        case let .failure(error, resumeData):
-            if let resumeData {
-                try? resumeData.write(to: resumeDataURL(for: asset), options: [.atomic])
-            }
-
-            isDownloading = false
-            activeAssetKind = nil
-            resetETA()
-            refreshLocalState()
-            self.error = Self.describe(error)
-
-            AppDiagnostics.shared.record(
-                "Model download failed",
-                category: "download",
-                metadata: [
-                    "asset": asset.kind.rawValue,
-                    "error": self.error ?? error.localizedDescription,
-                    "hasResumeData": resumeData != nil
-                ]
-            )
-        }
+    private func stopProgressMonitor() {
+        progressMonitorTask?.cancel()
+        progressMonitorTask = nil
     }
 
-    private static func describe(_ error: Error) -> String {
-        let nsError = error as NSError
-
-        if nsError.domain == NSURLErrorDomain {
-            switch nsError.code {
-            case NSURLErrorNotConnectedToInternet:
-                return "No internet connection. Try again when the network is available."
-            case NSURLErrorTimedOut:
-                return "The model download timed out. Please try again."
-            case NSURLErrorCannotCreateFile, NSURLErrorCannotOpenFile:
-                return "Unable to save the model file on disk."
-            case NSURLErrorCancelled:
-                return "The model download was interrupted. Open the app again to resume."
-            default:
-                break
-            }
-        }
-
-        if let localizedDescription = nsError.localizedFailureReason, !localizedDescription.isEmpty {
-            return localizedDescription
-        }
-
-        return nsError.localizedDescription
-    }
-
-    private static let unsupportedRuntimeMessage = "Local GGUF downloads are disabled in the iOS Simulator. Simulator chat uses mocked replies for UI testing; run Yemma on a physical iPhone for real on-device inference."
-}
-
-private enum ModelDownloaderIO {
-    static func loadResumeDataIfAvailable(fileManager: FileManager, resumeDataURL: URL) -> Data? {
-        guard fileManager.fileExists(atPath: resumeDataURL.path) else {
-            return nil
-        }
-
-        return try? Data(contentsOf: resumeDataURL)
-    }
-
-    static func clearResumeData(fileManager: FileManager, resumeDataURL: URL) {
-        guard fileManager.fileExists(atPath: resumeDataURL.path) else { return }
-        try? fileManager.removeItem(at: resumeDataURL)
-    }
-
-    /// GGUF magic bytes: "GGUF" in little-endian (0x46475547).
-    private static let ggufMagic: [UInt8] = [0x47, 0x47, 0x55, 0x46]
-
-    static func validateLocalFile(
-        fileManager: FileManager,
-        fileURL: URL,
-        expectedBytes: Int64? = nil
-    ) -> ValidationResult {
-        guard fileManager.fileExists(atPath: fileURL.path) else {
-            clearInvalidFile(fileManager: fileManager, fileURL: fileURL)
-            return ValidationResult(isDownloaded: false, localPath: nil)
-        }
-
-        guard
-            let attributes = try? fileManager.attributesOfItem(atPath: fileURL.path),
-            let size = attributes[.size] as? NSNumber,
-            size.int64Value > 0
-        else {
-            clearInvalidFile(fileManager: fileManager, fileURL: fileURL)
-            return ValidationResult(isDownloaded: false, localPath: nil)
-        }
-
-        // Validate expected file size when known (catches truncated downloads).
-        if let expectedBytes, size.int64Value != expectedBytes {
-            AppDiagnostics.shared.record(
-                "Model file size mismatch",
-                category: "download",
-                metadata: [
-                    "path": fileURL.lastPathComponent,
-                    "expected": expectedBytes,
-                    "actual": size.int64Value
-                ]
-            )
-            ModelIntegrityCache.clearCachedDigest(for: fileURL)
-            clearInvalidFile(fileManager: fileManager, fileURL: fileURL)
-            return ValidationResult(isDownloaded: false, localPath: nil)
-        }
-
-        // Validate GGUF magic header.
-        guard let handle = try? FileHandle(forReadingFrom: fileURL) else {
-            clearInvalidFile(fileManager: fileManager, fileURL: fileURL)
-            return ValidationResult(isDownloaded: false, localPath: nil)
-        }
-        let headerData = handle.readData(ofLength: 4)
-        try? handle.close()
-
-        guard headerData.count == 4, Array(headerData) == ggufMagic else {
-            AppDiagnostics.shared.record(
-                "Invalid GGUF header",
-                category: "download",
-                metadata: ["path": fileURL.lastPathComponent]
-            )
-            ModelIntegrityCache.clearCachedDigest(for: fileURL)
-            clearInvalidFile(fileManager: fileManager, fileURL: fileURL)
-            return ValidationResult(isDownloaded: false, localPath: nil)
-        }
-
-        return ValidationResult(isDownloaded: true, localPath: fileURL.path)
-    }
-
-    static func clearInvalidFile(fileManager: FileManager, fileURL: URL) {
-        ModelIntegrityCache.clearCachedDigest(for: fileURL)
-        if fileManager.fileExists(atPath: fileURL.path) {
-            try? fileManager.removeItem(at: fileURL)
-        }
-    }
-
-    static func persistDownloadedFile(fileManager: FileManager, from tempURL: URL, to destinationURL: URL) throws {
-        if fileManager.fileExists(atPath: destinationURL.path) {
-            try fileManager.removeItem(at: destinationURL)
-        }
-
-        try fileManager.moveItem(at: tempURL, to: destinationURL)
-    }
-}
-
-struct ModelIntegrityCacheEntry: Codable, Sendable {
-    let fileSizeBytes: Int64
-    let modifiedAt: TimeInterval
-    let sha256: String
-}
-
-enum ModelIntegrityCache {
-    private static let storageKey = "com.avmillabs.yemma4.integrity-cache"
-    private static let lock = NSLock()
-
-    static func cachedSHA256(for fileURL: URL, fileManager: FileManager = .default) -> String? {
-        lock.lock()
-        defer { lock.unlock() }
-
-        guard let fileMetadata = currentFileMetadata(for: fileURL, fileManager: fileManager),
-              let cache = readCache() else {
-            return nil
-        }
-
-        guard let entry = cacheEntry(for: fileURL, cache: cache),
-              entry.fileSizeBytes == fileMetadata.fileSizeBytes,
-              entry.modifiedAt == fileMetadata.modifiedAt else {
-            return nil
-        }
-
-        return entry.sha256
-    }
-
-    static func clearCachedDigest(for fileURL: URL) {
-        lock.lock()
-        defer { lock.unlock() }
-
-        var cache = readCache() ?? [:]
-        let didRemovePrimary = cache.removeValue(forKey: cacheKey(for: fileURL)) != nil
-        let didRemoveLegacy = cache.removeValue(forKey: fileURL.path) != nil
-        guard didRemovePrimary || didRemoveLegacy else { return }
-        writeCache(cache)
-    }
-
-    static func cacheDigestIfNeeded(
-        for fileURL: URL,
-        expectedBytes: Int64? = nil,
-        assetName: String
-    ) throws {
-        guard cachedSHA256(for: fileURL) == nil else { return }
-
-        let fileManager = FileManager.default
-        guard let fileMetadata = currentFileMetadata(for: fileURL, fileManager: fileManager) else {
+    private func applyDiskUsageSample(_ sampledBytes: Int64) {
+        guard isDownloading else {
             return
         }
 
-        if let expectedBytes, fileMetadata.fileSizeBytes != expectedBytes {
+        guard sampledBytes > 0 else {
             return
         }
 
-        let sha256 = try computeSHA256(for: fileURL)
-
-        lock.lock()
-        defer { lock.unlock() }
-
-        var cache = readCache() ?? [:]
-        let entry = ModelIntegrityCacheEntry(
-            fileSizeBytes: fileMetadata.fileSizeBytes,
-            modifiedAt: fileMetadata.modifiedAt,
-            sha256: sha256
+        currentDownloadedBytes = sampledBytes
+        currentEstimatedBytes = max(currentEstimatedBytes, Gemma4MLXSupport.approximateDownloadBytes)
+        downloadProgress = min(
+            max(Double(sampledBytes) / Double(currentEstimatedBytes), 0),
+            0.99
         )
-        let didWriteCache: Bool
-        if cacheEntry(for: fileURL, cache: cache) == nil {
-            cache.removeValue(forKey: fileURL.path)
-            cache[cacheKey(for: fileURL)] = entry
-            writeCache(cache)
-            didWriteCache = true
-        } else {
-            didWriteCache = false
-        }
+        updateETA()
+    }
 
-        guard didWriteCache else { return }
+    private func firstValidModelDirectoryAsync(using hub: HubApi) async -> (ValidatedModelDirectory, Int64)? {
+        await Task.detached(priority: .utility) {
+            let repositoryIDs = [Gemma4MLXSupport.repositoryID] + Gemma4MLXSupport.legacyRepositoryIDs
+            for repositoryID in repositoryIDs {
+                let location = hub.localRepoLocation(Hub.Repo(id: repositoryID))
+                guard let validatedDirectory = try? ModelDirectoryValidator.validatedDirectory(at: location) else {
+                    continue
+                }
+                return (validatedDirectory, Gemma4MLXSupport.directorySize(at: location))
+            }
 
-        AppDiagnostics.shared.record(
-            "Model asset integrity cached",
-            category: "download",
-            metadata: [
-                "asset": assetName,
-                "fileSizeMB": Int(fileMetadata.fileSizeBytes / (1024 * 1024)),
-                "sha256": sha256
-            ]
+            return nil
+        }.value
+    }
+
+    private func allKnownModelDirectories(using hub: HubApi) -> [URL] {
+        let repositoryIDs = [Gemma4MLXSupport.repositoryID] + Gemma4MLXSupport.legacyRepositoryIDs
+        return repositoryIDs.map { hub.localRepoLocation(Hub.Repo(id: $0)) }
+    }
+
+    private static func performDownload(
+        hub: HubApi,
+        progressHandler: @escaping @Sendable (Progress, Double?) -> Void
+    ) async throws -> DownloadResolution {
+        let location = try await hub.snapshot(
+            from: Hub.Repo(id: Gemma4MLXSupport.repositoryID),
+            revision: Gemma4MLXSupport.repositoryRevision,
+            matching: Gemma4MLXSupport.downloadPatterns,
+            progressHandler: progressHandler
         )
-    }
 
-    private static func computeSHA256(for fileURL: URL) throws -> String {
-        let handle = try FileHandle(forReadingFrom: fileURL)
-        defer { try? handle.close() }
-
-        var hasher = SHA256()
-        while autoreleasepool(invoking: {
-            let chunk = handle.readData(ofLength: 8 * 1024 * 1024)
-            guard !chunk.isEmpty else { return false }
-            hasher.update(data: chunk)
-            return true
-        }) {}
-
-        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
-    }
-
-    private static func cacheKey(for fileURL: URL) -> String {
-        fileURL.lastPathComponent
-    }
-
-    private static func cacheEntry(
-        for fileURL: URL,
-        cache: [String: ModelIntegrityCacheEntry]
-    ) -> ModelIntegrityCacheEntry? {
-        cache[cacheKey(for: fileURL)] ?? cache[fileURL.path]
-    }
-
-    private static func currentFileMetadata(
-        for fileURL: URL,
-        fileManager: FileManager
-    ) -> (fileSizeBytes: Int64, modifiedAt: TimeInterval)? {
-        guard
-            let fileAttributes = try? fileManager.attributesOfItem(atPath: fileURL.path),
-            let fileSize = fileAttributes[.size] as? NSNumber,
-            let modifiedAt = fileAttributes[.modificationDate] as? Date
-        else {
-            return nil
-        }
-
-        return (fileSize.int64Value, modifiedAt.timeIntervalSince1970)
-    }
-
-    private static func readCache() -> [String: ModelIntegrityCacheEntry]? {
-        guard let data = UserDefaults.standard.data(forKey: storageKey) else {
-            return nil
-        }
-
-        return try? JSONDecoder().decode([String: ModelIntegrityCacheEntry].self, from: data)
-    }
-
-    private static func writeCache(_ cache: [String: ModelIntegrityCacheEntry]) {
-        guard let data = try? JSONEncoder().encode(cache) else { return }
-        UserDefaults.standard.set(data, forKey: storageKey)
-    }
-}
-
-enum BackgroundDownloadCompletion {
-    case success
-    case failure(Error, resumeData: Data?)
-}
-
-enum BackgroundDownloadStatus {
-    case idle
-    case started(progress: Double)
-    case reconnected(progress: Double)
-    case completed
-
-    var modeLabel: String {
-        switch self {
-        case .started:
-            return "started"
-        case .reconnected:
-            return "reconnected"
-        case .completed:
-            return "completed"
-        case .idle:
-            return "idle"
-        }
-    }
-}
-
-final class BackgroundModelDownloadEvents: @unchecked Sendable {
-    static let shared = BackgroundModelDownloadEvents()
-
-    private let lock = NSLock()
-    private var handler: (() -> Void)?
-
-    func setCompletionHandler(_ handler: @escaping () -> Void) {
-        lock.lock()
-        self.handler = handler
-        lock.unlock()
-    }
-
-    func finishPendingEvents() {
-        lock.lock()
-        let handler = self.handler
-        self.handler = nil
-        lock.unlock()
-        handler?()
-    }
-}
-
-private final class BackgroundModelDownloadSession: NSObject, URLSessionDownloadDelegate, URLSessionTaskDelegate, @unchecked Sendable {
-    static let shared = BackgroundModelDownloadSession()
-
-    private let identifier = "\(Yemma4AppConfiguration.bundleIdentifier).model-download"
-    private let lock = NSLock()
-    private let fileManager = FileManager.default
-
-    private lazy var session: URLSession = {
-        let configuration = URLSessionConfiguration.background(withIdentifier: identifier)
-        configuration.sessionSendsLaunchEvents = true
-        configuration.isDiscretionary = false
-        configuration.waitsForConnectivity = true
-        configuration.httpMaximumConnectionsPerHost = 1
-        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
-        configuration.allowsCellularAccess = true
-        configuration.allowsExpensiveNetworkAccess = true
-        configuration.allowsConstrainedNetworkAccess = true
-        return URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
-    }()
-
-    private var destinationURL: URL?
-    private var progressHandler: (@Sendable (Double) -> Void)?
-    private var completionHandler: (@Sendable (BackgroundDownloadCompletion) -> Void)?
-    private var lastReportedProgress: Double = 0
-    private var lastProgressUpdate = Date.distantPast
-
-    private override init() {
-        super.init()
-    }
-
-    func startOrReconnect(
-        downloadURL: URL,
-        destinationURL: URL,
-        resumeData: Data?,
-        progressHandler: @escaping @Sendable (Double) -> Void,
-        completionHandler: @escaping @Sendable (BackgroundDownloadCompletion) -> Void
-    ) async -> BackgroundDownloadStatus {
-        setCallbacks(downloadURL: downloadURL, destinationURL: destinationURL, progressHandler: progressHandler, completionHandler: completionHandler)
-
-        if fileManager.fileExists(atPath: destinationURL.path) {
-            return .completed
-        }
-
-        let tasks = await allTasks()
-        if let task = matchingDownloadTask(in: tasks, for: downloadURL) {
-            let progress = currentProgress(for: task)
-            progressHandler(progress)
-            return .reconnected(progress: progress)
-        }
-
-        let task: URLSessionDownloadTask
-        if let resumeData {
-            task = session.downloadTask(withResumeData: resumeData)
-        } else {
-            task = session.downloadTask(with: downloadURL)
-        }
-        task.taskDescription = downloadURL.absoluteString
-        task.resume()
-        progressHandler(0)
-        return .started(progress: 0)
-    }
-
-    func observeExistingDownload(
-        downloadURL: URL,
-        destinationURL: URL,
-        progressHandler: @escaping @Sendable (Double) -> Void,
-        completionHandler: @escaping @Sendable (BackgroundDownloadCompletion) -> Void
-    ) async -> BackgroundDownloadStatus {
-        setCallbacks(downloadURL: downloadURL, destinationURL: destinationURL, progressHandler: progressHandler, completionHandler: completionHandler)
-
-        if fileManager.fileExists(atPath: destinationURL.path) {
-            return .completed
-        }
-
-        let tasks = await allTasks()
-        if let task = matchingDownloadTask(in: tasks, for: downloadURL) {
-            let progress = currentProgress(for: task)
-            progressHandler(progress)
-            return .reconnected(progress: progress)
-        }
-
-        return .idle
-    }
-
-    nonisolated func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64, totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
-        guard totalBytesExpectedToWrite > 0 else { return }
-
-        let progress = min(1, max(0, Double(totalBytesWritten) / Double(totalBytesExpectedToWrite)))
-
-        lock.lock()
-        let now = Date()
-        let progressDelta = progress - lastReportedProgress
-        let shouldReport = progress >= 1
-            || progressDelta >= 0.005
-            || now.timeIntervalSince(lastProgressUpdate) >= 0.15
-        if shouldReport {
-            lastReportedProgress = progress
-            lastProgressUpdate = now
-        }
-        let handler = self.progressHandler
-        lock.unlock()
-
-        guard shouldReport else { return }
-        handler?(progress)
-    }
-
-    nonisolated func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
-        lock.lock()
-        let destinationURL = self.destinationURL
-        let completionHandler = self.completionHandler
-        lock.unlock()
-
-        guard let destinationURL else {
-            completionHandler?(.failure(NSError(domain: NSURLErrorDomain, code: NSURLErrorUnknown), resumeData: nil))
-            return
-        }
-
+        let validation: ValidatedModelDirectory
         do {
-            try ModelDownloaderIO.persistDownloadedFile(
-                fileManager: fileManager,
-                from: location,
-                to: destinationURL
-            )
-            completionHandler?(.success)
+            validation = try ModelDirectoryValidator.validatedDirectory(at: location)
         } catch {
-            completionHandler?(.failure(error, resumeData: nil))
+            try? FileManager.default.removeItem(at: location)
+            throw error
         }
+
+        return DownloadResolution(
+            location: location,
+            validation: validation,
+            directorySize: Gemma4MLXSupport.directorySize(at: location)
+        )
     }
 
-    nonisolated func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        guard let error else { return }
+    private func purgeStaleDownloadDirectories(
+        using hub: HubApi,
+    ) async {
+        let directories = allKnownModelDirectories(using: hub)
 
-        let resumeData = (error as NSError).userInfo[NSURLSessionDownloadTaskResumeData] as? Data
+        await Task.detached(priority: .utility) {
+            let fileManager = FileManager.default
 
-        lock.lock()
-        let completionHandler = self.completionHandler
-        lock.unlock()
-
-        completionHandler?(.failure(error, resumeData: resumeData))
-    }
-
-    nonisolated func urlSessionDidFinishEvents(forBackgroundURLSession session: URLSession) {
-        BackgroundModelDownloadEvents.shared.finishPendingEvents()
-    }
-
-    private func setCallbacks(
-        downloadURL: URL,
-        destinationURL: URL,
-        progressHandler: @escaping @Sendable (Double) -> Void,
-        completionHandler: @escaping @Sendable (BackgroundDownloadCompletion) -> Void
-    ) {
-        lock.lock()
-        self.destinationURL = destinationURL
-        self.progressHandler = progressHandler
-        self.completionHandler = completionHandler
-        lock.unlock()
-    }
-
-    private func allTasks() async -> [URLSessionTask] {
-        await withCheckedContinuation { continuation in
-            session.getAllTasks { tasks in
-                continuation.resume(returning: tasks)
+            for cachedDirectory in directories where fileManager.fileExists(atPath: cachedDirectory.path) {
+                try? fileManager.removeItem(at: cachedDirectory)
             }
+        }.value
+    }
+
+    private func describe(_ error: Error) -> String {
+        if case Hub.HubClientError.authorizationRequired = error {
+            return """
+                Yemma could not download the configured Hugging Face model source (\(Gemma4MLXSupport.repositoryID)) because authentication was required. Provide a valid Hugging Face token or switch Yemma to a public model source for first-launch setup.
+                """
         }
+
+        if let error = error as? LocalizedError, let description = error.errorDescription {
+            return description
+        }
+
+        return error.localizedDescription
     }
 
-    private func matchingDownloadTask(in tasks: [URLSessionTask], for downloadURL: URL) -> URLSessionDownloadTask? {
-        tasks
-            .compactMap { $0 as? URLSessionDownloadTask }
-            .first {
-                $0.taskDescription == downloadURL.absoluteString
-                    || $0.originalRequest?.url == downloadURL
-                    || $0.currentRequest?.url == downloadURL
-            }
+    private static let unsupportedRuntimeMessage =
+        "Local MLX downloads are disabled in the iOS Simulator. Run Yemma on a physical iPhone for real on-device inference."
+
+    private func restorePersistedState() {
+        guard let persistedModelPath = defaults.string(forKey: Self.persistedModelPathKey) else {
+            return
+        }
+
+        guard fileManager.fileExists(atPath: persistedModelPath) else {
+            clearPersistedState()
+            return
+        }
+
+        modelPath = persistedModelPath
+        isDownloaded = true
+        downloadProgress = 1
+        error = nil
     }
 
-    private func currentProgress(for task: URLSessionTask) -> Double {
-        guard task.countOfBytesExpectedToReceive > 0 else { return 0 }
-        return min(1, max(0, Double(task.countOfBytesReceived) / Double(task.countOfBytesExpectedToReceive)))
+    private func persistState(modelPath: String) {
+        defaults.set(modelPath, forKey: Self.persistedModelPathKey)
+    }
+
+    private func clearPersistedState() {
+        defaults.removeObject(forKey: Self.persistedModelPathKey)
+    }
+
+    private func hubClient() -> HubApi {
+        if let cachedHub {
+            return cachedHub
+        }
+
+        let hub = makeHub()
+        cachedHub = hub
+        return hub
     }
 }
