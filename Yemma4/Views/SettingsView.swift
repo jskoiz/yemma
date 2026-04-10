@@ -233,7 +233,7 @@ public struct SettingsView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Yemma 4 will return to the download screen until the model is downloaded again.")
+            Text("Yemma will return to setup until the model is downloaded again.")
         }
         .confirmationDialog(
             "Delete conversation history?",
@@ -290,8 +290,8 @@ public struct SettingsView: View {
             } label: {
                 utilityActionRow(
                     icon: "sparkles.rectangle.stack",
-                    title: "Setup and status",
-                    detail: "Review download, setup, and local model status."
+                    title: "Setup status",
+                    detail: "Check download progress and local setup."
                 )
             }
             .buttonStyle(.plain)
@@ -328,10 +328,10 @@ public struct SettingsView: View {
             UtilitySectionSeparator()
             linkRow(
                 icon: "shield.lefthalf.filled",
-                title: "Model details and attributions",
-                detail: "Where the model comes from and what stays local.",
+                title: "Model and privacy details",
+                detail: "Learn where the model comes from and what stays local.",
                 url: metadataURL,
-                accessibilityHint: "Opens project metadata in Safari."
+                accessibilityHint: "Opens model and privacy details in Safari."
             )
             UtilitySectionSeparator()
             linkRow(
@@ -356,10 +356,10 @@ public struct SettingsView: View {
         UtilitySection("About") {
             linkRow(
                 icon: "link",
-                title: "Project repository",
+                title: "Project page",
                 detail: "Source, releases, and updates.",
                 url: repositoryURL,
-                accessibilityHint: "Opens the project repository in Safari."
+                accessibilityHint: "Opens the project page in Safari."
             )
             UtilitySectionSeparator()
             infoRow(icon: "building.2", title: "Made by", detail: "AVMIL Labs in Honolulu, Hawaii")
@@ -398,7 +398,7 @@ public struct SettingsView: View {
                     .foregroundStyle(AppTheme.textSecondary)
             }
 
-            Text("Pick a simple preset first. Advanced runtime controls stay available below.")
+            Text("Start with a simple preset. You can fine-tune behavior below if needed.")
                 .font(AppTheme.Typography.utilityCaption)
                 .foregroundStyle(AppTheme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -470,12 +470,12 @@ public struct SettingsView: View {
         } label: {
             utilityActionRow(
                 icon: "gearshape.2",
-                title: "Advanced runtime controls",
-                detail: "Context window, flash attention, response limit, and diagnostics."
+                title: "Model settings",
+                detail: "Adjust memory, response length, and performance options."
             )
         }
         .buttonStyle(.plain)
-        .accessibilityHint("Opens lower-level model controls and diagnostics.")
+        .accessibilityHint("Opens controls for memory, speed, and response length.")
     }
 
     private var appearanceRow: some View {
@@ -686,22 +686,11 @@ public struct SettingsView: View {
     }
 
     private var modelSizeText: String {
-        let localPaths = [modelDownloader.modelPath, modelDownloader.mmprojPath].compactMap { $0 }
-        guard !localPaths.isEmpty else {
+        guard let modelPath = modelDownloader.modelPath else {
             return "Not downloaded"
         }
 
-        let fileManager = FileManager.default
-        let totalBytes = localPaths.reduce(into: Int64(0)) { total, path in
-            guard
-                let attributes = try? fileManager.attributesOfItem(atPath: path),
-                let size = attributes[.size] as? NSNumber
-            else {
-                return
-            }
-            total += size.int64Value
-        }
-
+        let totalBytes = Gemma4MLXSupport.directorySize(at: URL(fileURLWithPath: modelPath))
         guard totalBytes > 0 else { return "Unknown" }
         return ByteCountFormatter.string(fromByteCount: totalBytes, countStyle: .file)
     }

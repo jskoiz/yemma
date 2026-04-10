@@ -13,6 +13,7 @@ import UIKit
 
 public struct ChatView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(ModelDownloader.self) private var modelDownloader
     @Environment(LLMService.self) private var llmService
     @Environment(ConversationStore.self) private var conversationStore
 
@@ -87,13 +88,16 @@ public struct ChatView: View {
     }
 
     private let onShowOnboarding: () -> Void
+    private let onRetryModelLoad: (() -> Void)?
 
     public init(
         initialMessages: [ChatMessage] = [],
-        onShowOnboarding: @escaping () -> Void = {}
+        onShowOnboarding: @escaping () -> Void = {},
+        onRetryModelLoad: (() -> Void)? = nil
     ) {
         _messages = State(initialValue: initialMessages)
         self.onShowOnboarding = onShowOnboarding
+        self.onRetryModelLoad = onRetryModelLoad
     }
 
     public var body: some View {
@@ -414,6 +418,11 @@ public struct ChatView: View {
             isModelLoading: llmService.isModelLoading,
             supportsLocalModelRuntime: supportsLocalModelRuntime,
             modelLoadStageText: modelStatusText,
+            statusDetailText: modelStatusDetailText,
+            statusProgress: modelStatusProgress,
+            statusIsFailure: isShowingModelFailure,
+            primarySetupActionTitle: primarySetupActionTitle,
+            onPrimarySetupAction: primarySetupAction,
             starters: taskStarters,
             onSelectStarter: selectStarter
         )
@@ -655,7 +664,13 @@ public struct ChatView: View {
         guard !isImportingAttachments else { return false }
         let hasDraft = !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         guard hasDraft || !pendingAttachments.isEmpty else { return false }
-        return llmService.isTextModelReady || !supportsLocalModelRuntime
+        if !supportsLocalModelRuntime {
+            return true
+        }
+        if llmService.isModelLoading {
+            return false
+        }
+        return llmService.isTextModelReady || modelDownloader.isDownloaded
     }
 
     private var modelStatusText: String {
@@ -663,11 +678,140 @@ public struct ChatView: View {
             return "Simulator mode with mock replies."
         }
 
+        if modelDownloader.isDownloading {
+            return "Downloading the Gemma 4 MLX bundle."
+        }
+
+        if modelDownloader.canResumeDownload {
+            return "Setup paused before the download finished."
+        }
+
+        if modelDownloader.error != nil {
+            return "The model bundle download needs attention."
+        }
+
         if llmService.isModelLoading {
             return llmService.modelLoadStage.statusText
         }
 
-        return "Preparing your on-device model."
+        if modelDownloader.isDownloaded, llmService.lastError != nil {
+            return "Yemma could not finish preparing the MLX model bundle."
+        }
+
+        return "Load your on-device Gemma 4 model."
+    }
+
+    private var modelStatusDetailText: String? {
+        if !supportsLocalModelRuntime {
+            return nil
+        }
+
+        if modelDownloader.isDownloading {
+            let percent = Int(modelDownloader.downloadProgress * 100)
+            if let eta = modelDownloader.estimatedSecondsRemaining {
+                return "\(percent)% downloaded. \(formatETA(eta)) remaining."
+            }
+            return "\(percent)% downloaded. You can stay here while the MLX setup continues."
+        }
+
+        if let error = modelDownloader.error {
+            return error
+        }
+
+        if modelDownloader.canResumeDownload {
+            return "Resume the download to keep setting up Yemma on this device."
+        }
+
+        if modelDownloader.isDownloaded, let error = llmService.lastError, !llmService.isModelLoading {
+            return error
+        }
+
+        if llmService.isModelLoading {
+            return "You can explore the shell while Yemma finishes local initialization."
+        }
+
+        if modelDownloader.isDownloaded {
+            return "Startup stays responsive. Load the MLX model only when you are ready to chat."
+        }
+
+        return nil
+    }
+
+    private var modelStatusProgress: Double? {
+        guard supportsLocalModelRuntime, modelDownloader.isDownloading else { return nil }
+        return modelDownloader.downloadProgress
+    }
+
+    private var isShowingModelFailure: Bool {
+        supportsLocalModelRuntime && (
+            modelDownloader.error != nil
+                || (modelDownloader.isDownloaded && llmService.lastError != nil && !llmService.isModelLoading)
+        )
+    }
+
+    private var primarySetupActionTitle: String? {
+        guard supportsLocalModelRuntime else { return nil }
+
+        if modelDownloader.isDownloading {
+            return nil
+        }
+
+        if modelDownloader.canResumeDownload {
+            return "Resume download"
+        }
+
+        if modelDownloader.error != nil {
+            return "Retry download"
+        }
+
+        if modelDownloader.isDownloaded, llmService.lastError != nil, !llmService.isModelLoading {
+            return "Retry model load"
+        }
+
+        if modelDownloader.isDownloaded, !llmService.isTextModelReady, !llmService.isModelLoading {
+            return "Load model"
+        }
+
+        return nil
+    }
+
+    private var primarySetupAction: (() -> Void)? {
+        guard supportsLocalModelRuntime else { return nil }
+
+        if modelDownloader.canResumeDownload || modelDownloader.error != nil {
+            return {
+                Task { await modelDownloader.downloadModel() }
+            }
+        }
+
+        if modelDownloader.isDownloaded, llmService.lastError != nil, !llmService.isModelLoading {
+            return onRetryModelLoad
+        }
+
+        if modelDownloader.isDownloaded, !llmService.isTextModelReady, !llmService.isModelLoading {
+            return onRetryModelLoad
+        }
+
+        return nil
+    }
+
+    private func formatETA(_ seconds: Double) -> String {
+        let s = max(Int(seconds), 0)
+        if s < 60 {
+            return "less than a minute"
+        }
+
+        if s < 3600 {
+            let minutes = s / 60
+            return "\(minutes) min"
+        }
+
+        let hours = s / 3600
+        let minutes = (s % 3600) / 60
+        if minutes == 0 {
+            return "\(hours)h"
+        }
+        return "\(hours)h \(minutes)m"
     }
 
     private func selectStarter(_ starter: ChatStarter) {
@@ -942,9 +1086,9 @@ public struct ChatView: View {
         isRestoringConversation = true
         await stopGeneration()
 
-        guard let snapshot = conversationStore.loadConversation(id: targetConversationID) else {
+        guard let snapshot = await conversationStore.loadConversationAsync(id: targetConversationID) else {
             let newConversationID = conversationStore.startFreshConversation()
-            guard let fallbackSnapshot = conversationStore.loadConversation(id: newConversationID) else {
+            guard let fallbackSnapshot = await conversationStore.loadConversationAsync(id: newConversationID) else {
                 isRestoringConversation = false
                 return
             }
@@ -1121,20 +1265,7 @@ public struct ChatView: View {
     }
 
     private func promptInput(from message: ChatMessage) -> PromptMessageInput {
-        PromptMessageInput(
-            role: message.user.isCurrentUser ? "user" : "assistant",
-            text: message.text,
-            images: message.attachments.compactMap { attachment in
-                guard attachment.type == .image, attachment.full.isFileURL else {
-                    return nil
-                }
-
-                return PromptImageAsset(
-                    id: attachment.id,
-                    filePath: attachment.full.path
-                )
-            }
-        )
+        YemmaPromptPlanner.promptInput(from: message)
     }
 
     // MARK: - Photo import
@@ -1219,12 +1350,26 @@ public struct ChatView: View {
 
     // MARK: - Prompt handling & streaming
 
+    @MainActor
     private func submitDraft() {
         let trimmedText = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedText.isEmpty || !pendingAttachments.isEmpty else { return }
         guard llmService.isTextModelReady || !supportsLocalModelRuntime else {
-            AppDiagnostics.shared.record("Send blocked because model is not loaded", category: "ui")
-            generationError = "The model is not loaded yet."
+            if llmService.isModelLoading {
+                AppDiagnostics.shared.record("Send deferred because model is still loading", category: "ui")
+                showToast("Preparing your on-device model")
+                return
+            }
+
+            if modelDownloader.isDownloaded {
+                AppDiagnostics.shared.record("Send triggered explicit model load", category: "ui")
+                onRetryModelLoad?()
+                showToast("Preparing your on-device model")
+                return
+            }
+
+            AppDiagnostics.shared.record("Send blocked because model download is incomplete", category: "ui")
+            generationError = "Finish the one-time model download first."
             return
         }
         guard !llmService.isGenerating else {
@@ -1292,14 +1437,7 @@ public struct ChatView: View {
     }
 
     private func conversationHistory(from messages: [ChatMessage]) -> [PromptMessageInput] {
-        messages
-            .compactMap { message in
-                let prompt = promptInput(from: message)
-                if prompt.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && prompt.images.isEmpty {
-                    return nil
-                }
-                return prompt
-            }
+        YemmaPromptPlanner.conversationHistory(from: messages)
     }
 
     /// Streams tokens into a buffer and flushes visible text at ~50ms intervals or word boundaries.
