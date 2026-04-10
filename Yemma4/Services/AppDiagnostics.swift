@@ -40,10 +40,10 @@ final class AppDiagnostics: @unchecked Sendable {
     @ObservationIgnored private let logger = Logger(subsystem: Yemma4AppConfiguration.bundleIdentifier, category: "Diagnostics")
     @ObservationIgnored private let encoder = JSONEncoder()
     @ObservationIgnored private let decoder = JSONDecoder()
+    @ObservationIgnored private var hasLoadedPersistedEvents = false
+    @ObservationIgnored private var isLoadingPersistedEvents = false
 
-    private init() {
-        loadPersistedEvents()
-    }
+    private init() {}
 
     func record(
         _ message: String,
@@ -85,6 +85,10 @@ final class AppDiagnostics: @unchecked Sendable {
         logger.log("diagnostics: cleared")
     }
 
+    func snapshot() -> [DiagnosticEvent] {
+        withLock { recentEvents }
+    }
+
     func exportText() -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd HH:mm:ss Z"
@@ -113,10 +117,26 @@ final class AppDiagnostics: @unchecked Sendable {
 #endif
     }
 
-    private func loadPersistedEvents() {
-        guard let data = UserDefaults.standard.data(forKey: storageKey) else { return }
-        guard let decoded = try? decoder.decode([DiagnosticEvent].self, from: data) else { return }
-        recentEvents = decoded
+    func loadPersistedEventsIfNeeded() async {
+        guard !hasLoadedPersistedEvents else { return }
+        guard !isLoadingPersistedEvents else { return }
+        isLoadingPersistedEvents = true
+
+        let storageKey = self.storageKey
+        let decoder = self.decoder
+        let decoded = await Task.detached(priority: .utility) {
+            guard let data = UserDefaults.standard.data(forKey: storageKey) else {
+                return [DiagnosticEvent]()
+            }
+            return (try? decoder.decode([DiagnosticEvent].self, from: data)) ?? []
+        }.value
+
+        await MainActor.run {
+            let combinedEvents = Self.trimmedEvents(decoded + recentEvents, maxEvents: maxEvents)
+            recentEvents = combinedEvents
+            hasLoadedPersistedEvents = true
+            isLoadingPersistedEvents = false
+        }
     }
 
     private func persist(_ events: [DiagnosticEvent]) {
@@ -131,6 +151,11 @@ final class AppDiagnostics: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return body()
+    }
+
+    private static func trimmedEvents(_ events: [DiagnosticEvent], maxEvents: Int) -> [DiagnosticEvent] {
+        guard events.count > maxEvents else { return events }
+        return Array(events.suffix(maxEvents))
     }
 }
 
