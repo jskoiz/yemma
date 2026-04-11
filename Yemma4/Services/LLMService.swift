@@ -414,8 +414,8 @@ final class LLMService: @unchecked Sendable {
         isModelLoaded
     }
 
-    static let defaultTemperature: Double = 0.7
-    static let defaultMaxResponseTokens: Int = 1024
+    static let defaultTemperature: Double = ResponseStylePreset.focused.temperature
+    static let defaultMaxResponseTokens: Int = ResponseStylePreset.focused.maxResponseTokens
 
     @ObservationIgnored private var modelContainer: ModelContainer?
     @ObservationIgnored private var loadedModelPath: String?

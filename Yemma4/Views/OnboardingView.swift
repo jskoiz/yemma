@@ -11,52 +11,40 @@ private struct SetupEducationCard: Identifiable {
 
     static let defaults: [SetupEducationCard] = [
         SetupEducationCard(
-            id: "privacy",
-            eyebrow: "Private By Default",
-            title: "Your chats stay on your iPhone.",
-            body: "Yemma runs the AI locally instead of sending each message to a company server.",
+            id: "setup",
+            eyebrow: "Setup Flow",
+            title: "Yemma downloads once, then opens straight into chat.",
+            body: "The first launch saves the local model bundle on this iPhone so the app is ready when setup finishes.",
             bullets: [
-                "No account is required to start chatting.",
-                "Your prompts do not need to leave your device.",
-                "After setup, Yemma works offline."
+                "Keep this screen open while the bundle finishes.",
+                "If setup pauses, you can resume without starting over.",
+                "When setup is done, chat is ready."
             ],
-            systemImage: "lock.shield.fill"
+            systemImage: "square.and.arrow.down.fill"
         ),
         SetupEducationCard(
             id: "gemma",
             eyebrow: "What Gemma 4 Is",
-            title: "Gemma 4 is the AI engine inside Yemma.",
-            body: "Gemma 4 is Google's newest open model family. Think of it as the brain the app downloads once so it can answer questions directly on your phone.",
+            title: "Gemma 4 is the model behind Yemma.",
+            body: "Think of it as the AI engine Yemma downloads once so it can answer questions on this device.",
             bullets: [
                 "It powers writing, planning, and Q&A.",
-                "The first setup is bigger because the AI lives on your device.",
-                "Once it is downloaded, you keep using the same local model."
+                "The first setup is bigger because the model lives locally.",
+                "You keep using the same downloaded bundle after setup."
             ],
             systemImage: "sparkles.rectangle.stack.fill"
         ),
         SetupEducationCard(
-            id: "comparison",
-            eyebrow: "Cloud AI Vs Local AI",
-            title: "Most AI apps start faster. Yemma stays local.",
-            body: "Apps like ChatGPT or Claude usually send your request to the internet. Yemma trades a longer first setup for stronger privacy.",
+            id: "after_setup",
+            eyebrow: "After Setup",
+            title: "Once setup finishes, the app gets out of the way.",
+            body: "Yemma keeps setup separate so the main experience stays focused on the conversation.",
             bullets: [
-                "Cloud AI: fast start, server-based responses.",
-                "Yemma: one-time download, on-device responses.",
-                "That means more privacy and offline use."
+                "Open chat and continue naturally.",
+                "Saved chats remain easy to revisit later.",
+                "The app stays ready whenever you come back."
             ],
-            systemImage: "arrow.left.arrow.right.circle.fill"
-        ),
-        SetupEducationCard(
-            id: "setup",
-            eyebrow: "What Setup Is Doing",
-            title: "Yemma is downloading the local AI bundle.",
-            body: "Yemma downloads the model weights and metadata it needs for local chat, then finishes local preparation on this iPhone.",
-            bullets: [
-                "The app keeps showing progress while setup continues.",
-                "If setup pauses, you can resume without starting over.",
-                "When setup is done, chat opens normally."
-            ],
-            systemImage: "square.and.arrow.down.fill"
+            systemImage: "chat.bubble.text.fill"
         )
     ]
 }
@@ -178,7 +166,7 @@ public struct OnboardingView: View {
                     .font(AppTheme.Typography.brandSection)
                     .foregroundStyle(AppTheme.textPrimary)
 
-                Text("Download the Gemma 4 MLX bundle once, then keep chat local on this iPhone.")
+                Text("Download the Gemma 4 MLX bundle once, then start chatting.")
                     .font(.system(size: 15, weight: .medium))
                     .foregroundStyle(AppTheme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -222,7 +210,7 @@ public struct OnboardingView: View {
                     .accessibilityLabel("Yemma 4")
             }
 
-            Text("Private chat, on your iPhone.")
+            Text("Finish setup once, then start chatting.")
                 .font(AppTheme.Typography.brandHero)
                 .foregroundStyle(AppTheme.textPrimary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -232,9 +220,6 @@ public struct OnboardingView: View {
                 .foregroundStyle(AppTheme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Label("Private, on-device, no cloud AI, no account.", systemImage: "lock.fill")
-                .font(AppTheme.Typography.utilityCaption)
-                .foregroundStyle(AppTheme.textSecondary)
         }
     }
 
@@ -294,18 +279,14 @@ public struct OnboardingView: View {
             VStack(alignment: .leading, spacing: 12) {
                 AnimatedProgressBar(progress: modelDownloader.downloadProgress)
 
-                HStack(alignment: .top, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(modelDownloader.activeDownloadLabel)
-                        Text(modelDownloader.activeDownloadDetail)
-                            .foregroundStyle(AppTheme.textTertiary)
-                    }
-
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Text("Saving the model bundle on this iPhone")
                     Spacer(minLength: 0)
 
                     Text(progressPercentLabel)
                         .font(.system(size: 15, weight: .semibold, design: .monospaced))
                         .foregroundStyle(AppTheme.textPrimary)
+                        .lineLimit(1)
                 }
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(AppTheme.textSecondary)
@@ -326,7 +307,7 @@ public struct OnboardingView: View {
             .font(.system(size: 13, weight: .medium))
             .foregroundStyle(AppTheme.textSecondary)
         case .ready:
-            infoRow(systemImage: "checkmark.circle.fill", title: "Saved on this iPhone", trailing: "Ready offline")
+            infoRow(systemImage: "checkmark.circle.fill", title: "Ready to chat", trailing: "Setup complete")
         case .failed:
             VStack(alignment: .leading, spacing: 10) {
                 AnimatedProgressBar(progress: modelDownloader.downloadProgress)
@@ -354,9 +335,12 @@ public struct OnboardingView: View {
                     Text(stat.value)
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(AppTheme.textPrimary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(minHeight: 72, alignment: .topLeading)
                 .padding(14)
                 .inputChrome(cornerRadius: AppTheme.Radius.small)
             }
@@ -366,7 +350,7 @@ public struct OnboardingView: View {
     private var educationGuideSection: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Text("While Yemma sets up")
+                Text("While setup finishes")
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(AppTheme.textPrimary)
 
@@ -455,11 +439,11 @@ public struct OnboardingView: View {
             }
 
             VStack(alignment: .leading, spacing: 3) {
-                Text("Setup is in progress")
+                Text("Setup continues in the background")
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(AppTheme.textPrimary)
 
-                Text("Keep reading below while Yemma finishes downloading in the background.")
+                Text("You can keep reading while the download finishes.")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(AppTheme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -594,13 +578,13 @@ public struct OnboardingView: View {
         case .simulator:
             return "Use the simulator for UI testing. A real device is required for on-device AI."
         case .intro:
-            return "Yemma needs a one-time download before chat is ready. Extra details can wait until setup is underway."
+            return "Yemma needs a one-time download before chat is ready."
         case .downloading:
-            return "Setup is in progress. Keep this screen open or come back later and Yemma will resume."
+            return "Download in progress. You can stay here or come back later."
         case .preparing:
             return "The model bundle is here. Yemma is finishing local setup on this iPhone."
         case .ready:
-            return "Everything is local and ready whenever you open Yemma."
+            return "Everything is ready whenever you open Yemma."
         case .failed:
             return "Setup needs attention before Yemma can open chat."
         }
@@ -642,7 +626,7 @@ public struct OnboardingView: View {
         case .intro:
             return "Set up Yemma once"
         case .downloading:
-            return "Downloading Yemma"
+            return "Model download"
         case .preparing:
             return "Preparing Yemma"
         case .ready:
@@ -657,13 +641,13 @@ public struct OnboardingView: View {
         case .simulator:
             return "Use mock replies here. Run on a physical iPhone for real on-device inference."
         case .intro:
-            return "First launch downloads Gemma 4 once. After setup, prompts, images, and responses stay on this iPhone and are not sent to any third-party AI service."
+            return "First launch downloads Gemma 4 once. After setup, chat is ready whenever you return."
         case .downloading:
-            return "Yemma is downloading model files from Hugging Face and saving them locally on this iPhone."
+            return "Downloading the Gemma 4 bundle and saving it locally on this iPhone."
         case .preparing:
             return "The download is complete. Yemma is loading the MLX model into memory and finishing local activation."
         case .ready:
-            return "Everything is local and ready whenever you open Yemma. Your chats stay on this iPhone unless you choose to share them yourself."
+            return "Everything is ready whenever you open Yemma."
         case .failed:
             return hasModelPreparationError
                 ? "The download finished, but local preparation did not."
@@ -683,9 +667,9 @@ public struct OnboardingView: View {
         case .intro:
             return [
                 ("Download", Self.formatBytes(modelDownloader.estimatedDownloadBytes)),
-                ("After setup", "Works offline"),
-                ("Privacy", "On-device chat"),
-                ("Account", "Not required")
+                ("After setup", "Ready to chat"),
+                ("Flow", "One-time setup"),
+                ("Use case", "Conversation")
             ]
         case .downloading:
             return [
@@ -705,7 +689,7 @@ public struct OnboardingView: View {
             return [
                 ("Status", "Ready"),
                 ("Stored locally", Self.formatBytes(modelDownloader.estimatedDownloadBytes)),
-                ("Privacy", "On-device"),
+                ("State", "Local setup"),
                 ("Offline", "Available")
             ]
         case .failed:
@@ -740,7 +724,7 @@ public struct OnboardingView: View {
         case .simulator:
             return "Mock replies for UI testing"
         case .intro:
-            return "Download Gemma 4 on this iPhone"
+            return "Download Gemma 4 once to begin"
         case .downloading:
             return modelDownloader.canResumeDownload && !modelDownloader.isDownloading
                 ? "Continue the one-time download"
@@ -748,7 +732,7 @@ public struct OnboardingView: View {
         case .preparing:
             return "This usually takes a few seconds"
         case .ready:
-            return "Everything is local and ready"
+            return "Everything is ready"
         case .failed:
             return hasModelPreparationError
                 ? "Prepare the local model again"
@@ -778,9 +762,9 @@ public struct OnboardingView: View {
         case .simulator:
             return ""
         case .intro:
-            return "The first run is larger because the AI model stays on your device instead of being fetched from the cloud each time."
+            return "The first run is larger because the model is stored locally on your iPhone."
         case .downloading:
-            return "You can leave and come back later. Yemma keeps the download progress it already saved."
+            return "You can leave and come back later. Yemma keeps the progress it already saved."
         case .preparing:
             return "You can open chat while Yemma finishes loading the model in the background."
         case .ready:
@@ -907,7 +891,7 @@ public struct OnboardingView: View {
     private static func formatETA(_ seconds: Double) -> String {
         let s = max(Int(seconds), 0)
         if s < 60 {
-            return "Less than a minute"
+            return "< 1 min"
         } else if s < 3600 {
             let minutes = s / 60
             return "\(minutes) min"

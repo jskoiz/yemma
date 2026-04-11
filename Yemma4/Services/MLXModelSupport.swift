@@ -215,11 +215,13 @@ enum Gemma4MLXSupport {
         codingPath.map(\.stringValue).joined(separator: ".")
     }
 
-    static func directorySize(at directory: URL) -> Int64 {
+    static func directorySize(at directory: URL, includingHiddenFiles: Bool = false) -> Int64 {
+        let options: FileManager.DirectoryEnumerationOptions = includingHiddenFiles ? [] : [.skipsHiddenFiles]
+
         guard let enumerator = FileManager.default.enumerator(
             at: directory,
             includingPropertiesForKeys: [.fileSizeKey, .isRegularFileKey],
-            options: [.skipsHiddenFiles]
+            options: options
         ) else {
             return 0
         }
