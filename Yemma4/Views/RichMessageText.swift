@@ -41,7 +41,7 @@ struct RichMessageText: View {
         }
         .paragraph { configuration in
             configuration.label
-                .markdownMargin(top: 0, bottom: 4)
+                .markdownMargin(top: 0, bottom: 6)
         }
         .listItem { configuration in
             configuration.label
@@ -86,6 +86,7 @@ struct RichMessageText: View {
             .foregroundStyle(foregroundColor)
             .tint(AppTheme.accent)
             .textSelection(.enabled)
+            .lineSpacing(3)
             .fixedSize(horizontal: false, vertical: true)
     }
 }
@@ -99,6 +100,7 @@ struct StreamingText: View {
         Text(text)
             .font(AppTheme.Typography.chatAssistantMessage)
             .foregroundStyle(foregroundColor)
+            .lineSpacing(3)
             .textSelection(.enabled)
             .fixedSize(horizontal: false, vertical: true)
     }

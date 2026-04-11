@@ -181,6 +181,7 @@ public struct SettingsView: View {
 
     @State private var showDeleteModelConfirmation = false
     @State private var showClearConversationConfirmation = false
+    @State private var didMigrateFocusedDefault = false
 
     private let onShowOnboarding: () -> Void
     private let onRunDebugScenario: ((DebugInferenceScenario) -> Void)?
@@ -193,7 +194,8 @@ public struct SettingsView: View {
         self.onRunDebugScenario = onRunDebugScenario
     }
 
-    private let repositoryURL = URL(string: "https://github.com/jskoiz/yemma")!
+    private let repositoryURL = URL(string: "https://yemma.chat")!
+    private let madeByURL = URL(string: "https://avmillabs.com")!
     private let licenseURL = URL(string: "https://github.com/jskoiz/yemma/blob/main/LICENSE")!
     private let metadataURL = URL(string: "https://github.com/jskoiz/yemma/blob/main/METADATA.md")!
     private let privacyURL = URL(string: "https://yemma.chat/privacy/")!
@@ -208,7 +210,7 @@ public struct SettingsView: View {
                     VStack(spacing: AppTheme.Layout.sectionSpacing) {
                         header
                         everydaySection
-                        storageSection
+                        modelStorageSection
                         trustSection
                         aboutSection
                     }
@@ -218,6 +220,9 @@ public struct SettingsView: View {
                 }
             }
             .toolbar(.hidden, for: .navigationBar)
+        }
+        .task {
+            migrateFocusedResponseStyleIfNeeded()
         }
         .confirmationDialog(
             "Delete the downloaded model?",
@@ -269,13 +274,11 @@ public struct SettingsView: View {
             responseStyleRow
             UtilitySectionSeparator()
             appearanceRow
-            UtilitySectionSeparator()
-            advancedRow
         }
     }
 
-    private var storageSection: some View {
-        UtilitySection("Storage") {
+    private var modelStorageSection: some View {
+        UtilitySection("Model & Storage") {
             infoRow(
                 icon: "shippingbox",
                 title: "Local model",
@@ -295,6 +298,8 @@ public struct SettingsView: View {
                 )
             }
             .buttonStyle(.plain)
+            UtilitySectionSeparator()
+            advancedRow
             UtilitySectionSeparator()
             destructiveRow(
                 icon: "trash",
@@ -357,12 +362,18 @@ public struct SettingsView: View {
             linkRow(
                 icon: "link",
                 title: "Project page",
-                detail: "Source, releases, and updates.",
+                detail: "yemma.chat",
                 url: repositoryURL,
                 accessibilityHint: "Opens the project page in Safari."
             )
             UtilitySectionSeparator()
-            infoRow(icon: "building.2", title: "Made by", detail: "AVMIL Labs in Honolulu, Hawaii")
+            linkRow(
+                icon: "building.2",
+                title: "Made by",
+                detail: "AVMIL Labs in Honolulu 🤙",
+                url: madeByURL,
+                accessibilityHint: "Opens the maker website in Safari."
+            )
             UtilitySectionSeparator()
             infoRow(icon: "info.circle", title: "Version", detail: appVersionText)
         }
@@ -370,11 +381,11 @@ public struct SettingsView: View {
 
     private var trustRow: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Label("Private on your iPhone", systemImage: "lock.shield.fill")
+            Label("On-device only", systemImage: "lock.shield.fill")
                 .font(AppTheme.Typography.utilityRowTitle)
                 .foregroundStyle(AppTheme.textPrimary)
 
-            Text("Runs on-device, keeps chats and attachments local to this device, and does not send prompts or personal data to a third-party AI service.")
+            Text("Chats, attachments, and prompts stay local to this device.")
                 .font(AppTheme.Typography.utilityRowDetail)
                 .foregroundStyle(AppTheme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -398,23 +409,19 @@ public struct SettingsView: View {
                     .foregroundStyle(AppTheme.textSecondary)
             }
 
-            Text("Start with a simple preset. You can fine-tune behavior below if needed.")
+            Text("Choose the default tone, length, and focus for replies.")
                 .font(AppTheme.Typography.utilityCaption)
                 .foregroundStyle(AppTheme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            VStack(spacing: 0) {
-                ForEach(Array(ResponseStylePreset.allCases.enumerated()), id: \.element.id) { index, preset in
+            VStack(spacing: 10) {
+                ForEach(ResponseStylePreset.allCases) { preset in
                     Button {
                         applyResponseStylePreset(preset)
                     } label: {
                         responseStyleButton(preset)
                     }
                     .buttonStyle(.plain)
-
-                    if index != ResponseStylePreset.allCases.count - 1 {
-                        UtilitySectionSeparator(leadingInset: AppTheme.Layout.rowIconSize + 12)
-                    }
                 }
             }
         }
@@ -425,13 +432,18 @@ public struct SettingsView: View {
     private func responseStyleButton(_ preset: ResponseStylePreset) -> some View {
         let isSelected = llmService.activeResponseStylePreset == preset
 
-        return HStack(alignment: .top, spacing: 12) {
-            Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(isSelected ? AppTheme.accent : AppTheme.textTertiary)
-                .frame(width: AppTheme.Layout.rowIconSize)
+        return HStack(alignment: .top, spacing: 14) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(isSelected ? AppTheme.accentSoft : AppTheme.controlFill)
+                    .frame(width: 30, height: 30)
 
-            VStack(alignment: .leading, spacing: 4) {
+                Image(systemName: isSelected ? "checkmark" : "circle")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(isSelected ? AppTheme.accent : AppTheme.textTertiary)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 8) {
                     Text(preset.title)
                         .font(AppTheme.Typography.utilityRowTitle.weight(.semibold))
@@ -456,8 +468,17 @@ public struct SettingsView: View {
 
             Spacer(minLength: 0)
         }
+        .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(Rectangle())
+        .background(
+            RoundedRectangle(cornerRadius: AppTheme.Radius.medium, style: .continuous)
+                .fill(isSelected ? AppTheme.accentSoft : AppTheme.controlFill)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: AppTheme.Radius.medium, style: .continuous)
+                .stroke(isSelected ? AppTheme.accent.opacity(0.35) : AppTheme.separator.opacity(0.75), lineWidth: 1)
+        )
+        .contentShape(RoundedRectangle(cornerRadius: AppTheme.Radius.medium, style: .continuous))
         .accessibilityElement(children: .combine)
         .accessibilityLabel(preset.title)
         .accessibilityValue(isSelected ? "Current" : "Not selected")
@@ -470,12 +491,12 @@ public struct SettingsView: View {
         } label: {
             utilityActionRow(
                 icon: "gearshape.2",
-                title: "Model settings",
-                detail: "Adjust memory, response length, and performance options."
+                title: "Advanced",
+                detail: "Model tuning, storage, diagnostics, and debug tools."
             )
         }
         .buttonStyle(.plain)
-        .accessibilityHint("Opens controls for memory, speed, and response length.")
+        .accessibilityHint("Opens advanced model, storage, diagnostics, and debug controls.")
     }
 
     private var appearanceRow: some View {
@@ -683,6 +704,19 @@ public struct SettingsView: View {
                 "maxResponseTokens": preset.maxResponseTokens
             ]
         )
+    }
+
+    private func migrateFocusedResponseStyleIfNeeded() {
+        guard !didMigrateFocusedDefault else { return }
+        didMigrateFocusedDefault = true
+
+        let defaults = UserDefaults.standard
+        guard defaults.object(forKey: "llm_temperature") == nil,
+              defaults.object(forKey: "llm_maxResponseTokens") == nil else {
+            return
+        }
+
+        applyResponseStylePreset(.focused)
     }
 
     private var modelSizeText: String {

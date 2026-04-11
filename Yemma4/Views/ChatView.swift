@@ -3,10 +3,6 @@ import PhotosUI
 import SwiftUI
 import ExyteChat
 
-#if canImport(AVFoundation)
-import AVFoundation
-#endif
-
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -29,15 +25,14 @@ public struct ChatView: View {
     @State private var toastMessage: String?
     @State private var toastTask: Task<Void, Never>?
     @State private var showSettings = false
-    @State private var showConversations = false
+    @State private var isSidebarOpen = false
+    @State private var sidebarDragOffset: CGFloat = 0
+    @State private var isShowingPhotoPicker = false
     @State private var loadedConversationID: UUID?
     @State private var isRestoringConversation = false
     @State private var conversationSaveTask: Task<Void, Never>?
     @State private var sharePayload: SharePayload?
     @FocusState private var isComposerFocused: Bool
-#if canImport(AVFoundation)
-    @State private var speechSynthesizer = AVSpeechSynthesizer()
-#endif
 
     // MARK: - Streaming state
     /// The ID of the assistant message currently being streamed.
@@ -102,31 +97,55 @@ public struct ChatView: View {
 
     public var body: some View {
         NavigationStack {
-            ZStack {
-                AppBackground()
+            GeometryReader { geometry in
+                let sidebarWidth = min(max(geometry.size.width * 0.82, 280), 360)
+                let sidebarProgress = sidebarRevealProgress(sidebarWidth: sidebarWidth)
 
-                VStack(spacing: 0) {
-                    topBar
-                    conversationContent
-                }
+                ZStack(alignment: .leading) {
+                    UtilityBackground()
 
-                if let toastMessage {
-                    VStack {
-                        Spacer()
-                        toastView(message: toastMessage)
-                            .transition(
-                                reduceMotion
-                                    ? .opacity
-                                    : .move(edge: .bottom).combined(with: .opacity)
-                            )
-                            .padding(.bottom, 116)
+                    if isSidebarPresented {
+                        ChatSidebarView(
+                            currentConversationID: loadedConversationID,
+                            onSelectConversation: { conversationID in
+                                Task { @MainActor in
+                                    await switchConversation(to: conversationID)
+                                    closeSidebar()
+                                }
+                            },
+                            onStartFresh: {
+                                Task { @MainActor in
+                                    await startFreshConversation()
+                                    closeSidebar()
+                                }
+                            },
+                            onOpenSettings: {
+                                closeSidebar()
+                                showSettings = true
+                            },
+                            onClose: closeSidebar
+                        )
+                        .frame(width: sidebarWidth)
+                        .offset(x: sidebarOffset(sidebarWidth: sidebarWidth))
                     }
+
+                    mainShell
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                        .overlay {
+                            if sidebarProgress > 0.001 {
+                                Color.black
+                                    .opacity(0.06 * sidebarProgress)
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    closeSidebar()
+                                }
+                            }
+                        }
+                        .offset(x: contentOffset(sidebarWidth: sidebarWidth))
+                        .simultaneousGesture(sidebarGesture(sidebarWidth: sidebarWidth))
                 }
             }
             .toolbar(.hidden, for: .navigationBar)
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                composerSection
-            }
             .sheet(isPresented: $showSettings) {
                 SettingsView(
                     onShowOnboarding: {
@@ -144,26 +163,6 @@ public struct ChatView: View {
                     .presentationDetents([.large])
                     .presentationDragIndicator(.hidden)
                     .presentationBackground(.clear)
-            }
-            .sheet(isPresented: $showConversations) {
-                ConversationBrowserSheet(
-                    currentConversationID: loadedConversationID,
-                    onSelectConversation: { conversationID in
-                        Task { @MainActor in
-                            await switchConversation(to: conversationID)
-                            showConversations = false
-                        }
-                    },
-                    onStartFresh: {
-                        Task { @MainActor in
-                            await startFreshConversation()
-                            showConversations = false
-                        }
-                    }
-                )
-                .presentationDetents([.large])
-                .presentationDragIndicator(.hidden)
-                .presentationBackground(.clear)
             }
             .onAppear {
                 AppDiagnostics.shared.record(
@@ -231,23 +230,42 @@ public struct ChatView: View {
         }
     }
 
+    private var mainShell: some View {
+        ZStack {
+            AppBackground()
+
+            VStack(spacing: 0) {
+                topBar
+                conversationContent
+            }
+
+            if let toastMessage {
+                VStack {
+                    Spacer()
+                    toastView(message: toastMessage)
+                        .transition(
+                            reduceMotion
+                                ? .opacity
+                                : .move(edge: .bottom).combined(with: .opacity)
+                        )
+                        .padding(.bottom, 116)
+                }
+            }
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            composerSection
+        }
+    }
+
     private var topBar: some View {
         HStack(spacing: 12) {
-            HStack(spacing: 2) {
-                CircleIconButton(systemName: "gearshape", filled: false, action: { showSettings = true })
-                    .accessibilityLabel("Settings")
-                    .accessibilityHint("Open settings and model controls.")
-                CircleIconButton(systemName: "bubble.left.and.bubble.right", filled: false, action: { showConversations = true })
-                    .accessibilityLabel("Saved chats")
-                    .accessibilityHint("Browse and rename saved conversations.")
-            }
-            .padding(4)
-            .background(
-                Capsule()
-                    .fill(AppTheme.controlFill)
-                    .overlay(Capsule().stroke(AppTheme.inputBorder, lineWidth: 1))
+            CircleIconButton(
+                systemName: "line.3.horizontal",
+                filled: true,
+                action: toggleSidebar
             )
-            .floatingShadow()
+            .accessibilityLabel("Open sidebar")
+            .accessibilityHint("Browse saved chats and quick settings.")
 
             Spacer(minLength: 0)
 
@@ -297,11 +315,21 @@ public struct ChatView: View {
                         .padding(.horizontal, 16)
                         .padding(.bottom, 18)
                         .frame(maxWidth: .infinity, minHeight: 0)
+                        .animation(
+                            reduceMotion
+                                ? nil
+                                : .spring(response: 0.34, dampingFraction: 0.9),
+                            value: messages.map(\.id)
+                        )
                     }
                     .coordinateSpace(name: scrollCoordinateSpaceName)
                     .scrollDismissesKeyboard(.interactively)
                     .contentShape(Rectangle())
                     .onTapGesture {
+                        if isSidebarPresented {
+                            closeSidebar()
+                            return
+                        }
                         isComposerFocused = false
                     }
                     .defaultScrollAnchor(.bottom)
@@ -428,78 +456,43 @@ public struct ChatView: View {
         )
     }
 
-    // MARK: - Message rows with grouping
-
-    /// Whether to show the "Yemma 4" label above an assistant message.
-    /// Suppressed when the previous message is also from the assistant.
-    private func shouldShowAssistantLabel(at index: Int) -> Bool {
-        guard !messages[index].user.isCurrentUser else { return false }
-        if index == 0 { return true }
-        return messages[index - 1].user.isCurrentUser
-    }
-
     private func messageRow(_ message: ChatMessage, index: Int) -> some View {
-        HStack {
+        HStack(alignment: .top, spacing: 0) {
             if message.user.isCurrentUser {
                 Spacer(minLength: 54)
-            }
 
-            VStack(alignment: message.user.isCurrentUser ? .trailing : .leading, spacing: 6) {
-                if shouldShowAssistantLabel(at: index) {
-                    Text("Yemma 4")
-                        .font(AppTheme.Typography.chatLabel)
-                        .foregroundStyle(AppTheme.assistantLabel)
-                        .padding(.horizontal, 2)
-                }
-
-                messageBubble(message)
-
-                if shouldShowMessageActionStrip(for: message, index: index) {
-                    messageActionStrip(for: message, index: index)
-                }
-            }
-            .frame(
-                maxWidth: message.user.isCurrentUser ? 420 : .infinity,
-                alignment: message.user.isCurrentUser ? .trailing : .leading
-            )
-
-            if !message.user.isCurrentUser {
-                Spacer(minLength: 40)
+                userMessageBubble(message)
+                    .frame(maxWidth: 420, alignment: .trailing)
+            } else {
+                assistantMessageBody(message, index: index)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
+        .frame(maxWidth: .infinity, alignment: message.user.isCurrentUser ? .trailing : .leading)
+        .transition(
+            reduceMotion
+                ? .opacity
+                : .move(edge: .bottom).combined(with: .opacity)
+        )
     }
 
-    private func messageBubbleBackground(for message: ChatMessage) -> some ShapeStyle {
-        if message.user.isCurrentUser {
-            return AnyShapeStyle(
-                LinearGradient(
-                    colors: [AppTheme.userBubbleTop, AppTheme.userBubbleBottom],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
+    private func userBubbleBackground() -> some ShapeStyle {
+        AnyShapeStyle(
+            LinearGradient(
+                colors: [AppTheme.userBubbleTop, AppTheme.userBubbleBottom],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
             )
-        }
-
-        return AnyShapeStyle(AppTheme.assistantBubble)
-    }
-
-    private func messageBubbleBorder(for message: ChatMessage) -> Color {
-        message.user.isCurrentUser ? AppTheme.userBubbleBorder : AppTheme.assistantBubbleBorder
-    }
-
-    private func messageTextColor(for message: ChatMessage) -> Color {
-        message.user.isCurrentUser ? AppTheme.userMessageText : AppTheme.assistantMessageText
+        )
     }
 
     @ViewBuilder
-    private func messageBubble(_ message: ChatMessage) -> some View {
+    private func userMessageBubble(_ message: ChatMessage) -> some View {
         let text = displayText(for: message)
         let shouldRenderText = shouldRenderText(for: message, text: text)
-        let isStreaming = message.id == streamingMessageID && llmService.isGenerating
-        let textColor = messageTextColor(for: message)
 
         VStack(
-            alignment: message.user.isCurrentUser ? .trailing : .leading,
+            alignment: .trailing,
             spacing: message.attachments.isEmpty || !shouldRenderText ? 0 : 12
         ) {
             if !message.attachments.isEmpty {
@@ -507,31 +500,55 @@ public struct ChatView: View {
             }
 
             if shouldRenderText {
-                Group {
-                    if message.user.isCurrentUser {
-                        Text(text)
-                            .font(AppTheme.Typography.chatUserMessage)
-                            .foregroundStyle(textColor)
-                            .multilineTextAlignment(.trailing)
-                            .textSelection(.enabled)
-                    } else if isStreaming {
-                        StreamingText(text: text, foregroundColor: textColor)
-                    } else {
-                        RichMessageText(text: text, foregroundColor: textColor)
-                    }
-                }
+                Text(text)
+                    .font(AppTheme.Typography.chatUserMessage)
+                    .foregroundStyle(AppTheme.userMessageText)
+                    .multilineTextAlignment(.trailing)
+                    .textSelection(.enabled)
             }
         }
         .padding(.horizontal, AppTheme.Layout.bubbleHorizontalPadding)
         .padding(.vertical, AppTheme.Layout.bubbleVerticalPadding)
-        .background(messageBubbleBackground(for: message))
+        .background(userBubbleBackground())
         .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.medium, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: AppTheme.Radius.medium, style: .continuous)
-                .stroke(messageBubbleBorder(for: message), lineWidth: 1)
+                .stroke(AppTheme.userBubbleBorder, lineWidth: 1)
         )
+    }
+
+    @ViewBuilder
+    private func assistantMessageBody(_ message: ChatMessage, index: Int) -> some View {
+        let text = displayText(for: message)
+        let shouldRenderText = shouldRenderText(for: message, text: text)
+        let isStreaming = message.id == streamingMessageID && llmService.isGenerating
+
+        VStack(alignment: .leading, spacing: 10) {
+            if !message.attachments.isEmpty {
+                attachmentGrid(for: message)
+            }
+
+            if shouldRenderText {
+                Group {
+                    if isStreaming {
+                        StreamingText(text: text)
+                    } else {
+                        RichMessageText(text: text)
+                    }
+                }
+                .transition(
+                    reduceMotion
+                        ? .opacity
+                        : .opacity.combined(with: .move(edge: .bottom))
+                )
+            }
+
+            if shouldShowMessageActionStrip(for: message, index: index) {
+                messageActionStrip(for: message, index: index)
+            }
+        }
         .contextMenu {
-            messageContextMenu(for: message, index: indexForMessage(message))
+            messageContextMenu(for: message, index: index)
         }
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: isStreaming)
     }
@@ -596,6 +613,10 @@ public struct ChatView: View {
             .inputChrome(cornerRadius: AppTheme.Radius.medium)
             .contentShape(RoundedRectangle(cornerRadius: AppTheme.Radius.medium, style: .continuous))
             .onTapGesture {
+                if isSidebarPresented {
+                    closeSidebar()
+                    return
+                }
                 isComposerFocused = true
             }
         }
@@ -614,18 +635,22 @@ public struct ChatView: View {
     }
 
     private var attachmentPickerButton: some View {
-        PhotosPicker(
-            selection: $selectedPhotoItems,
-            maxSelectionCount: 4,
-            matching: .images,
-            preferredItemEncoding: .automatic
-        ) {
+        Button {
+            isShowingPhotoPicker = true
+        } label: {
             Image(systemName: isImportingAttachments ? "hourglass" : "plus")
                 .font(.system(size: 22, weight: .semibold))
                 .foregroundStyle(AppTheme.textSecondary)
                 .frame(width: 36, height: 36)
         }
         .buttonStyle(.plain)
+        .photosPicker(
+            isPresented: $isShowingPhotoPicker,
+            selection: $selectedPhotoItems,
+            maxSelectionCount: 4,
+            matching: .images,
+            preferredItemEncoding: .automatic
+        )
         .disabled(isImportingAttachments)
         .accessibilityLabel("Add image")
         .accessibilityHint("Attach up to four images to your next message.")
@@ -816,7 +841,12 @@ public struct ChatView: View {
 
     private func selectStarter(_ starter: ChatStarter) {
         draft = starter.prompt
-        isComposerFocused = true
+        if starter.behavior == .promptAndPickImage {
+            isComposerFocused = false
+            isShowingPhotoPicker = true
+        } else {
+            isComposerFocused = true
+        }
         AppDiagnostics.shared.record(
             "Starter selected",
             category: "ui",
@@ -854,32 +884,44 @@ public struct ChatView: View {
     }
 
     private func shouldShowMessageActionStrip(for message: ChatMessage, index: Int) -> Bool {
-        canRetryAssistantResponse(message, index: index)
+        guard !message.user.isCurrentUser else { return false }
+        let hasText = !message.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return hasText || canRetryAssistantResponse(message, index: index)
     }
 
     private func messageActionStrip(for message: ChatMessage, index: Int) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
+        let trimmedText = message.text.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        return ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                messageActionButton(
-                    title: "Retry",
-                    systemImage: "arrow.clockwise",
-                    accessibilityHint: "Generate the assistant reply again."
-                ) {
-                    Task { @MainActor in
-                        await retryAssistantResponse(message, index: index)
+                if !trimmedText.isEmpty {
+                    messageActionButton(
+                        title: "Copy",
+                        systemImage: "doc.on.doc",
+                        accessibilityHint: "Copy this response."
+                    ) {
+                        copyMessageText(trimmedText)
                     }
                 }
 
-                ForEach([AssistantRefinement.shorter, .moreDetail], id: \.rawValue) { refinement in
+                if canRetryAssistantResponse(message, index: index) {
                     messageActionButton(
-                        title: refinement.title,
-                        systemImage: refinement.systemImage,
-                        accessibilityHint: refinement == .shorter
-                            ? "Ask for a shorter version of the latest assistant reply."
-                            : "Ask for a more detailed version of the latest assistant reply."
+                        title: "Retry",
+                        systemImage: "arrow.clockwise",
+                        accessibilityHint: "Generate the assistant reply again."
                     ) {
                         Task { @MainActor in
-                            await refineAssistantResponse(message, refinement: refinement)
+                            await retryAssistantResponse(message, index: index)
+                        }
+                    }
+
+                    messageActionButton(
+                        title: AssistantRefinement.shorter.title,
+                        systemImage: AssistantRefinement.shorter.systemImage,
+                        accessibilityHint: "Ask for a shorter version of the latest assistant reply."
+                    ) {
+                        Task { @MainActor in
+                            await refineAssistantResponse(message, refinement: .shorter)
                         }
                     }
                 }
@@ -898,10 +940,14 @@ public struct ChatView: View {
             Label(title, systemImage: systemImage)
                 .font(.footnote.weight(.semibold))
                 .foregroundStyle(AppTheme.textSecondary)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 7)
-                .background(AppTheme.controlFill)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 9)
+                .background(AppTheme.controlFill.opacity(0.94))
                 .clipShape(Capsule())
+                .overlay(
+                    Capsule()
+                        .stroke(AppTheme.controlBorder, lineWidth: 1)
+                )
         }
         .buttonStyle(.plain)
         .accessibilityHint(accessibilityHint)
@@ -922,12 +968,6 @@ public struct ChatView: View {
                 shareMessageText(trimmedText)
             } label: {
                 Label("Share", systemImage: "square.and.arrow.up")
-            }
-
-            Button {
-                speakMessageText(trimmedText, messageID: message.id)
-            } label: {
-                Label("Speak", systemImage: "speaker.wave.2")
             }
         }
 
@@ -981,24 +1021,6 @@ public struct ChatView: View {
             metadata: ["chars": text.count]
         )
         sharePayload = SharePayload(text: text)
-    }
-
-    private func speakMessageText(_ text: String, messageID: String) {
-        AppHaptics.selection()
-#if canImport(AVFoundation)
-        speechSynthesizer.stopSpeaking(at: .immediate)
-        let utterance = AVSpeechUtterance(string: text)
-        utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
-        speechSynthesizer.speak(utterance)
-#endif
-        AppDiagnostics.shared.record(
-            "Message spoken",
-            category: "ui",
-            metadata: [
-                "messageID": messageID,
-                "chars": text.count
-            ]
-        )
     }
 
     private func editAndResendLastUserTurn(_ message: ChatMessage) {
@@ -1129,6 +1151,80 @@ public struct ChatView: View {
             category: "ui",
             metadata: ["conversationID": conversationID.uuidString]
         )
+    }
+
+    private var isSidebarPresented: Bool {
+        isSidebarOpen || sidebarDragOffset > 0
+    }
+
+    private func toggleSidebar() {
+        withAnimation(.spring(response: 0.34, dampingFraction: 0.88)) {
+            isSidebarOpen.toggle()
+            sidebarDragOffset = 0
+        }
+    }
+
+    private func closeSidebar() {
+        withAnimation(.spring(response: 0.34, dampingFraction: 0.88)) {
+            isSidebarOpen = false
+            sidebarDragOffset = 0
+        }
+    }
+
+    private func sidebarRevealProgress(sidebarWidth: CGFloat) -> CGFloat {
+        guard sidebarWidth > 0 else { return 0 }
+
+        let visibleWidth: CGFloat
+        if isSidebarOpen {
+            visibleWidth = sidebarWidth + min(0, sidebarDragOffset)
+        } else {
+            visibleWidth = max(0, sidebarDragOffset)
+        }
+
+        return min(max(visibleWidth / sidebarWidth, 0), 1)
+    }
+
+    private func sidebarOffset(sidebarWidth: CGFloat) -> CGFloat {
+        if isSidebarOpen {
+            return min(0, sidebarDragOffset)
+        }
+
+        return -sidebarWidth + max(0, sidebarDragOffset)
+    }
+
+    private func contentOffset(sidebarWidth: CGFloat) -> CGFloat {
+        sidebarRevealProgress(sidebarWidth: sidebarWidth) * sidebarWidth
+    }
+
+    private func sidebarGesture(sidebarWidth: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 14)
+            .onChanged { value in
+                guard abs(value.translation.width) > abs(value.translation.height) else { return }
+
+                if isSidebarOpen {
+                    sidebarDragOffset = max(-sidebarWidth, min(0, value.translation.width))
+                } else {
+                    guard value.startLocation.x <= 28, value.translation.width > 0 else { return }
+                    sidebarDragOffset = min(sidebarWidth, value.translation.width)
+                }
+            }
+            .onEnded { value in
+                defer { sidebarDragOffset = 0 }
+                guard abs(value.translation.width) > abs(value.translation.height) else { return }
+
+                if isSidebarOpen {
+                    let closingDistance = min(value.translation.width, value.predictedEndTranslation.width)
+                    withAnimation(.spring(response: 0.34, dampingFraction: 0.88)) {
+                        isSidebarOpen = closingDistance >= -(sidebarWidth * 0.22)
+                    }
+                } else {
+                    guard value.startLocation.x <= 28 else { return }
+                    let openingDistance = max(value.translation.width, value.predictedEndTranslation.width)
+                    withAnimation(.spring(response: 0.34, dampingFraction: 0.88)) {
+                        isSidebarOpen = openingDistance > sidebarWidth * 0.22
+                    }
+                }
+            }
     }
 
     private func scheduleConversationSave(delayMs: Int = 280) {
@@ -1374,7 +1470,7 @@ public struct ChatView: View {
         }
         guard !llmService.isGenerating else {
             AppDiagnostics.shared.record("Send blocked because generation is already active", category: "ui")
-            showToast("Please wait for Yemma 4 to finish")
+            showToast("Please wait for the current response")
             return
         }
 
@@ -1388,6 +1484,7 @@ public struct ChatView: View {
             ]
         )
         draft = ""
+        isComposerFocused = false
         Task { @MainActor in
             let attachments = pendingAttachments
             pendingAttachments = []
@@ -1684,6 +1781,387 @@ private struct ConversationBottomOffsetPreferenceKey: PreferenceKey {
 private struct SharePayload: Identifiable {
     let id = UUID()
     let text: String
+}
+
+private struct ChatSidebarView: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(ModelDownloader.self) private var modelDownloader
+    @Environment(LLMService.self) private var llmService
+    @Environment(ConversationStore.self) private var conversationStore
+    @AppStorage(AppearancePreference.storageKey) private var appearancePreferenceRaw = AppearancePreference.system.rawValue
+
+    let currentConversationID: UUID?
+    let onSelectConversation: (UUID) -> Void
+    let onStartFresh: () -> Void
+    let onOpenSettings: () -> Void
+    let onClose: () -> Void
+
+    @State private var renameConversation: ConversationMetadata?
+    @State private var renameTitle = ""
+
+    var body: some View {
+        ZStack {
+            UtilityBackground()
+
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: AppTheme.Layout.sectionSpacing) {
+                    header
+                    everydaySection
+                    chatsSection
+                    modelSection
+                }
+                .padding(.horizontal, AppTheme.Layout.screenPadding)
+                .padding(.top, 20)
+                .padding(.bottom, 28)
+            }
+        }
+        .task {
+            await conversationStore.loadIndexIfNeeded()
+        }
+        .alert(
+            "Rename Chat",
+            isPresented: Binding(
+                get: { renameConversation != nil },
+                set: { if !$0 { renameConversation = nil } }
+            )
+        ) {
+            TextField("Chat name", text: $renameTitle)
+            Button("Save") {
+                guard let renameConversation else { return }
+                let trimmedTitle = renameTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmedTitle.isEmpty else { return }
+                AppDiagnostics.shared.record(
+                    "Conversation renamed",
+                    category: "ui",
+                    metadata: ["conversationID": renameConversation.id.uuidString]
+                )
+                AppHaptics.selection()
+                conversationStore.renameConversation(id: renameConversation.id, title: trimmedTitle)
+                self.renameConversation = nil
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Give this chat a shorter, easier-to-scan name.")
+        }
+    }
+
+    private var header: some View {
+        HStack(alignment: .top, spacing: 16) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Yemma 4")
+                    .font(.system(size: 24, weight: .semibold, design: .serif))
+                    .foregroundStyle(AppTheme.textPrimary)
+
+                Text("Chats and quick controls")
+                    .font(AppTheme.Typography.utilityCaption)
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 0)
+
+            CircleIconButton(systemName: "xmark", action: onClose)
+                .accessibilityLabel("Close sidebar")
+        }
+    }
+
+    private var everydaySection: some View {
+        UtilitySection("Everyday") {
+            VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 10) {
+                    rowHeader(title: "Response style", detail: llmService.activeResponseStyleTitle)
+
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 90), spacing: 8)], spacing: 8) {
+                        ForEach(ResponseStylePreset.allCases) { preset in
+                            responseStyleChip(preset)
+                        }
+                    }
+                }
+
+                UtilitySectionSeparator(leadingInset: AppTheme.Layout.rowHorizontalPadding)
+
+                VStack(alignment: .leading, spacing: 10) {
+                    rowHeader(title: "Appearance", detail: selectedAppearancePreference.title)
+
+                    if dynamicTypeSize.isAccessibilitySize {
+                        Menu {
+                            ForEach(AppearancePreference.allCases) { appearance in
+                                Button(appearance.title) {
+                                    appearancePreferenceBinding.wrappedValue = appearance
+                                }
+                            }
+                        } label: {
+                            HStack {
+                                Text(selectedAppearancePreference.title)
+                                    .font(AppTheme.Typography.utilityRowTitle)
+                                    .foregroundStyle(AppTheme.textPrimary)
+                                Spacer()
+                                Image(systemName: "chevron.up.chevron.down")
+                                    .font(.footnote.weight(.semibold))
+                                    .foregroundStyle(AppTheme.textSecondary)
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 12)
+                            .background(AppTheme.controlFill)
+                            .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.small, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        Picker("Appearance", selection: appearancePreferenceBinding) {
+                            ForEach(AppearancePreference.allCases) { appearance in
+                                Text(appearance.title).tag(appearance)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                    }
+                }
+            }
+            .utilityRowPadding()
+        }
+    }
+
+    private var chatsSection: some View {
+        UtilitySection("Chats") {
+            Button {
+                AppDiagnostics.shared.record("New conversation requested", category: "ui")
+                AppHaptics.selection()
+                onStartFresh()
+            } label: {
+                actionRow(
+                    icon: "square.and.pencil",
+                    title: "New chat",
+                    subtitle: "Start fresh without losing your other threads"
+                )
+            }
+            .buttonStyle(.plain)
+
+            if !conversationStore.conversations.isEmpty {
+                UtilitySectionSeparator(leadingInset: AppTheme.Layout.rowHorizontalPadding)
+            }
+
+            ForEach(Array(conversationStore.conversations.enumerated()), id: \.element.id) { index, metadata in
+                Button {
+                    AppDiagnostics.shared.record(
+                        "Conversation selected",
+                        category: "ui",
+                        metadata: [
+                            "conversationID": metadata.id.uuidString,
+                            "messageCount": metadata.messageCount
+                        ]
+                    )
+                    AppHaptics.selection()
+                    onSelectConversation(metadata.id)
+                } label: {
+                    conversationRow(metadata)
+                }
+                .buttonStyle(.plain)
+                .contextMenu {
+                    Button {
+                        renameConversation = metadata
+                        renameTitle = metadata.title
+                    } label: {
+                        Label("Rename", systemImage: "pencil")
+                    }
+                }
+
+                if index != conversationStore.conversations.count - 1 {
+                    UtilitySectionSeparator(leadingInset: AppTheme.Layout.rowHorizontalPadding)
+                }
+            }
+        }
+    }
+
+    private var modelSection: some View {
+        UtilitySection("Model & Storage") {
+            Button(action: onOpenSettings) {
+                HStack(spacing: 14) {
+                    Image(systemName: "internaldrive")
+                        .frame(width: AppTheme.Layout.rowIconSize)
+                        .foregroundStyle(AppTheme.textPrimary)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Open full settings")
+                            .font(AppTheme.Typography.utilityRowTitle)
+                            .foregroundStyle(AppTheme.textPrimary)
+
+                        Text(modelSummary)
+                            .font(AppTheme.Typography.utilityCaption)
+                            .foregroundStyle(AppTheme.textSecondary)
+                            .multilineTextAlignment(.leading)
+                    }
+
+                    Spacer()
+
+                    Image(systemName: "chevron.right")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(AppTheme.textSecondary)
+                }
+                .utilityRowPadding()
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private func rowHeader(title: String, detail: String) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(title)
+                .font(AppTheme.Typography.utilityRowTitle)
+                .foregroundStyle(AppTheme.textPrimary)
+
+            Spacer()
+
+            Text(detail)
+                .font(AppTheme.Typography.utilityCaption)
+                .foregroundStyle(AppTheme.textSecondary)
+        }
+    }
+
+    private func responseStyleChip(_ preset: ResponseStylePreset) -> some View {
+        let isSelected = llmService.activeResponseStylePreset == preset
+
+        return Button {
+            guard llmService.activeResponseStylePreset != preset else { return }
+            llmService.applyResponseStylePreset(preset)
+            AppHaptics.selection()
+            AppDiagnostics.shared.record(
+                "Response style preset applied",
+                category: "settings",
+                metadata: [
+                    "preset": preset.rawValue,
+                    "temperature": preset.temperature,
+                    "maxResponseTokens": preset.maxResponseTokens
+                ]
+            )
+        } label: {
+            Text(preset.title)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(isSelected ? AppTheme.accentForeground : AppTheme.textPrimary)
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(isSelected ? AppTheme.accent : AppTheme.controlFill)
+                .clipShape(Capsule())
+                .overlay(
+                    Capsule()
+                        .stroke(isSelected ? AppTheme.accent.opacity(0.2) : AppTheme.controlBorder, lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func conversationRow(_ metadata: ConversationMetadata) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: metadata.id == currentConversationID ? "checkmark.circle.fill" : "bubble.left.and.bubble.right")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(metadata.id == currentConversationID ? AppTheme.accent : AppTheme.textSecondary)
+                .frame(width: AppTheme.Layout.rowIconSize)
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    Text(metadata.title)
+                        .font(AppTheme.Typography.utilityRowTitle.weight(.semibold))
+                        .foregroundStyle(AppTheme.textPrimary)
+                        .lineLimit(1)
+
+                    if metadata.id == currentConversationID {
+                        statusChip("Current")
+                    } else if metadata.hasDraft {
+                        statusChip("Draft")
+                    }
+                }
+
+                Text(metadata.preview)
+                    .font(AppTheme.Typography.utilityRowDetail)
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .lineLimit(2)
+
+                HStack(spacing: 8) {
+                    Text(Self.relativeDateText(for: metadata.updatedAt))
+                    Text("·")
+                    Text("\(metadata.messageCount) \(metadata.messageCount == 1 ? "message" : "messages")")
+                }
+                .font(AppTheme.Typography.utilityCaption)
+                .foregroundStyle(AppTheme.textTertiary)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .utilityRowPadding()
+        .contentShape(Rectangle())
+    }
+
+    private func actionRow(icon: String, title: String, subtitle: String) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: icon)
+                .frame(width: AppTheme.Layout.rowIconSize)
+                .foregroundStyle(AppTheme.textPrimary)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text(title)
+                    .font(AppTheme.Typography.utilityRowTitle.weight(.semibold))
+                    .foregroundStyle(AppTheme.textPrimary)
+
+                Text(subtitle)
+                    .font(AppTheme.Typography.utilityRowDetail)
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+
+            Spacer()
+        }
+        .utilityRowPadding()
+        .contentShape(Rectangle())
+    }
+
+    private func statusChip(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(AppTheme.accent)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(AppTheme.accentSoft)
+            .clipShape(Capsule())
+    }
+
+    private var selectedAppearancePreference: AppearancePreference {
+        AppearancePreference.from(appearancePreferenceRaw)
+    }
+
+    private var appearancePreferenceBinding: Binding<AppearancePreference> {
+        Binding(
+            get: { selectedAppearancePreference },
+            set: { newValue in
+                guard appearancePreferenceRaw != newValue.rawValue else { return }
+                appearancePreferenceRaw = newValue.rawValue
+                AppHaptics.selection()
+                AppDiagnostics.shared.record(
+                    "Appearance preference changed",
+                    category: "settings",
+                    metadata: ["appearance": newValue.rawValue]
+                )
+            }
+        )
+    }
+
+    private var modelSummary: String {
+        guard let modelPath = modelDownloader.modelPath else {
+            return "Setup, storage, downloads, and advanced controls."
+        }
+
+        let totalBytes = Gemma4MLXSupport.directorySize(at: URL(fileURLWithPath: modelPath))
+        guard totalBytes > 0 else {
+            return "Setup, storage, downloads, and advanced controls."
+        }
+
+        let sizeText = ByteCountFormatter.string(fromByteCount: totalBytes, countStyle: .file)
+        return "Model downloaded locally (\(sizeText)). Setup, storage, and advanced controls."
+    }
+
+    private static func relativeDateText(for date: Date) -> String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .short
+        return formatter.localizedString(for: date, relativeTo: Date())
+    }
 }
 
 #if canImport(UIKit)
