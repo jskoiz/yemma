@@ -98,8 +98,9 @@ public struct ChatView: View {
     public var body: some View {
         NavigationStack {
             GeometryReader { geometry in
-                let sidebarWidth = min(max(geometry.size.width * 0.82, 280), 360)
+                let sidebarWidth = geometry.size.width
                 let sidebarProgress = sidebarRevealProgress(sidebarWidth: sidebarWidth)
+                let shellOffset = sidebarProgress * (geometry.size.width + 12)
 
                 ZStack(alignment: .leading) {
                     UtilityBackground()
@@ -141,7 +142,7 @@ public struct ChatView: View {
                                 }
                             }
                         }
-                        .offset(x: contentOffset(sidebarWidth: sidebarWidth))
+                        .offset(x: shellOffset)
                         .simultaneousGesture(sidebarGesture(sidebarWidth: sidebarWidth))
                 }
             }
@@ -1190,10 +1191,6 @@ public struct ChatView: View {
         }
 
         return -sidebarWidth + max(0, sidebarDragOffset)
-    }
-
-    private func contentOffset(sidebarWidth: CGFloat) -> CGFloat {
-        sidebarRevealProgress(sidebarWidth: sidebarWidth) * sidebarWidth
     }
 
     private func sidebarGesture(sidebarWidth: CGFloat) -> some Gesture {
