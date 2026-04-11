@@ -369,7 +369,9 @@ public final class ModelDownloader {
                         return Int64(0)
                     }
 
-                    return Gemma4MLXSupport.directorySize(at: downloadLocation)
+                    // Hugging Face stages active downloads inside the repo's hidden `.cache`
+                    // directory, so the live progress sampler needs to include hidden files.
+                    return Gemma4MLXSupport.directorySize(at: downloadLocation, includingHiddenFiles: true)
                 }.value
 
                 guard !Task.isCancelled else {
