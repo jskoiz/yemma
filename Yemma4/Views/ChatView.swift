@@ -24,7 +24,6 @@ public struct ChatView: View {
     @State private var memoryAlertMessage: String?
     @State private var toastMessage: String?
     @State private var toastTask: Task<Void, Never>?
-    @State private var showSettings = false
     @State private var isSidebarOpen = false
     @State private var sidebarDragOffset: CGFloat = 0
     @State private var isShowingPhotoPicker = false
@@ -120,18 +119,23 @@ public struct ChatView: View {
                                     closeSidebar()
                                 }
                             },
-                            onOpenSettings: {
+                            onShowOnboarding: {
                                 closeSidebar()
-                                showSettings = true
+                                onShowOnboarding()
+                            },
+                            onRunDebugScenario: { scenario in
+                                closeSidebar()
+                                Task { @MainActor in
+                                    try? await Task.sleep(for: .milliseconds(150))
+                                    await runDebugScenario(scenario)
+                                }
+                            },
+                            onClose: {
+                                closeSidebar()
                             }
                         )
                         .frame(width: sidebarWidth)
                         .offset(x: sidebarOffset(sidebarWidth: sidebarWidth))
-                        .overlay(alignment: .topTrailing) {
-                            sidebarCloseButton
-                                .padding(.top, 20)
-                                .padding(.trailing, AppTheme.Layout.screenPadding)
-                        }
                     }
 
                     mainShell
@@ -151,24 +155,6 @@ public struct ChatView: View {
                 }
             }
             .toolbar(.hidden, for: .navigationBar)
-            .sheet(isPresented: $showSettings) {
-                SettingsView(
-                    onShowOnboarding: {
-                        showSettings = false
-                        onShowOnboarding()
-                    },
-                    onRunDebugScenario: { scenario in
-                        showSettings = false
-                        Task { @MainActor in
-                            try? await Task.sleep(for: .milliseconds(150))
-                            await runDebugScenario(scenario)
-                        }
-                    }
-                )
-                    .presentationDetents([.large])
-                    .presentationDragIndicator(.hidden)
-                    .presentationBackground(.clear)
-            }
             .onAppear {
                 AppDiagnostics.shared.record(
                     "startup: view_appeared",
@@ -285,38 +271,6 @@ public struct ChatView: View {
         .padding(.horizontal, 16)
         .padding(.top, 6)
         .padding(.bottom, 12)
-    }
-
-    private var sidebarCloseButton: some View {
-        Button {
-            withAnimation(.spring(response: 0.34, dampingFraction: 0.88)) {
-                isSidebarOpen = false
-                sidebarDragOffset = 0
-            }
-        } label: {
-            HStack {
-                Spacer(minLength: 0)
-
-                ZStack {
-                    Circle()
-                        .fill(AppTheme.controlFill)
-
-                    Circle()
-                        .stroke(AppTheme.controlBorder, lineWidth: 1)
-
-                    Image(systemName: "xmark")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(AppTheme.textPrimary)
-                }
-                .frame(width: 56, height: 56)
-                .padding(.trailing, 20)
-            }
-            .frame(width: 152, height: 88, alignment: .topTrailing)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Close sidebar")
-        .accessibilityHint("Returns to the chat.")
     }
 
     // MARK: - Conversation content with auto-scroll
@@ -708,8 +662,7 @@ public struct ChatView: View {
 
     private var typingIndicator: some View {
         HStack(spacing: 0) {
-            TypingDotsView()
-                .frame(width: 32, height: 20)
+            ThinkingOrbView()
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 16)
@@ -1783,32 +1736,60 @@ public struct ChatView: View {
     }
 }
 
-// MARK: - Typing Dots Animation
+// MARK: - Thinking indicator
 
-/// A small three-dot "thinking" animation inspired by ChatGPT/Claude iOS apps.
+private struct ThinkingOrbView: View {
+    var body: some View {
+        HStack(spacing: 10) {
+            TypingDotsView()
+            Text("Thinking")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(AppTheme.textSecondary)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+        .background(AppTheme.controlFill)
+        .clipShape(Capsule(style: .continuous))
+        .overlay(
+            Capsule(style: .continuous)
+                .stroke(AppTheme.assistantBubbleBorder, lineWidth: 1)
+        )
+        .shadow(color: AppTheme.shadow(.floating).color.opacity(0.45), radius: 14, x: 0, y: 8)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Thinking")
+    }
+}
+
 private struct TypingDotsView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var phase: Int = 0
 
-    private let dotSize: CGFloat = 7
-    private let spacing: CGFloat = 4
+    private let dotSize: CGFloat = 6.5
+    private let spacing: CGFloat = 5
+    private let stepDuration: TimeInterval = 0.28
 
     var body: some View {
-        HStack(spacing: spacing) {
-            ForEach(0..<3, id: \.self) { index in
-                Circle()
-                    .fill(AppTheme.textSecondary)
-                    .frame(width: dotSize, height: dotSize)
-                    .opacity(dotOpacity(for: index))
-                    .scaleEffect(dotScale(for: index))
+        TimelineView(.periodic(from: .now, by: reduceMotion ? 1 : stepDuration)) { context in
+            let phase = animationPhase(for: context.date)
+
+            HStack(spacing: spacing) {
+                ForEach(0..<3, id: \.self) { index in
+                    Circle()
+                        .fill(AppTheme.textSecondary)
+                        .frame(width: dotSize, height: dotSize)
+                        .opacity(dotOpacity(for: index, phase: phase))
+                        .scaleEffect(dotScale(for: index, phase: phase))
+                        .animation(reduceMotion ? nil : .easeInOut(duration: stepDuration * 0.9), value: phase)
+                }
             }
-        }
-        .onAppear {
-            startAnimation()
         }
     }
 
-    private func dotOpacity(for index: Int) -> Double {
+    private func animationPhase(for date: Date) -> Int {
+        guard !reduceMotion else { return 0 }
+        return Int(date.timeIntervalSinceReferenceDate / stepDuration) % 3
+    }
+
+    private func dotOpacity(for index: Int, phase: Int) -> Double {
         if reduceMotion {
             return 0.8
         }
@@ -1820,7 +1801,7 @@ private struct TypingDotsView: View {
         }
     }
 
-    private func dotScale(for index: Int) -> CGFloat {
+    private func dotScale(for index: Int, phase: Int) -> CGFloat {
         if reduceMotion {
             return 1.0
         }
@@ -1829,15 +1810,6 @@ private struct TypingDotsView: View {
         case 0: return 1.0
         case 1: return 0.85
         default: return 0.7
-        }
-    }
-
-    private func startAnimation() {
-        guard !reduceMotion else { return }
-        Timer.scheduledTimer(withTimeInterval: 0.35, repeats: true) { _ in
-            withAnimation(.easeInOut(duration: 0.3)) {
-                phase = (phase + 1) % 3
-            }
         }
     }
 }
@@ -1857,18 +1829,31 @@ private struct SharePayload: Identifiable {
 
 private struct ChatSidebarView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(ModelDownloader.self) private var modelDownloader
     @Environment(LLMService.self) private var llmService
     @Environment(ConversationStore.self) private var conversationStore
+    @Environment(AppDiagnostics.self) private var diagnostics
     @AppStorage(AppearancePreference.storageKey) private var appearancePreferenceRaw = AppearancePreference.system.rawValue
 
     let currentConversationID: UUID?
     let onSelectConversation: (UUID) -> Void
     let onStartFresh: () -> Void
-    let onOpenSettings: () -> Void
+    let onShowOnboarding: () -> Void
+    let onRunDebugScenario: ((DebugInferenceScenario) -> Void)?
+    let onClose: () -> Void
 
     @State private var renameConversation: ConversationMetadata?
     @State private var renameTitle = ""
+    @State private var showAdvancedControls = false
+    @State private var showEventLog = false
+    @State private var diagnosticsCopied = false
+    @State private var showDeleteModelConfirmation = false
+    @State private var showClearConversationConfirmation = false
+
+    private let repositoryURL = URL(string: "https://yemma.chat")!
+    private let madeByURL = URL(string: "https://avmillabs.com")!
+    private let maxTokenOptions: [Int] = [256, 512, 1024, 2048, 4096]
 
     var body: some View {
         ZStack {
@@ -1884,6 +1869,7 @@ private struct ChatSidebarView: View {
                         everydaySection
                         chatsSection
                         modelSection
+                        aboutSection
                     }
                     .padding(.horizontal, AppTheme.Layout.screenPadding)
                     .padding(.bottom, 28)
@@ -1892,6 +1878,41 @@ private struct ChatSidebarView: View {
         }
         .task {
             await conversationStore.loadIndexIfNeeded()
+            await diagnostics.loadPersistedEventsIfNeeded()
+        }
+        .alert("Diagnostics copied", isPresented: $diagnosticsCopied) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("The recent diagnostics log is on the pasteboard.")
+        }
+        .confirmationDialog(
+            "Delete the downloaded model?",
+            isPresented: $showDeleteModelConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete Model", role: .destructive) {
+                Task {
+                    await llmService.unloadModel()
+                    modelDownloader.deleteModel()
+                    onShowOnboarding()
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Yemma will return to setup until the model is downloaded again.")
+        }
+        .confirmationDialog(
+            "Delete conversation history?",
+            isPresented: $showClearConversationConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete History", role: .destructive) {
+                AppDiagnostics.shared.record("Conversation history cleared", category: "ui")
+                conversationStore.deleteAllConversations()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes saved local chats, drafts, and attached images on this iPhone.")
         }
         .alert(
             "Rename Chat",
@@ -1921,15 +1942,38 @@ private struct ChatSidebarView: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Yemma 4")
-                .font(.system(size: 24, weight: .semibold, design: .serif))
-                .foregroundStyle(AppTheme.textPrimary)
+        HStack(alignment: .top, spacing: 16) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Yemma 4")
+                    .font(.system(size: 24, weight: .semibold, design: .serif))
+                    .foregroundStyle(AppTheme.textPrimary)
 
-            Text("Chats and quick controls")
-                .font(AppTheme.Typography.utilityCaption)
-                .foregroundStyle(AppTheme.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
+                Text("Chats and quick controls")
+                    .font(AppTheme.Typography.utilityCaption)
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 0)
+
+            Button(action: onClose) {
+                ZStack {
+                    Circle()
+                        .fill(AppTheme.controlFill)
+
+                    Circle()
+                        .stroke(AppTheme.controlBorder, lineWidth: 1)
+
+                    Image(systemName: "xmark")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(AppTheme.textPrimary)
+                }
+                .frame(width: 48, height: 48)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Close sidebar")
+            .accessibilityHint("Returns to the chat.")
         }
     }
 
@@ -2041,32 +2085,91 @@ private struct ChatSidebarView: View {
 
     private var modelSection: some View {
         UtilitySection("Model & Storage") {
-            Button(action: onOpenSettings) {
-                HStack(spacing: 14) {
-                    Image(systemName: "internaldrive")
-                        .frame(width: AppTheme.Layout.rowIconSize)
-                        .foregroundStyle(AppTheme.textPrimary)
+            infoRow(
+                icon: "shippingbox",
+                title: "Local model",
+                detail: modelSizeText
+            )
+            UtilitySectionSeparator()
 
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Open full settings")
-                            .font(AppTheme.Typography.utilityRowTitle)
-                            .foregroundStyle(AppTheme.textPrimary)
-
-                        Text(modelSummary)
-                            .font(AppTheme.Typography.utilityCaption)
-                            .foregroundStyle(AppTheme.textSecondary)
-                            .multilineTextAlignment(.leading)
-                    }
-
-                    Spacer()
-
-                    Image(systemName: "chevron.right")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(AppTheme.textSecondary)
-                }
-                .utilityRowPadding()
+            Button {
+                AppHaptics.selection()
+                onShowOnboarding()
+            } label: {
+                actionRow(
+                    icon: "sparkles.rectangle.stack",
+                    title: "Setup status",
+                    subtitle: setupStatusDetail
+                )
             }
             .buttonStyle(.plain)
+
+            UtilitySectionSeparator()
+
+            Button {
+                if reduceMotion {
+                    showAdvancedControls.toggle()
+                } else {
+                    withAnimation(.easeInOut(duration: 0.22)) {
+                        showAdvancedControls.toggle()
+                    }
+                }
+                AppHaptics.selection()
+            } label: {
+                disclosureRow(
+                    icon: "gearshape.2",
+                    title: "Advanced",
+                    subtitle: "Model tuning, diagnostics, and debug tools.",
+                    isExpanded: showAdvancedControls
+                )
+            }
+            .buttonStyle(.plain)
+
+            if showAdvancedControls {
+                UtilitySectionSeparator(leadingInset: AppTheme.Layout.rowHorizontalPadding)
+                advancedCard
+            }
+
+            UtilitySectionSeparator()
+
+            destructiveRow(
+                icon: "trash",
+                title: "Delete conversation history",
+                subtitle: "Remove saved local chats, drafts, and attached images."
+            ) {
+                showClearConversationConfirmation = true
+            }
+
+            UtilitySectionSeparator()
+
+            destructiveRow(
+                icon: "externaldrive.badge.minus",
+                title: "Delete downloaded model",
+                subtitle: "Remove the local model and send Yemma back to setup.",
+                isDisabled: modelDownloader.modelPath == nil
+            ) {
+                showDeleteModelConfirmation = true
+            }
+        }
+    }
+
+    private var aboutSection: some View {
+        UtilitySection("About") {
+            linkRow(
+                icon: "link",
+                title: "Project page",
+                subtitle: "yemma.chat",
+                url: repositoryURL
+            )
+            UtilitySectionSeparator()
+            linkRow(
+                icon: "building.2",
+                title: "Made by",
+                subtitle: "AVMIL Labs in Honolulu 🤙",
+                url: madeByURL
+            )
+            UtilitySectionSeparator()
+            infoRow(icon: "info.circle", title: "Version", detail: appVersionText)
         }
     }
 
@@ -2181,6 +2284,499 @@ private struct ChatSidebarView: View {
         .contentShape(Rectangle())
     }
 
+    private func disclosureRow(
+        icon: String,
+        title: String,
+        subtitle: String,
+        isExpanded: Bool
+    ) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: icon)
+                .frame(width: AppTheme.Layout.rowIconSize)
+                .foregroundStyle(AppTheme.textPrimary)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text(title)
+                    .font(AppTheme.Typography.utilityRowTitle.weight(.semibold))
+                    .foregroundStyle(AppTheme.textPrimary)
+
+                Text(subtitle)
+                    .font(AppTheme.Typography.utilityRowDetail)
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+
+            Spacer()
+
+            Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(AppTheme.textSecondary)
+        }
+        .utilityRowPadding()
+        .contentShape(Rectangle())
+    }
+
+    private var advancedCard: some View {
+        VStack(spacing: 0) {
+            advancedSubsectionHeader(
+                title: "Model controls",
+                detail: "Fine-tune response length and creativity when you want something more custom than the preset."
+            )
+            advancedDivider()
+            advancedTemperatureRow
+            advancedDivider()
+            advancedMaxResponseRow
+            advancedDivider()
+            diagnosticsSection
+
+#if DEBUG
+            if onRunDebugScenario != nil {
+                advancedDivider()
+                debugScenariosRow
+            }
+#endif
+
+            advancedDivider()
+            resetDefaultsRow
+        }
+        .background(
+            RoundedRectangle(cornerRadius: AppTheme.Radius.medium, style: .continuous)
+                .fill(AppTheme.controlFill)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: AppTheme.Radius.medium, style: .continuous)
+                .stroke(AppTheme.controlBorder, lineWidth: 1)
+        )
+        .padding(.horizontal, AppTheme.Layout.rowHorizontalPadding)
+        .padding(.vertical, 14)
+    }
+
+    private func advancedSubsectionHeader(title: String, detail: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(AppTheme.Typography.utilityRowTitle.weight(.semibold))
+                .foregroundStyle(AppTheme.textPrimary)
+
+            Text(detail)
+                .font(AppTheme.Typography.utilityCaption)
+                .foregroundStyle(AppTheme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 16)
+        .padding(.top, 14)
+        .padding(.bottom, 12)
+    }
+
+    private func advancedDivider() -> some View {
+        Divider()
+            .padding(.leading, 16)
+            .overlay(AppTheme.separator)
+    }
+
+    private var advancedTemperatureRow: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Label("Creativity", systemImage: "slider.horizontal.3")
+                    .font(AppTheme.Typography.utilityRowTitle)
+                    .foregroundStyle(AppTheme.textPrimary)
+
+                Spacer()
+
+                Text(String(format: "%.1f", llmService.temperature))
+                    .font(AppTheme.Typography.utilityRowDetail)
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+
+            Slider(
+                value: Binding(
+                    get: { llmService.temperature },
+                    set: { llmService.temperature = $0 }
+                ),
+                in: 0.1...2.0,
+                step: 0.1
+            )
+            .tint(AppTheme.accent)
+
+            Text("Lower stays tighter. Higher feels more open-ended.")
+                .font(AppTheme.Typography.utilityCaption)
+                .foregroundStyle(AppTheme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+    }
+
+    private var advancedMaxResponseRow: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Label("Max response", systemImage: "text.word.spacing")
+                    .font(AppTheme.Typography.utilityRowTitle)
+                    .foregroundStyle(AppTheme.textPrimary)
+
+                Spacer()
+
+                Text(tokenLabel(llmService.maxResponseTokens))
+                    .font(AppTheme.Typography.utilityRowDetail)
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+
+            Menu {
+                ForEach(maxTokenOptions, id: \.self) { count in
+                    Button(tokenLabel(count)) {
+                        guard llmService.maxResponseTokens != count else { return }
+                        llmService.maxResponseTokens = count
+                        AppHaptics.selection()
+                        diagnostics.record(
+                            "Max response changed",
+                            category: "settings",
+                            metadata: ["maxResponseTokens": count]
+                        )
+                    }
+                }
+            } label: {
+                HStack {
+                    Text(tokenLabel(llmService.maxResponseTokens))
+                        .font(AppTheme.Typography.utilityRowTitle)
+                        .foregroundStyle(AppTheme.textPrimary)
+
+                    Spacer()
+
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(AppTheme.textSecondary)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .background(AppTheme.inputFill)
+                .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.small, style: .continuous))
+            }
+            .buttonStyle(.plain)
+
+            Text("Maximum tokens the model can generate per reply.")
+                .font(AppTheme.Typography.utilityCaption)
+                .foregroundStyle(AppTheme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+    }
+
+    private var diagnosticsSection: some View {
+        VStack(spacing: 0) {
+            advancedSubsectionHeader(
+                title: "Diagnostics",
+                detail: "Inspect recent events, copy the local log, or clear it."
+            )
+            advancedDivider()
+            advancedInfoRow(
+                icon: "waveform.path.ecg",
+                title: "Recent events",
+                detail: "\(diagnostics.recentEvents.count)"
+            )
+            advancedDivider()
+            Button {
+                diagnostics.copyToPasteboard()
+                diagnosticsCopied = true
+            } label: {
+                advancedActionRow(
+                    icon: "doc.on.doc",
+                    title: "Copy diagnostics log",
+                    detail: "Put the recent local event log on the pasteboard."
+                )
+            }
+            .buttonStyle(.plain)
+            advancedDivider()
+            Button {
+                diagnostics.clear()
+            } label: {
+                advancedActionRow(
+                    icon: "trash",
+                    title: "Clear diagnostics log",
+                    detail: "Remove recent local event history from the app.",
+                    titleColor: AppTheme.destructive,
+                    trailingColor: AppTheme.destructive
+                )
+            }
+            .buttonStyle(.plain)
+
+            if !diagnostics.recentEvents.isEmpty {
+                advancedDivider()
+
+                Button {
+                    if reduceMotion {
+                        showEventLog.toggle()
+                    } else {
+                        withAnimation(.easeInOut(duration: 0.22)) {
+                            showEventLog.toggle()
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 14) {
+                        Image(systemName: "list.bullet.rectangle")
+                            .frame(width: AppTheme.Layout.rowIconSize)
+                            .foregroundStyle(AppTheme.textPrimary)
+
+                        Text("Event log")
+                            .font(AppTheme.Typography.utilityRowTitle)
+                            .foregroundStyle(AppTheme.textPrimary)
+
+                        Spacer()
+
+                        Text("\(diagnostics.recentEvents.suffix(6).count)")
+                            .font(AppTheme.Typography.utilityRowDetail)
+                            .foregroundStyle(AppTheme.textSecondary)
+
+                        Image(systemName: showEventLog ? "chevron.up" : "chevron.down")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(AppTheme.textSecondary)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 14)
+                }
+                .buttonStyle(.plain)
+
+                if showEventLog {
+                    ForEach(Array(diagnostics.recentEvents.suffix(6).reversed())) { event in
+                        advancedDivider()
+                        diagnosticEventRow(event)
+                    }
+                }
+            }
+        }
+    }
+
+#if DEBUG
+    private var debugScenariosRow: some View {
+        Menu {
+            ForEach(DebugInferenceScenario.allCases) { scenario in
+                Button {
+                    AppHaptics.selection()
+                    onRunDebugScenario?(scenario)
+                } label: {
+                    Label(scenario.title, systemImage: scenario.icon)
+                }
+            }
+        } label: {
+            advancedActionRow(
+                icon: "wrench.and.screwdriver",
+                title: "Debug scenarios",
+                detail: "Run canned prompts to check formatting and rendering."
+            )
+        }
+        .buttonStyle(.plain)
+    }
+#endif
+
+    private var resetDefaultsRow: some View {
+        Button {
+            llmService.resetAdvancedSettings()
+            AppHaptics.selection()
+            diagnostics.record("Advanced settings reset", category: "settings")
+        } label: {
+            advancedActionRow(
+                icon: "arrow.counterclockwise",
+                title: "Reset to defaults",
+                detail: "Restore the focused default tuning.",
+                titleColor: AppTheme.accent,
+                trailingColor: AppTheme.accent
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func advancedInfoRow(icon: String, title: String, detail: String) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: icon)
+                .frame(width: AppTheme.Layout.rowIconSize)
+                .foregroundStyle(AppTheme.textPrimary)
+
+            Text(title)
+                .font(AppTheme.Typography.utilityRowTitle)
+                .foregroundStyle(AppTheme.textPrimary)
+
+            Spacer()
+
+            Text(detail)
+                .font(AppTheme.Typography.utilityRowDetail)
+                .foregroundStyle(AppTheme.textSecondary)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+    }
+
+    private func advancedActionRow(
+        icon: String,
+        title: String,
+        detail: String,
+        titleColor: Color = AppTheme.textPrimary,
+        trailingColor: Color = AppTheme.textSecondary
+    ) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: icon)
+                .frame(width: AppTheme.Layout.rowIconSize)
+                .foregroundStyle(titleColor)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(AppTheme.Typography.utilityRowTitle)
+                    .foregroundStyle(titleColor)
+
+                Text(detail)
+                    .font(AppTheme.Typography.utilityCaption)
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .multilineTextAlignment(.leading)
+            }
+
+            Spacer()
+
+            Image(systemName: "chevron.right")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(trailingColor)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+    }
+
+    private func diagnosticEventRow(_ event: DiagnosticEvent) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(event.category.uppercased())
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(AppTheme.textSecondary)
+
+                Spacer()
+
+                Text(event.timestamp.formatted(date: .omitted, time: .standard))
+                    .font(AppTheme.Typography.utilityCaption)
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+
+            Text(event.message)
+                .font(AppTheme.Typography.utilityRowTitle.weight(.semibold))
+                .foregroundStyle(AppTheme.textPrimary)
+
+            if !event.metadata.isEmpty {
+                Text(
+                    event.metadata
+                        .sorted { $0.key < $1.key }
+                        .map { "\($0.key): \($0.value)" }
+                        .joined(separator: " • ")
+                )
+                .font(AppTheme.Typography.utilityCaption)
+                .foregroundStyle(AppTheme.textSecondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+    }
+
+    private func infoRow(icon: String, title: String, detail: String) -> some View {
+        ViewThatFits(in: .vertical) {
+            HStack(spacing: 14) {
+                Image(systemName: icon)
+                    .frame(width: AppTheme.Layout.rowIconSize)
+                    .foregroundStyle(AppTheme.textPrimary)
+
+                Text(title)
+                    .font(AppTheme.Typography.utilityRowTitle)
+                    .foregroundStyle(AppTheme.textPrimary)
+
+                Spacer()
+
+                Text(detail)
+                    .font(AppTheme.Typography.utilityRowDetail)
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .multilineTextAlignment(.trailing)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 14) {
+                    Image(systemName: icon)
+                        .frame(width: AppTheme.Layout.rowIconSize)
+                        .foregroundStyle(AppTheme.textPrimary)
+
+                    Text(title)
+                        .font(AppTheme.Typography.utilityRowTitle)
+                        .foregroundStyle(AppTheme.textPrimary)
+                }
+
+                Text(detail)
+                    .font(AppTheme.Typography.utilityRowDetail)
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .padding(.leading, AppTheme.Layout.rowIconSize + 14)
+            }
+        }
+        .utilityRowPadding()
+        .accessibilityElement(children: .combine)
+    }
+
+    private func destructiveRow(
+        icon: String,
+        title: String,
+        subtitle: String,
+        isDisabled: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 14) {
+                Image(systemName: icon)
+                    .frame(width: AppTheme.Layout.rowIconSize)
+                    .foregroundStyle(AppTheme.destructive)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(title)
+                        .font(AppTheme.Typography.utilityRowTitle.weight(.semibold))
+                        .foregroundStyle(AppTheme.destructive)
+
+                    Text(subtitle)
+                        .font(AppTheme.Typography.utilityRowDetail)
+                        .foregroundStyle(AppTheme.textSecondary)
+                }
+
+                Spacer()
+            }
+            .utilityRowPadding()
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(isDisabled)
+        .opacity(isDisabled ? 0.45 : 1)
+    }
+
+    private func linkRow(
+        icon: String,
+        title: String,
+        subtitle: String,
+        url: URL
+    ) -> some View {
+        Link(destination: url) {
+            HStack(spacing: 14) {
+                Image(systemName: icon)
+                    .frame(width: AppTheme.Layout.rowIconSize)
+                    .foregroundStyle(AppTheme.textPrimary)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(title)
+                        .font(AppTheme.Typography.utilityRowTitle.weight(.semibold))
+                        .foregroundStyle(AppTheme.textPrimary)
+
+                    Text(subtitle)
+                        .font(AppTheme.Typography.utilityRowDetail)
+                        .foregroundStyle(AppTheme.textSecondary)
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+            .utilityRowPadding()
+        }
+        .buttonStyle(.plain)
+    }
+
     private func statusChip(_ text: String) -> some View {
         Text(text)
             .font(.system(size: 11, weight: .semibold))
@@ -2211,18 +2807,59 @@ private struct ChatSidebarView: View {
         )
     }
 
-    private var modelSummary: String {
+    private var modelSizeText: String {
         guard let modelPath = modelDownloader.modelPath else {
-            return "Setup, storage, downloads, and advanced controls."
+            return "Not downloaded"
         }
 
         let totalBytes = Gemma4MLXSupport.directorySize(at: URL(fileURLWithPath: modelPath))
         guard totalBytes > 0 else {
-            return "Setup, storage, downloads, and advanced controls."
+            return "Unknown"
         }
 
-        let sizeText = ByteCountFormatter.string(fromByteCount: totalBytes, countStyle: .file)
-        return "Model downloaded locally (\(sizeText)). Setup, storage, and advanced controls."
+        return ByteCountFormatter.string(fromByteCount: totalBytes, countStyle: .file)
+    }
+
+    private var setupStatusDetail: String {
+        if modelDownloader.isDownloading {
+            return "\(Int(modelDownloader.downloadProgress * 100))% downloaded locally."
+        }
+
+        if modelDownloader.canResumeDownload {
+            return "Resume the model download and setup."
+        }
+
+        if modelDownloader.error != nil {
+            return "The local model setup needs attention."
+        }
+
+        if llmService.isModelLoading {
+            return "Loading the local model into memory."
+        }
+
+        if llmService.isTextModelReady {
+            return "Ready to chat fully on-device."
+        }
+
+        if modelDownloader.isDownloaded {
+            return "Downloaded locally. Load it when you are ready to chat."
+        }
+
+        return "Check download progress and local setup."
+    }
+
+    private var appVersionText: String {
+        let info = Bundle.main.infoDictionary
+        let version = info?["CFBundleShortVersionString"] as? String ?? "Unknown"
+        let build = info?["CFBundleVersion"] as? String ?? "Unknown"
+        return "\(version) (\(build))"
+    }
+
+    private func tokenLabel(_ count: Int) -> String {
+        if count >= 1024 {
+            return String(format: "%.1fK", Double(count) / 1024.0)
+        }
+        return "\(count)"
     }
 
     private static func relativeDateText(for date: Date) -> String {
