@@ -1140,13 +1140,30 @@ public struct ChatView: View {
     private func switchConversation(to conversationID: UUID) async {
         persistConversationNow()
         guard conversationStore.currentConversationID != conversationID else { return }
+        await stopGeneration()
         conversationStore.setCurrentConversation(id: conversationID)
+        if let snapshot = conversationStore.loadConversation(id: conversationID) {
+            applyConversationSnapshot(snapshot)
+        } else {
+            await restoreConversationIfNeeded(force: true)
+        }
     }
 
     @MainActor
     private func startFreshConversation() async {
         persistConversationNow()
+        await stopGeneration()
         let conversationID = conversationStore.startFreshConversation()
+        conversationSaveTask?.cancel()
+        applyConversationSnapshot(
+            ConversationSnapshot(
+                id: conversationID,
+                title: "New chat",
+                messages: [],
+                draftText: "",
+                draftAttachments: []
+            )
+        )
         AppDiagnostics.shared.record(
             "Fresh conversation started",
             category: "ui",
