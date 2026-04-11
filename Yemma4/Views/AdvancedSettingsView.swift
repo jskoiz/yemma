@@ -27,12 +27,7 @@ struct AdvancedSettingsView: View {
 
                     overviewSection
                     inferenceSection
-#if DEBUG
-                    diagnosticsSection
-                    if onRunDebugScenario != nil {
-                        debugSection
-                    }
-#endif
+                    advancedSection
                     resetSection
                 }
                 .padding(.horizontal, AppTheme.Layout.screenPadding)
@@ -187,10 +182,33 @@ struct AdvancedSettingsView: View {
         .accessibilityHint("Sets the longest reply the model is allowed to produce.")
     }
 
-    // MARK: - Diagnostics
+    // MARK: - Advanced
 
-    private var diagnosticsSection: some View {
-        UtilitySection("Diagnostics") {
+    private var advancedSection: some View {
+        UtilitySection("Advanced") {
+            diagnosticsContent
+
+#if DEBUG
+            if onRunDebugScenario != nil {
+                UtilitySectionSeparator()
+                debugContent
+            }
+#endif
+        }
+        .alert("Diagnostics copied", isPresented: $diagnosticsCopied) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("The recent diagnostics log is on the pasteboard.")
+        }
+    }
+
+    private var diagnosticsContent: some View {
+        VStack(spacing: 0) {
+            subsectionHeader(
+                title: "Diagnostics",
+                detail: "Inspect recent events, copy the local log, or clear it."
+            )
+            UtilitySectionSeparator()
             infoRow(icon: "waveform.path.ecg", title: "Recent events", detail: "\(diagnostics.recentEvents.count)")
             UtilitySectionSeparator()
             Button {
@@ -243,11 +261,6 @@ struct AdvancedSettingsView: View {
                 }
             }
         }
-        .alert("Diagnostics copied", isPresented: $diagnosticsCopied) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text("The recent diagnostics log is on the pasteboard.")
-        }
     }
 
     private func diagnosticEventRow(_ event: DiagnosticEvent) -> some View {
@@ -284,22 +297,34 @@ struct AdvancedSettingsView: View {
         .padding(.vertical, 14)
     }
 
-    // MARK: - Debug
+    private func subsectionHeader(title: String, detail: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(AppTheme.Typography.utilityRowTitle.weight(.semibold))
+                .foregroundStyle(AppTheme.textPrimary)
 
-#if DEBUG
-    private var debugSection: some View {
-        UtilitySection("Debug Scenarios") {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Use these from a Debug build to probe formatting quality. Run the live prompts on a physical iPhone, since the simulator only returns mocked replies.")
-                    .font(AppTheme.Typography.utilityCaption)
-                    .foregroundStyle(AppTheme.textSecondary)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .utilityRowPadding()
+            Text(detail)
+                .font(AppTheme.Typography.utilityCaption)
+                .foregroundStyle(AppTheme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, AppTheme.Layout.rowHorizontalPadding)
+        .padding(.top, 14)
+        .padding(.bottom, 12)
+    }
+
+    #if DEBUG
+    private var debugContent: some View {
+        VStack(spacing: 0) {
+            subsectionHeader(
+                title: "Debug scenarios",
+                detail: "Use canned prompts to probe formatting quality on a physical iPhone."
+            )
 
             if let onRunDebugScenario {
+                UtilitySectionSeparator()
                 ForEach(DebugInferenceScenario.allCases) { scenario in
-                    UtilitySectionSeparator()
                     actionDetailRow(
                         icon: scenario.icon,
                         title: scenario.title,
@@ -308,11 +333,15 @@ struct AdvancedSettingsView: View {
                         dismiss()
                         onRunDebugScenario(scenario)
                     }
+
+                    if scenario != DebugInferenceScenario.allCases.last {
+                        UtilitySectionSeparator()
+                    }
                 }
             }
         }
     }
-#endif
+    #endif
 
     private func actionDetailRow(
         icon: String,
