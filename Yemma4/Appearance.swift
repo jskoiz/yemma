@@ -116,37 +116,37 @@ enum AppTheme {
     static let groupedBackground = Color(uiColor: .systemGroupedBackground)
     static let groupedSurface = Color(uiColor: .secondarySystemGroupedBackground)
     static let groupedSurfaceBorder = dynamicColor(light: rgba(67, 79, 104, alpha: 0.08), dark: rgba(255, 255, 255, alpha: 0.06))
-    static let utilityTopTint = dynamicColor(light: rgba(111, 95, 214, alpha: 0.09), dark: rgba(124, 108, 228, alpha: 0.10))
+    static let utilityTopTint = dynamicColor(light: rgba(24, 24, 28, alpha: 0.06), dark: rgba(255, 255, 255, alpha: 0.04))
 
     static let controlFill = dynamicColor(light: rgba(255, 255, 255, alpha: 0.86), dark: rgba(37, 41, 53, alpha: 0.92))
     static let controlBorder = dynamicColor(light: rgba(67, 79, 104, alpha: 0.08), dark: rgba(255, 255, 255, alpha: 0.09))
     static let inputFill = dynamicColor(light: rgba(255, 255, 255, alpha: 0.92), dark: rgba(24, 27, 37, alpha: 0.96))
     static let inputBorder = dynamicColor(light: rgba(67, 79, 104, alpha: 0.10), dark: rgba(255, 255, 255, alpha: 0.08))
-    static let chipFill = dynamicColor(light: rgba(111, 95, 214, alpha: 0.10), dark: rgba(124, 108, 228, alpha: 0.20))
-    static let chipPressedFill = dynamicColor(light: rgba(111, 95, 214, alpha: 0.16), dark: rgba(124, 108, 228, alpha: 0.28))
+    static let chipFill = dynamicColor(light: rgba(24, 24, 28, alpha: 0.08), dark: rgba(255, 255, 255, alpha: 0.10))
+    static let chipPressedFill = dynamicColor(light: rgba(24, 24, 28, alpha: 0.14), dark: rgba(255, 255, 255, alpha: 0.16))
 
     static let textPrimary = Color(uiColor: .label)
     static let textSecondary = Color(uiColor: .secondaryLabel)
     static let textTertiary = Color(uiColor: .tertiaryLabel)
     static let separator = dynamicColor(light: rgba(67, 79, 104, alpha: 0.12), dark: rgba(255, 255, 255, alpha: 0.08))
 
-    static let accent = dynamicColor(light: rgba(90, 73, 198), dark: rgba(124, 108, 228))
-    static let accentStrong = dynamicColor(light: rgba(72, 56, 170), dark: rgba(104, 88, 210))
-    static let accentSoft = dynamicColor(light: rgba(90, 73, 198, alpha: 0.16), dark: rgba(124, 108, 228, alpha: 0.24))
+    static let accent = dynamicColor(light: rgba(20, 20, 24), dark: rgba(244, 244, 246))
+    static let accentStrong = dynamicColor(light: rgba(8, 8, 12), dark: rgba(255, 255, 255))
+    static let accentSoft = dynamicColor(light: rgba(20, 20, 24, alpha: 0.12), dark: rgba(255, 255, 255, alpha: 0.16))
     static let accentForeground = Color.white
     static let accentSecondaryForeground = Color.white.opacity(0.76)
     static let destructive = dynamicColor(light: rgba(191, 43, 55), dark: rgba(255, 107, 122))
 
     static let userBubbleTop = accent
     static let userBubbleBottom = accentStrong
-    static let userBubbleBorder = dynamicColor(light: rgba(72, 56, 170, alpha: 0.24), dark: rgba(255, 255, 255, alpha: 0.12))
+    static let userBubbleBorder = dynamicColor(light: rgba(8, 8, 12, alpha: 0.18), dark: rgba(255, 255, 255, alpha: 0.12))
     static let assistantBubble = dynamicColor(light: rgba(255, 255, 255, alpha: 0.84), dark: rgba(33, 37, 49, alpha: 0.94))
     static let assistantBubbleBorder = dynamicColor(light: rgba(67, 79, 104, alpha: 0.08), dark: rgba(255, 255, 255, alpha: 0.06))
     static let assistantLabel = dynamicColor(light: rgba(94, 104, 128), dark: rgba(166, 174, 194))
     static let userMessageText = Color.white
     static let assistantMessageText = textPrimary
     static let messageCodeBlockBackground = dynamicColor(light: rgba(22, 29, 49, alpha: 0.05), dark: rgba(255, 255, 255, alpha: 0.05))
-    static let messageQuote = dynamicColor(light: rgba(90, 73, 198, alpha: 0.30), dark: rgba(124, 108, 228, alpha: 0.40))
+    static let messageQuote = dynamicColor(light: rgba(20, 20, 24, alpha: 0.20), dark: rgba(255, 255, 255, alpha: 0.24))
 
     static let composerFadeMiddle = dynamicColor(light: rgba(255, 255, 255, alpha: 0.50), dark: rgba(8, 10, 16, alpha: 0.54))
     static let composerFadeBottom = dynamicColor(light: rgba(255, 255, 255, alpha: 0.82), dark: rgba(8, 10, 16, alpha: 0.88))

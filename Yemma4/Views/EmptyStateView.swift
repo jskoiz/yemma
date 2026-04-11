@@ -23,16 +23,16 @@ struct ChatStarter: Identifiable, Hashable {
             behavior: .promptAndPickImage
         ),
         ChatStarter(
-            title: "Draft a polished reply",
-            subtitle: "Turn a quick thought into a sendable message",
-            prompt: "Draft a polite reply saying I can meet Thursday afternoon instead of Wednesday morning.",
-            systemImage: "envelope.open"
+            title: "Teach me something",
+            subtitle: "Share a short history or science fact I probably do not know",
+            prompt: "Teach me one short surprising fact from history or science that most people do not know. Keep it clear and under three short paragraphs.",
+            systemImage: "sparkles"
         ),
         ChatStarter(
-            title: "Make a clear plan",
-            subtitle: "Organize a goal into practical next steps",
-            prompt: "Help me turn a vague goal into a simple step-by-step plan with a short checklist.",
-            systemImage: "list.clipboard"
+            title: "Tell me a random fact",
+            subtitle: "Give me one interesting fact with a quick explanation",
+            prompt: "Tell me one interesting random fact and explain why it is surprising in a few sentences. Keep it concise.",
+            systemImage: "lightbulb"
         )
     ]
 }
