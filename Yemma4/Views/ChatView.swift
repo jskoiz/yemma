@@ -41,6 +41,7 @@ public struct ChatView: View {
     /// Whether the transcript is currently close enough to the bottom to auto-scroll.
     @State private var isPinnedToBottom = true
     @State private var scrollViewportHeight: CGFloat = 0
+    @State private var completedAssistantMessageIDs: Set<String> = []
 
     private let bottomAnchorID = "conversation-bottom-anchor"
     private let scrollCoordinateSpaceName = "conversation-scroll"
@@ -304,8 +305,9 @@ public struct ChatView: View {
                                 )
                         }
                         .padding(.horizontal, 16)
+                        .padding(.top, 8)
                         .padding(.bottom, 18)
-                        .frame(maxWidth: .infinity, minHeight: 0)
+                        .frame(maxWidth: .infinity, minHeight: geometry.size.height, alignment: .top)
                         .animation(
                             reduceMotion
                                 ? nil
@@ -358,7 +360,16 @@ public struct ChatView: View {
         guard index > 0 else { return 0 }
         let previous = messages[index - 1]
         let current = messages[index]
-        return previous.user.isCurrentUser == current.user.isCurrentUser ? 4 : 14
+
+        if previous.user.isCurrentUser == current.user.isCurrentUser {
+            return previous.user.isCurrentUser ? 6 : 8
+        }
+
+        if previous.user.isCurrentUser && !current.user.isCurrentUser {
+            return 22
+        }
+
+        return 18
     }
 
     private func scrollToBottomIfPinned(proxy: ScrollViewProxy, animated: Bool) {
@@ -513,6 +524,7 @@ public struct ChatView: View {
         let text = displayText(for: message)
         let shouldRenderText = shouldRenderText(for: message, text: text)
         let isStreaming = message.id == streamingMessageID && llmService.isGenerating
+        let isActionStripVisible = shouldShowMessageActionStrip(for: message, index: index)
 
         VStack(alignment: .leading, spacing: 10) {
             if !message.attachments.isEmpty {
@@ -534,14 +546,20 @@ public struct ChatView: View {
                 )
             }
 
-            if shouldShowMessageActionStrip(for: message, index: index) {
+            if isActionStripVisible {
                 messageActionStrip(for: message, index: index)
+                    .transition(
+                        reduceMotion
+                            ? .opacity
+                            : .opacity.combined(with: .move(edge: .top))
+                    )
             }
         }
         .contextMenu {
             messageContextMenu(for: message, index: index)
         }
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: isStreaming)
+        .animation(reduceMotion ? nil : .spring(response: 0.28, dampingFraction: 0.9), value: isActionStripVisible)
     }
 
     // MARK: - Composer
@@ -876,7 +894,8 @@ public struct ChatView: View {
     private func shouldShowMessageActionStrip(for message: ChatMessage, index: Int) -> Bool {
         guard !message.user.isCurrentUser else { return false }
         let hasText = !message.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        return hasText || canRetryAssistantResponse(message, index: index)
+        guard hasText else { return false }
+        return completedAssistantMessageIDs.contains(message.id)
     }
 
     private func messageActionStrip(for message: ChatMessage, index: Int) -> some View {
@@ -918,6 +937,7 @@ public struct ChatView: View {
             messageActionOverflowMenu(for: message, index: index, trimmedText: trimmedText)
         }
         .padding(.horizontal, 2)
+        .padding(.top, 6)
     }
 
     private func messageActionIconButton(
@@ -928,9 +948,9 @@ public struct ChatView: View {
     ) -> some View {
         Button(action: action) {
             Image(systemName: systemImage)
-                .font(.system(size: 17, weight: .semibold))
+                .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(AppTheme.textSecondary)
-                .frame(width: 28, height: 28)
+                .frame(width: 22, height: 22)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -947,9 +967,9 @@ public struct ChatView: View {
             messageActionMenuItems(for: message, index: index, trimmedText: trimmedText)
         } label: {
             Image(systemName: "ellipsis")
-                .font(.system(size: 17, weight: .semibold))
+                .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(AppTheme.textSecondary)
-                .frame(width: 28, height: 28)
+                .frame(width: 22, height: 22)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -1081,6 +1101,7 @@ public struct ChatView: View {
 
         await stopGeneration()
         updateMessageText(id: message.id, text: "")
+        completedAssistantMessageIDs.remove(message.id)
         generationError = nil
         memoryAlertMessage = nil
         isPinnedToBottom = true
@@ -1136,6 +1157,11 @@ public struct ChatView: View {
     private func applyConversationSnapshot(_ snapshot: ConversationSnapshot) {
         loadedConversationID = snapshot.id
         messages = snapshot.messages
+        completedAssistantMessageIDs = Set(
+            snapshot.messages
+                .filter { !$0.user.isCurrentUser && !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+                .map(\.id)
+        )
         draft = snapshot.draftText
         pendingAttachments = snapshot.draftAttachments
         selectedPhotoItems = []
@@ -1548,6 +1574,7 @@ public struct ChatView: View {
             )
         )
 
+        completedAssistantMessageIDs.remove(assistantID)
         streamingMessageID = assistantID
         isPinnedToBottom = true
         generationError = nil
@@ -1624,10 +1651,12 @@ public struct ChatView: View {
 
         if text.isEmpty {
             messages.remove(at: index)
+            completedAssistantMessageIDs.remove(id)
             return
         }
 
         messages[index].text = text
+        completedAssistantMessageIDs.insert(id)
         persistConversationNow()
     }
 
@@ -1638,6 +1667,7 @@ public struct ChatView: View {
         AppDiagnostics.shared.record("Conversation cleared", category: "ui", metadata: ["previousMessages": messages.count])
         await stopGeneration()
         messages.removeAll()
+        completedAssistantMessageIDs.removeAll()
         draft = ""
         pendingAttachments.removeAll()
         selectedPhotoItems.removeAll()
