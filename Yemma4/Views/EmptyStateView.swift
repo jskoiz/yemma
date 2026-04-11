@@ -11,6 +11,7 @@ struct ChatStarter: Identifiable, Hashable {
     let prompt: String
     let systemImage: String
     var behavior: ChatStarterBehavior = .promptOnly
+    var sendsImmediately = false
 
     var id: String { title }
 
@@ -26,13 +27,15 @@ struct ChatStarter: Identifiable, Hashable {
             title: "Teach me something",
             subtitle: "Share a short history or science fact I probably do not know",
             prompt: "Teach me one short surprising fact from history or science that most people do not know. Keep it clear and under three short paragraphs.",
-            systemImage: "sparkles"
+            systemImage: "sparkles",
+            sendsImmediately: true
         ),
         ChatStarter(
             title: "Tell me a random fact",
             subtitle: "Give me one interesting fact with a quick explanation",
             prompt: "Tell me one interesting random fact and explain why it is surprising in a few sentences. Keep it concise.",
-            systemImage: "lightbulb"
+            systemImage: "lightbulb",
+            sendsImmediately: true
         )
     ]
 }
