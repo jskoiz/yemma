@@ -70,16 +70,30 @@ struct EmptyStateView: View {
                 }
 
                 if !starters.isEmpty {
-                    VStack(spacing: 10) {
-                        ForEach(starters) { starter in
+                    VStack(spacing: 0) {
+                        ForEach(Array(starters.enumerated()), id: \.element.id) { index, starter in
                             starterButton(starter)
+
+                            if index != starters.count - 1 {
+                                Divider()
+                                    .overlay(AppTheme.separator)
+                                    .padding(.leading, 52)
+                            }
                         }
                     }
+                    .padding(.vertical, 4)
+                    .background(
+                        RoundedRectangle(cornerRadius: AppTheme.Radius.medium, style: .continuous)
+                            .fill(AppTheme.controlFill)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: AppTheme.Radius.medium, style: .continuous)
+                            .stroke(AppTheme.controlBorder, lineWidth: 1)
+                    )
                 }
             }
-            .padding(20)
-            .frame(maxWidth: 560, alignment: .leading)
-            .brandCard(cornerRadius: AppTheme.Radius.large)
+            .frame(maxWidth: 540, alignment: .leading)
+            .padding(.horizontal, 20)
 
             Spacer(minLength: 24)
         }
@@ -121,10 +135,10 @@ struct EmptyStateView: View {
             }
         }
         .foregroundStyle(statusTextColor)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
         .background(statusBackground)
-        .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.small, style: .continuous))
+        .clipShape(Capsule(style: .continuous))
     }
 
     private func starterButton(_ starter: ChatStarter) -> some View {
@@ -133,9 +147,9 @@ struct EmptyStateView: View {
         } label: {
             HStack(spacing: 12) {
                 Image(systemName: starter.systemImage)
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(AppTheme.accent)
-                    .frame(width: 24)
+                    .frame(width: 26)
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(starter.title)
@@ -165,9 +179,9 @@ struct EmptyStateView: View {
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(AppTheme.textTertiary)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 13)
-            .inputChrome(cornerRadius: AppTheme.Radius.small)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 16)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
