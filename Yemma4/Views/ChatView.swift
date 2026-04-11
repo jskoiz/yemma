@@ -27,6 +27,7 @@ public struct ChatView: View {
     @State private var isSidebarOpen = false
     @State private var sidebarDragOffset: CGFloat = 0
     @State private var isShowingPhotoPicker = false
+    @State private var showArchiveBrowser = false
     @State private var loadedConversationID: UUID?
     @State private var isRestoringConversation = false
     @State private var conversationSaveTask: Task<Void, Never>?
@@ -131,6 +132,10 @@ public struct ChatView: View {
                                     await runDebugScenario(scenario)
                                 }
                             },
+                            onOpenArchive: {
+                                closeSidebar()
+                                showArchiveBrowser = true
+                            },
                             onClose: {
                                 closeSidebar()
                             }
@@ -156,6 +161,27 @@ public struct ChatView: View {
                 }
             }
             .toolbar(.hidden, for: .navigationBar)
+            .sheet(isPresented: $showArchiveBrowser) {
+                ConversationBrowserSheet(
+                    title: "Archive",
+                    currentConversationID: loadedConversationID,
+                    onSelectConversation: { conversationID in
+                        Task { @MainActor in
+                            await switchConversation(to: conversationID)
+                            showArchiveBrowser = false
+                        }
+                    },
+                    onStartFresh: {
+                        Task { @MainActor in
+                            await startFreshConversation()
+                            showArchiveBrowser = false
+                        }
+                    }
+                )
+                .presentationDetents([.large])
+                .presentationDragIndicator(.hidden)
+                .presentationBackground(.clear)
+            }
             .onAppear {
                 AppDiagnostics.shared.record(
                     "startup: view_appeared",
@@ -1876,6 +1902,7 @@ private struct ChatSidebarView: View {
     let onStartFresh: () -> Void
     let onShowOnboarding: () -> Void
     let onRunDebugScenario: ((DebugInferenceScenario) -> Void)?
+    let onOpenArchive: () -> Void
     let onClose: () -> Void
 
     @State private var renameConversation: ConversationMetadata?
@@ -1889,6 +1916,7 @@ private struct ChatSidebarView: View {
     private let repositoryURL = URL(string: "https://yemma.chat")!
     private let madeByURL = URL(string: "https://avmillabs.com")!
     private let maxTokenOptions: [Int] = [256, 512, 1024, 2048, 4096]
+    private let recentConversationLimit = 10
 
     var body: some View {
         ZStack {
@@ -2068,7 +2096,10 @@ private struct ChatSidebarView: View {
     }
 
     private var chatsSection: some View {
-        UtilitySection("Chats") {
+        let recentConversations = Array(conversationStore.conversations.prefix(recentConversationLimit))
+        let archivedConversationCount = max(conversationStore.conversations.count - recentConversationLimit, 0)
+
+        return UtilitySection("Chats") {
             Button {
                 AppDiagnostics.shared.record("New conversation requested", category: "ui")
                 AppHaptics.selection()
@@ -2082,11 +2113,11 @@ private struct ChatSidebarView: View {
             }
             .buttonStyle(.plain)
 
-            if !conversationStore.conversations.isEmpty {
+            if !recentConversations.isEmpty {
                 UtilitySectionSeparator(leadingInset: AppTheme.Layout.rowHorizontalPadding)
             }
 
-            ForEach(Array(conversationStore.conversations.enumerated()), id: \.element.id) { index, metadata in
+            ForEach(Array(recentConversations.enumerated()), id: \.element.id) { index, metadata in
                 Button {
                     AppDiagnostics.shared.record(
                         "Conversation selected",
@@ -2111,9 +2142,24 @@ private struct ChatSidebarView: View {
                     }
                 }
 
-                if index != conversationStore.conversations.count - 1 {
+                if index != recentConversations.count - 1 || archivedConversationCount > 0 {
                     UtilitySectionSeparator(leadingInset: AppTheme.Layout.rowHorizontalPadding)
                 }
+            }
+
+            if archivedConversationCount > 0 {
+                Button {
+                    AppDiagnostics.shared.record(
+                        "Archive opened",
+                        category: "ui",
+                        metadata: ["count": archivedConversationCount]
+                    )
+                    AppHaptics.selection()
+                    onOpenArchive()
+                } label: {
+                    compactArchiveRow(count: archivedConversationCount)
+                }
+                .buttonStyle(.plain)
             }
         }
     }
@@ -2256,13 +2302,13 @@ private struct ChatSidebarView: View {
     }
 
     private func conversationRow(_ metadata: ConversationMetadata) -> some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .center, spacing: 10) {
             Image(systemName: metadata.id == currentConversationID ? "checkmark.circle.fill" : "bubble.left.and.bubble.right")
-                .font(.system(size: 17, weight: .semibold))
+                .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(metadata.id == currentConversationID ? AppTheme.accent : AppTheme.textSecondary)
                 .frame(width: AppTheme.Layout.rowIconSize)
 
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 8) {
                     Text(metadata.title)
                         .font(AppTheme.Typography.utilityRowTitle.weight(.semibold))
@@ -2276,10 +2322,12 @@ private struct ChatSidebarView: View {
                     }
                 }
 
-                Text(metadata.preview)
-                    .font(AppTheme.Typography.utilityRowDetail)
-                    .foregroundStyle(AppTheme.textSecondary)
-                    .lineLimit(2)
+                if !metadata.preview.isEmpty {
+                    Text(metadata.preview)
+                        .font(AppTheme.Typography.utilityCaption)
+                        .foregroundStyle(AppTheme.textSecondary)
+                        .lineLimit(1)
+                }
 
                 HStack(spacing: 8) {
                     Text(Self.relativeDateText(for: metadata.updatedAt))
@@ -2293,7 +2341,36 @@ private struct ChatSidebarView: View {
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .utilityRowPadding()
+        .padding(.horizontal, AppTheme.Layout.rowHorizontalPadding)
+        .padding(.vertical, 10)
+        .contentShape(Rectangle())
+    }
+
+    private func compactArchiveRow(count: Int) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "archivebox")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(AppTheme.textSecondary)
+                .frame(width: AppTheme.Layout.rowIconSize)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Archive")
+                    .font(AppTheme.Typography.utilityRowTitle.weight(.semibold))
+                    .foregroundStyle(AppTheme.textPrimary)
+
+                Text("\(count) older chats")
+                    .font(AppTheme.Typography.utilityCaption)
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+
+            Spacer()
+
+            Image(systemName: "chevron.right")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(AppTheme.textSecondary)
+        }
+        .padding(.horizontal, AppTheme.Layout.rowHorizontalPadding)
+        .padding(.vertical, 10)
         .contentShape(Rectangle())
     }
 
