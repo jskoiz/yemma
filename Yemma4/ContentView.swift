@@ -52,18 +52,20 @@ struct CircleIconButton: View {
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: systemName)
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(AppTheme.textPrimary)
-                .frame(width: AppTheme.Layout.controlIconSize, height: AppTheme.Layout.controlIconSize)
-                .background(
-                    Circle()
-                        .fill(filled ? AppTheme.controlFill : Color.clear)
-                )
-                .overlay(
-                    Circle()
-                        .stroke(AppTheme.controlBorder, lineWidth: filled ? 1 : 0)
-                )
+            ZStack {
+                Circle()
+                    .fill(filled ? AppTheme.controlFill : Color.clear)
+
+                Circle()
+                    .stroke(AppTheme.controlBorder, lineWidth: filled ? 1 : 0)
+
+                Image(systemName: systemName)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(AppTheme.textPrimary)
+            }
+            .frame(width: AppTheme.Layout.controlIconSize, height: AppTheme.Layout.controlIconSize)
+            .frame(minWidth: 44, minHeight: 44)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
