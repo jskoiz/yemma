@@ -85,36 +85,39 @@ Runtime controls, debug probes, and diagnostics.
 
 ## Gemma 4 MLX Port
 
-Yemma originally ran Gemma 4 through two separate GGUF assets: a text model plus a standalone `mmproj` vision projector. The shipped MLX path replaces that with one Swift-native multimodal bundle and one runtime container.
+Yemma originally ran Gemma 4 through two separate GGUF assets: a text model plus a standalone `mmproj` vision projector. The current MLX integration replaces that with one Swift-native multimodal bundle and one runtime container.
+
+The important distinction is that MLX Swift already provided the general model-loading, tokenizer, and VLM infrastructure. The missing work was Gemma 4 support on the Swift side, plus Yemma-specific integration around download, validation, prompt shaping, and runtime lifecycle.
 
 Validated upstream baseline:
 
-- `mlx-swift-lm` at `8b5eef7`
-- `mlx-swift-examples` at `31b6cf6`
+- `mlx-swift-lm` at `8b5eef7` for Gemma 4 model, processor, and parity fixes
+- `mlx-swift-examples` at `31b6cf6` for app-side smoke validation and request-shaping patterns
 
-How the Swift port works:
+How the current Yemma integration works:
 
-- `Package.swift` pulls in `MLX`, `MLXLMCommon`, `MLXVLM`, `Hub`, and `Tokenizers`, so the app stays in Swift instead of bridging through `llama.cpp` or Objective-C++ vision code.
-- `ModelDownloader` pulls one Hugging Face repository, `mlx-community/gemma-4-e2b-it-4bit`, using `*.safetensors`, `*.json`, and `*.jinja` patterns instead of downloading a text GGUF and a second `mmproj` file.
-- `ModelDirectoryValidator` proves the downloaded bundle is actually loadable by checking required metadata files, processor config, tokenizer files, weight shards, and safetensors index references before the app accepts setup as complete.
-- `Gemma4MLXSupport` enforces the Gemma 4 multimodal contract in Swift by cross-checking processor and model values like soft-token budgets, patch size, and pooling kernel size, and it normalizes compatibility gaps like a missing top-level `pad_token_id`.
-- `LLMService` converts each conversation turn into structured `Chat.Message` entries with optional image URLs, then calls `context.processor.prepare(input:)` so MLX performs the image and text preprocessing directly inside the same Swift runtime.
-- `VLMModelFactory.shared._load(...)` loads the entire Gemma 4 VLM from one local directory, so text generation and image understanding live in one `ModelContainer` instead of separate GGUF and projector runtimes.
-- Multimodal generation stability is handled in Swift too: Yemma adds a hidden-channel budget processor and response-token filtering so on-device image turns stay clean without a custom native bridge.
+- `Package.swift` pulls in `MLX`, `MLXLMCommon`, `MLXVLM`, `Hub`, and `Tokenizers`, so the runtime stays inside Swift instead of bridging through `llama.cpp` or Objective-C++ vision code.
+- `ModelDownloader` pulls one MLX model repository, currently `mlx-community/gemma-4-e2b-it-4bit`, using `*.safetensors`, `*.json`, and `*.jinja` patterns instead of downloading a text GGUF and a second `mmproj` file. Yemma also recognizes legacy local bundles from `EZCon/gemma-4-E2B-it-4bit-mlx`.
+- `ModelDirectoryValidator` proves the downloaded bundle is structurally usable by checking required metadata files, processor config, tokenizer files, weight shards, and safetensors index references before the app accepts setup as complete.
+- `Gemma4MLXSupport` enforces the Gemma 4 multimodal asset contract in Swift by cross-checking processor and model values like soft-token budgets, patch size, and pooling kernel size. It also normalizes a known compatibility gap when a bundle is missing a top-level `pad_token_id`.
+- `LLMService` converts each conversation turn into structured `Chat.Message` and `UserInput` values with optional image URLs, then calls `context.processor.prepare(input:)` so MLX performs the image and text preprocessing directly inside the same runtime path as inference.
+- The current implementation uses `VLMModelFactory.shared._load(...)` to load the entire Gemma 4 VLM from one local directory, so text generation and image understanding live in one `ModelContainer` instead of separate GGUF and projector runtimes.
+- Yemma still adds app-side stability logic around the MLX runtime, including prompt shaping, smoke checks, and output filtering for noisy hidden-channel and control-token responses.
 
 What that buys us:
 
 - no standalone `mmproj` download
 - no Objective-C++ multimodal bridge
-- one model bundle to download, validate, load, and delete
-- one runtime path for both text-only and image-assisted turns
+- one model bundle to download, validate, load, unload, and delete
+- one Swift runtime path for both text-only and image-assisted turns
 
 ## Model Bundle
 
-- Source repository: [`mlx-community/gemma-4-e2b-it-4bit`](https://huggingface.co/mlx-community/gemma-4-e2b-it-4bit)
+- Current default download source: [`mlx-community/gemma-4-e2b-it-4bit`](https://huggingface.co/mlx-community/gemma-4-e2b-it-4bit)
+- Legacy-compatible local bundle ID: `EZCon/gemma-4-E2B-it-4bit-mlx`
 - Approximate first-download size: `4.2 GB`
 - Downloaded file classes: safetensors weights, tokenizer/config JSON, processor config, and chat template files
-- Runtime contract: `config.json`, `tokenizer.json`, `tokenizer_config.json`, `processor_config.json` or `preprocessor_config.json`, plus one or more readable `.safetensors` weight files
+- Runtime contract: `config.json`, `tokenizer.json`, `tokenizer_config.json`, `processor_config.json` or `preprocessor_config.json`, plus one or more readable `.safetensors` weight files and any referenced safetensors index entries
 
 After the bundle is downloaded, Yemma can load, unload, and run it entirely on device.
 

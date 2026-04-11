@@ -59,12 +59,14 @@ Services are `@Observable` and injected through SwiftUI environment:
 
 ### Multimodal MLX Path
 
-- `ModelDownloader` fetches `mlx-community/gemma-4-e2b-it-4bit`
+- MLX Swift already provides the general model-loading, tokenizer, and VLM infrastructure; the missing work here was Gemma 4 Swift support plus Yemma-specific integration
+- `ModelDownloader` fetches `mlx-community/gemma-4-e2b-it-4bit` and also recognizes legacy local bundles from `EZCon/gemma-4-E2B-it-4bit-mlx`
 - `ModelDirectoryValidator` verifies tokenizer/config/processor files and safetensors shards before load
 - `Gemma4MLXSupport` checks the Gemma 4 multimodal asset contract and normalizes known compatibility gaps
-- `LLMService.makeGemma4UserInput(...)` converts turns into structured chat messages with optional images
+- `LLMService.makeGemma4UserInput(...)` converts turns into structured chat messages and `UserInput` values with optional images
 - `context.processor.prepare(input:)` performs text and image preprocessing inside the MLX stack
-- `VLMModelFactory.shared._load(...)` loads the combined text+vision model into one runtime container
+- `VLMModelFactory.shared._load(...)` currently loads the combined text+vision model into one runtime container
+- Yemma adds app-side prompt shaping, smoke checks, and output filtering on top of the MLX runtime
 
 ### Concurrency Patterns
 
@@ -119,7 +121,8 @@ when you need a clean first-launch timing probe on a physical device.
 
 ## Model Details
 
-- Repository: `mlx-community/gemma-4-e2b-it-4bit`
+- Default repository: `mlx-community/gemma-4-e2b-it-4bit`
+- Legacy-compatible local bundle ID: `EZCon/gemma-4-E2B-it-4bit-mlx`
 - Stored locally as one MLX model directory with safetensors weights and config files
 - Images and text are processed through the same Swift runtime container
 - Default sampling: `top-k=64`, `top-p=0.95`, `temperature=0.7`
