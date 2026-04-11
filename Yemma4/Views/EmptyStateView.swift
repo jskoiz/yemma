@@ -1,31 +1,41 @@
 import SwiftUI
 
+enum ChatStarterBehavior: Hashable {
+    case promptOnly
+    case promptAndPickImage
+}
+
 struct ChatStarter: Identifiable, Hashable {
     let title: String
     let subtitle: String
     let prompt: String
     let systemImage: String
+    var behavior: ChatStarterBehavior = .promptOnly
+    var sendsImmediately = false
 
     var id: String { title }
 
     static let defaults: [ChatStarter] = [
         ChatStarter(
-            title: "Plan a 3-day workout",
-            subtitle: "Beginner routine at home",
-            prompt: "Plan a beginner-friendly 3-day workout split I can do at home in 30 minutes per session.",
-            systemImage: "figure.strengthtraining.traditional"
+            title: "Describe a photo",
+            subtitle: "Upload an image and break down what stands out",
+            prompt: "Describe this image clearly. Summarize what is happening, point out the key details, and mention anything easy to miss at a glance.",
+            systemImage: "photo.on.rectangle.angled",
+            behavior: .promptAndPickImage
         ),
         ChatStarter(
-            title: "Draft a polite reply",
-            subtitle: "Reschedule a meeting",
-            prompt: "Draft a polite reply saying I can meet Thursday afternoon instead of Wednesday morning.",
-            systemImage: "envelope.open"
+            title: "Teach me something",
+            subtitle: "Share a short history or science fact I probably do not know",
+            prompt: "Teach me one short surprising fact from history or science that most people do not know. Keep it clear and under three short paragraphs.",
+            systemImage: "sparkles",
+            sendsImmediately: true
         ),
         ChatStarter(
-            title: "Explain a topic simply",
-            subtitle: "Use one short example",
-            prompt: "Explain how compound interest works in simple terms with one short example.",
-            systemImage: "text.book.closed"
+            title: "Tell me a random fact",
+            subtitle: "Give me one interesting fact with a quick explanation",
+            prompt: "Tell me one interesting random fact and explain why it is surprising in a few sentences. Keep it concise.",
+            systemImage: "lightbulb",
+            sendsImmediately: true
         )
     ]
 }
@@ -53,7 +63,7 @@ struct EmptyStateView: View {
                         .font(AppTheme.Typography.brandSection)
                         .foregroundStyle(AppTheme.textPrimary)
 
-                    Text("Private, on-device, no cloud AI, no account.")
+                    Text("Pick a starting point, or ask in your own words below.")
                         .font(.system(size: 15, weight: .medium))
                         .foregroundStyle(AppTheme.textSecondary)
                 }
@@ -63,16 +73,30 @@ struct EmptyStateView: View {
                 }
 
                 if !starters.isEmpty {
-                    VStack(spacing: 10) {
-                        ForEach(starters) { starter in
+                    VStack(spacing: 0) {
+                        ForEach(Array(starters.enumerated()), id: \.element.id) { index, starter in
                             starterButton(starter)
+
+                            if index != starters.count - 1 {
+                                Divider()
+                                    .overlay(AppTheme.separator)
+                                    .padding(.leading, 52)
+                            }
                         }
                     }
+                    .padding(.vertical, 4)
+                    .background(
+                        RoundedRectangle(cornerRadius: AppTheme.Radius.medium, style: .continuous)
+                            .fill(AppTheme.controlFill)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: AppTheme.Radius.medium, style: .continuous)
+                            .stroke(AppTheme.controlBorder, lineWidth: 1)
+                    )
                 }
             }
-            .padding(20)
-            .frame(maxWidth: 560, alignment: .leading)
-            .brandCard(cornerRadius: AppTheme.Radius.large)
+            .frame(maxWidth: 540, alignment: .leading)
+            .padding(.horizontal, 20)
 
             Spacer(minLength: 24)
         }
@@ -114,10 +138,10 @@ struct EmptyStateView: View {
             }
         }
         .foregroundStyle(statusTextColor)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
         .background(statusBackground)
-        .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.small, style: .continuous))
+        .clipShape(Capsule(style: .continuous))
     }
 
     private func starterButton(_ starter: ChatStarter) -> some View {
@@ -126,18 +150,37 @@ struct EmptyStateView: View {
         } label: {
             HStack(spacing: 12) {
                 Image(systemName: starter.systemImage)
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(AppTheme.accent)
-                    .frame(width: 24)
+                    .frame(width: 26)
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(starter.title)
-                        .font(AppTheme.Typography.utilityRowTitle)
-                        .foregroundStyle(AppTheme.textPrimary)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 8) {
+                        Text(starter.title)
+                            .font(AppTheme.Typography.utilityRowTitle)
+                            .foregroundStyle(AppTheme.textPrimary)
 
-                    Text(starter.subtitle)
-                        .font(AppTheme.Typography.utilityCaption)
-                        .foregroundStyle(AppTheme.textSecondary)
+                        if starter.behavior == .promptAndPickImage {
+                            Text("Photo")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(AppTheme.accent)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(AppTheme.accentSoft)
+                                .clipShape(Capsule())
+                        }
+
+                        Spacer(minLength: 0)
+                    }
+
+                    HStack(spacing: 8) {
+                        Text(starter.subtitle)
+                            .font(AppTheme.Typography.utilityCaption)
+                            .foregroundStyle(AppTheme.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        Spacer(minLength: 0)
+                    }
                 }
 
                 Spacer()
@@ -146,9 +189,9 @@ struct EmptyStateView: View {
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(AppTheme.textTertiary)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 13)
-            .inputChrome(cornerRadius: AppTheme.Radius.small)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 16)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
