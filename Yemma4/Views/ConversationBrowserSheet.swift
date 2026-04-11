@@ -18,7 +18,6 @@ struct ConversationBrowserSheet: View {
             ScrollView(showsIndicators: false) {
                 VStack(spacing: AppTheme.Layout.sectionSpacing) {
                     header
-                    introCard
 
                     UtilitySection("Chats") {
                         Button {
@@ -117,22 +116,6 @@ struct ConversationBrowserSheet: View {
         }
         .padding(.horizontal, AppTheme.Layout.screenHeaderHorizontalPadding)
         .padding(.top, 18)
-    }
-
-    private var introCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label("Saved on this iPhone", systemImage: "iphone")
-                .font(AppTheme.Typography.utilityCaption)
-                .foregroundStyle(AppTheme.accent)
-
-            Text("Switch between chats, keep drafts in place, and rename threads when they need a clearer label.")
-                .font(AppTheme.Typography.utilityRowDetail)
-                .foregroundStyle(AppTheme.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(AppTheme.Layout.rowHorizontalPadding)
-        .groupedCard(cornerRadius: AppTheme.Radius.medium)
     }
 
     private func conversationRow(_ metadata: ConversationMetadata) -> some View {

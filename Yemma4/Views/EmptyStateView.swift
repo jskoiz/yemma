@@ -1,31 +1,38 @@
 import SwiftUI
 
+enum ChatStarterBehavior: Hashable {
+    case promptOnly
+    case promptAndPickImage
+}
+
 struct ChatStarter: Identifiable, Hashable {
     let title: String
     let subtitle: String
     let prompt: String
     let systemImage: String
+    var behavior: ChatStarterBehavior = .promptOnly
 
     var id: String { title }
 
     static let defaults: [ChatStarter] = [
         ChatStarter(
-            title: "Plan a 3-day workout",
-            subtitle: "Beginner routine at home",
-            prompt: "Plan a beginner-friendly 3-day workout split I can do at home in 30 minutes per session.",
-            systemImage: "figure.strengthtraining.traditional"
+            title: "Describe a photo",
+            subtitle: "Upload an image and break down what stands out",
+            prompt: "Describe this image clearly. Summarize what is happening, point out the key details, and mention anything easy to miss at a glance.",
+            systemImage: "photo.on.rectangle.angled",
+            behavior: .promptAndPickImage
         ),
         ChatStarter(
-            title: "Draft a polite reply",
-            subtitle: "Reschedule a meeting",
+            title: "Draft a polished reply",
+            subtitle: "Turn a quick thought into a sendable message",
             prompt: "Draft a polite reply saying I can meet Thursday afternoon instead of Wednesday morning.",
             systemImage: "envelope.open"
         ),
         ChatStarter(
-            title: "Explain a topic simply",
-            subtitle: "Use one short example",
-            prompt: "Explain how compound interest works in simple terms with one short example.",
-            systemImage: "text.book.closed"
+            title: "Make a clear plan",
+            subtitle: "Organize a goal into practical next steps",
+            prompt: "Help me turn a vague goal into a simple step-by-step plan with a short checklist.",
+            systemImage: "list.clipboard"
         )
     ]
 }
@@ -53,7 +60,7 @@ struct EmptyStateView: View {
                         .font(AppTheme.Typography.brandSection)
                         .foregroundStyle(AppTheme.textPrimary)
 
-                    Text("Private, on-device, no cloud AI, no account.")
+                    Text("Pick a starting point, or ask in your own words below.")
                         .font(.system(size: 15, weight: .medium))
                         .foregroundStyle(AppTheme.textSecondary)
                 }
@@ -130,14 +137,26 @@ struct EmptyStateView: View {
                     .foregroundStyle(AppTheme.accent)
                     .frame(width: 24)
 
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 4) {
                     Text(starter.title)
                         .font(AppTheme.Typography.utilityRowTitle)
                         .foregroundStyle(AppTheme.textPrimary)
 
-                    Text(starter.subtitle)
-                        .font(AppTheme.Typography.utilityCaption)
-                        .foregroundStyle(AppTheme.textSecondary)
+                    HStack(spacing: 8) {
+                        Text(starter.subtitle)
+                            .font(AppTheme.Typography.utilityCaption)
+                            .foregroundStyle(AppTheme.textSecondary)
+
+                        if starter.behavior == .promptAndPickImage {
+                            Text("Photo")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(AppTheme.accent)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(AppTheme.accentSoft)
+                                .clipShape(Capsule())
+                        }
+                    }
                 }
 
                 Spacer()
