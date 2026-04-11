@@ -123,11 +123,15 @@ public struct ChatView: View {
                             onOpenSettings: {
                                 closeSidebar()
                                 showSettings = true
-                            },
-                            onClose: closeSidebar
+                            }
                         )
                         .frame(width: sidebarWidth)
                         .offset(x: sidebarOffset(sidebarWidth: sidebarWidth))
+                        .overlay(alignment: .topTrailing) {
+                            sidebarCloseButton
+                                .padding(.top, 20)
+                                .padding(.trailing, AppTheme.Layout.screenPadding)
+                        }
                     }
 
                     mainShell
@@ -281,6 +285,38 @@ public struct ChatView: View {
         .padding(.horizontal, 16)
         .padding(.top, 6)
         .padding(.bottom, 12)
+    }
+
+    private var sidebarCloseButton: some View {
+        Button {
+            withAnimation(.spring(response: 0.34, dampingFraction: 0.88)) {
+                isSidebarOpen = false
+                sidebarDragOffset = 0
+            }
+        } label: {
+            HStack {
+                Spacer(minLength: 0)
+
+                ZStack {
+                    Circle()
+                        .fill(AppTheme.controlFill)
+
+                    Circle()
+                        .stroke(AppTheme.controlBorder, lineWidth: 1)
+
+                    Image(systemName: "xmark")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(AppTheme.textPrimary)
+                }
+                .frame(width: 56, height: 56)
+                .padding(.trailing, 20)
+            }
+            .frame(width: 152, height: 88, alignment: .topTrailing)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Close sidebar")
+        .accessibilityHint("Returns to the chat.")
     }
 
     // MARK: - Conversation content with auto-scroll
@@ -1830,7 +1866,6 @@ private struct ChatSidebarView: View {
     let onSelectConversation: (UUID) -> Void
     let onStartFresh: () -> Void
     let onOpenSettings: () -> Void
-    let onClose: () -> Void
 
     @State private var renameConversation: ConversationMetadata?
     @State private var renameTitle = ""
@@ -1839,16 +1874,20 @@ private struct ChatSidebarView: View {
         ZStack {
             UtilityBackground()
 
-            ScrollView(showsIndicators: false) {
-                VStack(spacing: AppTheme.Layout.sectionSpacing) {
-                    header
-                    everydaySection
-                    chatsSection
-                    modelSection
+            VStack(spacing: AppTheme.Layout.sectionSpacing) {
+                header
+                    .padding(.horizontal, AppTheme.Layout.screenPadding)
+                    .padding(.top, 20)
+
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: AppTheme.Layout.sectionSpacing) {
+                        everydaySection
+                        chatsSection
+                        modelSection
+                    }
+                    .padding(.horizontal, AppTheme.Layout.screenPadding)
+                    .padding(.bottom, 28)
                 }
-                .padding(.horizontal, AppTheme.Layout.screenPadding)
-                .padding(.top, 20)
-                .padding(.bottom, 28)
             }
         }
         .task {
@@ -1882,22 +1921,15 @@ private struct ChatSidebarView: View {
     }
 
     private var header: some View {
-        HStack(alignment: .top, spacing: 16) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Yemma 4")
-                    .font(.system(size: 24, weight: .semibold, design: .serif))
-                    .foregroundStyle(AppTheme.textPrimary)
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Yemma 4")
+                .font(.system(size: 24, weight: .semibold, design: .serif))
+                .foregroundStyle(AppTheme.textPrimary)
 
-                Text("Chats and quick controls")
-                    .font(AppTheme.Typography.utilityCaption)
-                    .foregroundStyle(AppTheme.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Spacer(minLength: 0)
-
-            CircleIconButton(systemName: "xmark", action: onClose)
-                .accessibilityLabel("Close sidebar")
+            Text("Chats and quick controls")
+                .font(AppTheme.Typography.utilityCaption)
+                .foregroundStyle(AppTheme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
