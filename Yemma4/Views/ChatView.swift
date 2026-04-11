@@ -852,6 +852,11 @@ public struct ChatView: View {
         if starter.behavior == .promptAndPickImage {
             isComposerFocused = false
             isShowingPhotoPicker = true
+        } else if starter.sendsImmediately {
+            isComposerFocused = false
+            Task { @MainActor in
+                submitDraft()
+            }
         } else {
             isComposerFocused = true
         }
