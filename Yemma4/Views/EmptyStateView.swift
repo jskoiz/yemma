@@ -152,14 +152,10 @@ struct EmptyStateView: View {
                     .frame(width: 26)
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(starter.title)
-                        .font(AppTheme.Typography.utilityRowTitle)
-                        .foregroundStyle(AppTheme.textPrimary)
-
                     HStack(spacing: 8) {
-                        Text(starter.subtitle)
-                            .font(AppTheme.Typography.utilityCaption)
-                            .foregroundStyle(AppTheme.textSecondary)
+                        Text(starter.title)
+                            .font(AppTheme.Typography.utilityRowTitle)
+                            .foregroundStyle(AppTheme.textPrimary)
 
                         if starter.behavior == .promptAndPickImage {
                             Text("Photo")
@@ -170,6 +166,17 @@ struct EmptyStateView: View {
                                 .background(AppTheme.accentSoft)
                                 .clipShape(Capsule())
                         }
+
+                        Spacer(minLength: 0)
+                    }
+
+                    HStack(spacing: 8) {
+                        Text(starter.subtitle)
+                            .font(AppTheme.Typography.utilityCaption)
+                            .foregroundStyle(AppTheme.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        Spacer(minLength: 0)
                     }
                 }
 
