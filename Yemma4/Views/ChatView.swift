@@ -893,71 +893,87 @@ public struct ChatView: View {
     private func messageActionStrip(for message: ChatMessage, index: Int) -> some View {
         let trimmedText = message.text.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        return ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                if !trimmedText.isEmpty {
-                    messageActionButton(
-                        title: "Copy",
-                        systemImage: "doc.on.doc",
-                        accessibilityHint: "Copy this response."
-                    ) {
-                        copyMessageText(trimmedText)
+        return HStack(spacing: 14) {
+            if !trimmedText.isEmpty {
+                messageActionIconButton(
+                    title: "Copy",
+                    systemImage: "doc.on.doc",
+                    accessibilityHint: "Copy this response."
+                ) {
+                    copyMessageText(trimmedText)
+                }
+            }
+
+            if canRetryAssistantResponse(message, index: index) {
+                messageActionIconButton(
+                    title: "Retry",
+                    systemImage: "arrow.clockwise",
+                    accessibilityHint: "Generate the assistant reply again."
+                ) {
+                    Task { @MainActor in
+                        await retryAssistantResponse(message, index: index)
                     }
                 }
 
-                if canRetryAssistantResponse(message, index: index) {
-                    messageActionButton(
-                        title: "Retry",
-                        systemImage: "arrow.clockwise",
-                        accessibilityHint: "Generate the assistant reply again."
-                    ) {
-                        Task { @MainActor in
-                            await retryAssistantResponse(message, index: index)
-                        }
-                    }
-
-                    messageActionButton(
-                        title: AssistantRefinement.shorter.title,
-                        systemImage: AssistantRefinement.shorter.systemImage,
-                        accessibilityHint: "Ask for a shorter version of the latest assistant reply."
-                    ) {
-                        Task { @MainActor in
-                            await refineAssistantResponse(message, refinement: .shorter)
-                        }
+                messageActionIconButton(
+                    title: AssistantRefinement.shorter.title,
+                    systemImage: AssistantRefinement.shorter.systemImage,
+                    accessibilityHint: "Ask for a shorter version of the latest assistant reply."
+                ) {
+                    Task { @MainActor in
+                        await refineAssistantResponse(message, refinement: .shorter)
                     }
                 }
             }
-            .padding(.horizontal, 2)
+
+            messageActionOverflowMenu(for: message, index: index, trimmedText: trimmedText)
         }
+        .padding(.horizontal, 2)
     }
 
-    private func messageActionButton(
+    private func messageActionIconButton(
         title: String,
         systemImage: String,
         accessibilityHint: String,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            Label(title, systemImage: systemImage)
-                .font(.footnote.weight(.semibold))
+            Image(systemName: systemImage)
+                .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(AppTheme.textSecondary)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 9)
-                .background(AppTheme.controlFill.opacity(0.94))
-                .clipShape(Capsule())
-                .overlay(
-                    Capsule()
-                        .stroke(AppTheme.controlBorder, lineWidth: 1)
-                )
+                .frame(width: 28, height: 28)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(title)
         .accessibilityHint(accessibilityHint)
     }
 
-    @ViewBuilder
-    private func messageContextMenu(for message: ChatMessage, index: Int) -> some View {
-        let trimmedText = message.text.trimmingCharacters(in: .whitespacesAndNewlines)
+    private func messageActionOverflowMenu(
+        for message: ChatMessage,
+        index: Int,
+        trimmedText: String
+    ) -> some View {
+        Menu {
+            messageActionMenuItems(for: message, index: index, trimmedText: trimmedText)
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(AppTheme.textSecondary)
+                .frame(width: 28, height: 28)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("More options")
+        .accessibilityHint("Shows actions for this response.")
+    }
 
+    @ViewBuilder
+    private func messageActionMenuItems(
+        for message: ChatMessage,
+        index: Int,
+        trimmedText: String
+    ) -> some View {
         if !trimmedText.isEmpty {
             Button {
                 copyMessageText(trimmedText)
@@ -999,6 +1015,12 @@ public struct ChatView: View {
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private func messageContextMenu(for message: ChatMessage, index: Int) -> some View {
+        let trimmedText = message.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        messageActionMenuItems(for: message, index: index, trimmedText: trimmedText)
     }
 
     private func copyMessageText(_ text: String) {
