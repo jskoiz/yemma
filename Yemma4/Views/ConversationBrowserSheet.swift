@@ -4,12 +4,14 @@ struct ConversationBrowserSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(ConversationStore.self) private var conversationStore
 
+    let title: String
     let currentConversationID: UUID?
     let onSelectConversation: (UUID) -> Void
     let onStartFresh: () -> Void
 
     @State private var renameConversation: ConversationMetadata?
     @State private var renameTitle = ""
+    @State private var deleteConversation: ConversationMetadata?
 
     var body: some View {
         ZStack {
@@ -62,6 +64,12 @@ struct ConversationBrowserSheet: View {
                                 } label: {
                                     Label("Rename", systemImage: "pencil")
                                 }
+
+                                Button(role: .destructive) {
+                                    deleteConversation = metadata
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
                             }
 
                             if index != conversationStore.conversations.count - 1 {
@@ -102,12 +110,34 @@ struct ConversationBrowserSheet: View {
         } message: {
             Text("Give this chat a shorter, easier-to-scan name.")
         }
+        .confirmationDialog(
+            "Delete this chat?",
+            isPresented: Binding(
+                get: { deleteConversation != nil },
+                set: { if !$0 { deleteConversation = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Delete Chat", role: .destructive) {
+                guard let deleteConversation else { return }
+                AppDiagnostics.shared.record(
+                    "Conversation deleted",
+                    category: "ui",
+                    metadata: ["conversationID": deleteConversation.id.uuidString]
+                )
+                conversationStore.deleteConversation(id: deleteConversation.id)
+                self.deleteConversation = nil
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes the chat from local history on this iPhone.")
+        }
     }
 
     private var header: some View {
         HStack {
             Spacer()
-            Text("Saved Chats")
+            Text(title)
                 .font(AppTheme.Typography.utilityTitle)
                 .foregroundStyle(AppTheme.textPrimary)
             Spacer()
@@ -254,6 +284,7 @@ private func previewBrowserStore() -> ConversationStore {
 
 #Preview("Saved Chats") {
     ConversationBrowserSheet(
+        title: "Saved Chats",
         currentConversationID: browserPreviewCurrentID,
         onSelectConversation: { _ in },
         onStartFresh: {}
@@ -263,6 +294,7 @@ private func previewBrowserStore() -> ConversationStore {
 
 #Preview("Saved Chats Dark Compact") {
     ConversationBrowserSheet(
+        title: "Saved Chats",
         currentConversationID: browserPreviewCurrentID,
         onSelectConversation: { _ in },
         onStartFresh: {}
