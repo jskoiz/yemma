@@ -35,7 +35,7 @@
 
 This repo contains the iOS app, landing page, and brand assets.
 
-Yemma now ships on a single-bundle MLX Gemma 4 runtime. The app downloads one Hugging Face repository, validates the bundle locally, and lets MLX handle both text and image preprocessing in Swift. Historical migration notes still live in [docs/mlx-migration-strategy.md](docs/mlx-migration-strategy.md) and [docs/MLX_REGRESSION_POSTMORTEM.md](docs/MLX_REGRESSION_POSTMORTEM.md).
+Yemma now ships on a single-bundle MLX Gemma 4 runtime. The app downloads one Hugging Face repository, validates the bundle locally, and lets MLX handle both text and image preprocessing in Swift.
 
 ## Features
 
