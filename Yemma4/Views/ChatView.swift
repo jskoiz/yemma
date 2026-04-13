@@ -37,11 +37,10 @@ public struct ChatView: View {
     // MARK: - Streaming state
     /// The ID of the assistant message currently being streamed.
     @State private var streamingMessageID: String?
-    /// Monotonic counter bumped each time we flush visible text — drives auto-scroll.
-    @State private var streamFlushTick: UInt64 = 0
-    /// Whether the transcript is currently close enough to the bottom to auto-scroll.
+    /// Whether the newest transcript content is currently in view.
     @State private var isPinnedToBottom = true
     @State private var scrollViewportHeight: CGFloat = 0
+    @State private var latestContentOverflow: CGFloat = 0
     @State private var completedAssistantMessageIDs: Set<String> = []
     @State private var lastStarterPromptIndexByID: [String: Int] = [:]
 
@@ -309,12 +308,12 @@ public struct ChatView: View {
         .padding(.bottom, 12)
     }
 
-    // MARK: - Conversation content with auto-scroll
+    // MARK: - Conversation content
 
     private func conversationContent(topInset: CGFloat) -> some View {
         GeometryReader { geometry in
             ScrollViewReader { proxy in
-                ZStack(alignment: .bottomTrailing) {
+                ZStack(alignment: .bottom) {
                     ScrollView(showsIndicators: false) {
                         LazyVStack(spacing: 0) {
                             if messages.isEmpty {
@@ -376,17 +375,9 @@ public struct ChatView: View {
                     .onChange(of: messages.count) { _, _ in
                         scrollToBottomIfPinned(proxy: proxy, animated: true)
                     }
-                    .onChange(of: streamFlushTick) { _, _ in
-                        scrollToBottomIfPinned(
-                            proxy: proxy,
-                            animated: !reduceMotion,
-                            animation: .easeOut(duration: 0.16)
-                        )
-                    }
 
                     if shouldShowJumpToLatest {
                         jumpToLatestButton(proxy: proxy)
-                            .padding(.trailing, 16)
                             .padding(.bottom, 12)
                     }
                 }
@@ -395,7 +386,7 @@ public struct ChatView: View {
     }
 
     private var shouldShowJumpToLatest: Bool {
-        !messages.isEmpty && !isPinnedToBottom
+        !messages.isEmpty && latestContentOverflow > 12
     }
 
     private func messageTopSpacing(at index: Int) -> CGFloat {
@@ -453,6 +444,7 @@ public struct ChatView: View {
         guard scrollViewportHeight > 0 else { return }
 
         let distanceFromBottom = max(bottomMaxY - scrollViewportHeight, 0)
+        latestContentOverflow = distanceFromBottom
         let nextPinnedState =
             isPinnedToBottom
             ? distanceFromBottom <= releasePinnedThreshold
@@ -463,7 +455,9 @@ public struct ChatView: View {
 
         guard llmService.isGenerating else { return }
         AppDiagnostics.shared.record(
-            nextPinnedState ? "Transcript auto-scroll resumed" : "Transcript auto-scroll paused",
+            nextPinnedState
+                ? "Transcript latest content visible"
+                : "Transcript latest content moved off-screen",
             category: "ui",
             metadata: [
                 "distanceFromBottom": Int(distanceFromBottom),
@@ -475,6 +469,7 @@ public struct ChatView: View {
     private func jumpToLatestButton(proxy: ScrollViewProxy) -> some View {
         Button {
             isPinnedToBottom = true
+            latestContentOverflow = 0
             AppDiagnostics.shared.record(
                 "Transcript jumped to latest",
                 category: "ui",
@@ -482,14 +477,28 @@ public struct ChatView: View {
             )
             scrollToBottom(proxy: proxy, animated: true)
         } label: {
-            Label("Latest", systemImage: "arrow.down.circle.fill")
-                .font(.caption.weight(.semibold))
+            Image(systemName: "arrow.down")
+                .font(.system(size: 24, weight: .semibold))
                 .foregroundStyle(AppTheme.textPrimary)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
+                .frame(width: 58, height: 58)
+                .background(
+                    Circle()
+                        .fill(AppTheme.brandCard)
+                )
+                .overlay(
+                    Circle()
+                        .stroke(AppTheme.brandCardBorder, lineWidth: 1)
+                )
+                .shadow(color: Color.black.opacity(0.12), radius: 18, y: 8)
         }
         .buttonStyle(.plain)
-        .brandCard(cornerRadius: AppTheme.Radius.small)
+        .accessibilityLabel("Scroll to latest")
+        .accessibilityHint("Jump to the newest part of the conversation.")
+        .transition(
+            reduceMotion
+                ? .opacity
+                : .scale(scale: 0.92).combined(with: .opacity)
+        )
     }
 
     private var emptyState: some View {
@@ -1646,6 +1655,7 @@ public struct ChatView: View {
         completedAssistantMessageIDs.remove(assistantID)
         streamingMessageID = assistantID
         isPinnedToBottom = true
+        latestContentOverflow = 0
         generationError = nil
         memoryAlertMessage = nil
         generationTask = Task {
@@ -1679,7 +1689,6 @@ public struct ChatView: View {
             if let visibleText = update.visibleText {
                 await MainActor.run {
                     updateMessageText(id: assistantID, text: visibleText)
-                    streamFlushTick &+= 1
                 }
             }
 
@@ -1693,7 +1702,6 @@ public struct ChatView: View {
         let finalText = streamingPolicy.finalize()
         await MainActor.run {
             finalizeAssistantMessage(id: assistantID, text: finalText)
-            streamFlushTick &+= 1
             persistConversationNow()
         }
 
