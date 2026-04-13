@@ -377,7 +377,11 @@ public struct ChatView: View {
                         scrollToBottomIfPinned(proxy: proxy, animated: true)
                     }
                     .onChange(of: streamFlushTick) { _, _ in
-                        scrollToBottomIfPinned(proxy: proxy, animated: false)
+                        scrollToBottomIfPinned(
+                            proxy: proxy,
+                            animated: !reduceMotion,
+                            animation: .easeOut(duration: 0.16)
+                        )
                     }
 
                     if shouldShowJumpToLatest {
@@ -410,12 +414,20 @@ public struct ChatView: View {
         return 18
     }
 
-    private func scrollToBottomIfPinned(proxy: ScrollViewProxy, animated: Bool) {
+    private func scrollToBottomIfPinned(
+        proxy: ScrollViewProxy,
+        animated: Bool,
+        animation: Animation? = nil
+    ) {
         guard isPinnedToBottom else { return }
-        scrollToBottom(proxy: proxy, animated: animated)
+        scrollToBottom(proxy: proxy, animated: animated, animation: animation)
     }
 
-    private func scrollToBottom(proxy: ScrollViewProxy, animated: Bool) {
+    private func scrollToBottom(
+        proxy: ScrollViewProxy,
+        animated: Bool,
+        animation: Animation? = nil
+    ) {
         let action = {
             proxy.scrollTo(bottomAnchorID, anchor: .bottom)
         }
@@ -424,7 +436,7 @@ public struct ChatView: View {
             if reduceMotion {
                 action()
             } else {
-                withAnimation(.easeOut(duration: 0.18)) {
+                withAnimation(animation ?? .easeOut(duration: 0.18)) {
                     action()
                 }
             }
@@ -1158,6 +1170,7 @@ public struct ChatView: View {
         await stopGeneration()
         updateMessageText(id: message.id, text: "")
         completedAssistantMessageIDs.remove(message.id)
+        streamingMessageID = message.id
         generationError = nil
         memoryAlertMessage = nil
         isPinnedToBottom = true

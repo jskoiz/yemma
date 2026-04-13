@@ -118,6 +118,16 @@ struct StreamingRenderer: Sendable {
         trimTrailingUnstableFragment(from: sanitize(text))
     }
 
+    static func isStandaloneStreamingUnit(_ character: Character) -> Bool {
+        character.unicodeScalars.contains { scalar in
+            if scalar.properties.isEmojiPresentation || scalar.properties.generalCategory == .otherSymbol {
+                return true
+            }
+
+            return standaloneStreamingScalarRanges.contains { $0.contains(scalar.value) }
+        }
+    }
+
     // MARK: - Pipeline Steps
 
     /// Repeatedly strips a leading role prefix and trims whitespace until the
@@ -207,8 +217,11 @@ struct StreamingRenderer: Sendable {
     private static func trimTrailingUnstableFragment(from text: String) -> String {
         guard let lastCharacter = text.last else { return text }
         guard !isStableStreamingBoundary(lastCharacter) else { return text }
+        guard !isStandaloneStreamingUnit(lastCharacter) else { return text }
 
-        guard let boundaryIndex = text.lastIndex(where: isStableStreamingBoundary) else {
+        guard let boundaryIndex = text.lastIndex(where: {
+            isStableStreamingBoundary($0) || isStandaloneStreamingUnit($0)
+        }) else {
             return text
         }
 
@@ -223,6 +236,24 @@ struct StreamingRenderer: Sendable {
 
         return ".,!?;:)]}\"'".contains(character)
     }
+
+    private static let standaloneStreamingScalarRanges: [ClosedRange<UInt32>] = [
+        0x1100...0x11FF,
+        0x3040...0x30FF,
+        0x3130...0x318F,
+        0x31F0...0x31FF,
+        0x3400...0x4DBF,
+        0x4E00...0x9FFF,
+        0xAC00...0xD7AF,
+        0xF900...0xFAFF,
+        0xFF66...0xFF9D,
+        0x20000...0x2A6DF,
+        0x2A700...0x2B73F,
+        0x2B740...0x2B81F,
+        0x2B820...0x2CEAF,
+        0x2CEB0...0x2EBEF,
+        0x30000...0x3134F
+    ]
 }
 
 struct StreamingRenderUpdate: Sendable {
@@ -237,6 +268,13 @@ struct StreamingRenderUpdate: Sendable {
 /// to improve the transcript: after a short cadence interval, at a word or
 /// punctuation boundary, or once enough raw characters have accumulated.
 struct StreamingUpdatePolicy: Sendable {
+    private struct FlushCadence {
+        let generalInterval: Duration
+        let boundaryInterval: Duration
+        let minimumInterval: Duration
+        let rawCharacterThreshold: Int
+    }
+
     private(set) var rawText = ""
 
     private var lastFlush = ContinuousClock.now
@@ -249,13 +287,17 @@ struct StreamingUpdatePolicy: Sendable {
         let shouldStop = StreamingRenderer.shouldStopStreaming(tailOf: rawText)
         let elapsed = now - lastFlush
         let rawDelta = rawText.count - lastRenderedRawCount
+        let cadence = flushCadence(for: rawText.count)
         let endsClause = token.last.map { ".!?,:;)\n".contains($0) } ?? false
-        let atWordBoundary = token.last?.isWhitespace == true || endsClause
+        let atWordBoundary =
+            token.last?.isWhitespace == true
+            || endsClause
+            || token.last.map(StreamingRenderer.isStandaloneStreamingUnit) == true
         let shouldFlush =
             shouldStop
-            || elapsed >= .milliseconds(70)
-            || (atWordBoundary && elapsed >= .milliseconds(28))
-            || (rawDelta >= 32 && elapsed >= .milliseconds(22))
+            || elapsed >= cadence.generalInterval
+            || (atWordBoundary && elapsed >= cadence.boundaryInterval)
+            || (rawDelta >= cadence.rawCharacterThreshold && elapsed >= cadence.minimumInterval)
 
         guard shouldFlush else {
             return StreamingRenderUpdate(visibleText: nil, shouldStop: shouldStop, didAdvance: false)
@@ -279,5 +321,31 @@ struct StreamingUpdatePolicy: Sendable {
 
     func finalize() -> String {
         StreamingRenderer.finalize(rawText)
+    }
+
+    private func flushCadence(for rawCharacterCount: Int) -> FlushCadence {
+        switch rawCharacterCount {
+        case ..<600:
+            return FlushCadence(
+                generalInterval: .milliseconds(70),
+                boundaryInterval: .milliseconds(28),
+                minimumInterval: .milliseconds(22),
+                rawCharacterThreshold: 32
+            )
+        case ..<1400:
+            return FlushCadence(
+                generalInterval: .milliseconds(84),
+                boundaryInterval: .milliseconds(34),
+                minimumInterval: .milliseconds(28),
+                rawCharacterThreshold: 48
+            )
+        default:
+            return FlushCadence(
+                generalInterval: .milliseconds(104),
+                boundaryInterval: .milliseconds(42),
+                minimumInterval: .milliseconds(34),
+                rawCharacterThreshold: 72
+            )
+        }
     }
 }

@@ -6,6 +6,8 @@ import UIKit
 #endif
 
 struct RichMessageText: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     let text: String
     var isStreaming = false
     var foregroundColor: Color = AppTheme.assistantMessageText
@@ -83,26 +85,25 @@ struct RichMessageText: View {
 
     var body: some View {
         Group {
-            if shouldRenderMarkdown {
-                if isStreaming {
-                    Markdown(text)
-                        .markdownTheme(chatMarkdownTheme)
-                        .markdownSoftBreakMode(.lineBreak)
-                        .foregroundStyle(foregroundColor)
-                        .tint(AppTheme.accent)
-                        .textSelection(.disabled)
-                        .lineSpacing(6)
-                        .fixedSize(horizontal: false, vertical: true)
-                } else {
-                    Markdown(text)
-                        .markdownTheme(chatMarkdownTheme)
-                        .markdownSoftBreakMode(.lineBreak)
-                        .foregroundStyle(foregroundColor)
-                        .tint(AppTheme.accent)
-                        .textSelection(.enabled)
-                        .lineSpacing(6)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+            if isStreaming {
+                StreamingRichMessageText(
+                    text: text,
+                    foregroundColor: foregroundColor
+                )
+                .transition(
+                    reduceMotion
+                        ? .opacity
+                        : .opacity.combined(with: .offset(y: 2))
+                )
+            } else if shouldRenderMarkdown {
+                Markdown(text)
+                    .markdownTheme(chatMarkdownTheme)
+                    .markdownSoftBreakMode(.lineBreak)
+                    .foregroundStyle(foregroundColor)
+                    .tint(AppTheme.accent)
+                    .textSelection(.enabled)
+                    .lineSpacing(6)
+                    .fixedSize(horizontal: false, vertical: true)
             } else {
                 PlainRichMessageText(
                     text: text,
@@ -112,11 +113,302 @@ struct RichMessageText: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: isStreaming)
     }
 
     private var shouldRenderMarkdown: Bool {
         MarkdownHeuristics.looksLikeMarkdown(text)
     }
+}
+
+private struct StreamingRichMessageText: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    let text: String
+    var foregroundColor: Color
+
+    private let wordSpacing: CGFloat = 4
+    private let lineSpacing: CGFloat = 8
+    private let blankLineHeight: CGFloat = 10
+
+    private var lines: [StreamingTextLine] {
+        Self.lines(from: text)
+    }
+
+    private var animatedSegmentIDs: [Int] {
+        lines.flatMap { line in
+            line.segments.compactMap { segment in
+                segment.kind == .content ? segment.id : nil
+            }
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: lineSpacing) {
+            if lines.isEmpty {
+                Text(" ")
+                    .font(AppTheme.Typography.chatAssistantMessage)
+                    .hidden()
+            } else {
+                ForEach(lines) { line in
+                    if line.segments.isEmpty {
+                        Color.clear
+                            .frame(maxWidth: .infinity, minHeight: blankLineHeight, alignment: .leading)
+                    } else {
+                        StreamingTokenFlowLayout(
+                            itemSpacing: wordSpacing,
+                            lineSpacing: lineSpacing
+                        ) {
+                            ForEach(line.segments) { segment in
+                                StreamingTextSegmentView(
+                                    segment: segment,
+                                    foregroundColor: foregroundColor
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: animatedSegmentIDs)
+    }
+
+    private static func lines(from text: String) -> [StreamingTextLine] {
+        let normalized = text.replacingOccurrences(of: "\r\n", with: "\n")
+        var nextSegmentID = 0
+
+        return normalized.components(separatedBy: "\n").enumerated().map { lineIndex, rawLine in
+            let segments = segments(
+                from: rawLine.replacingOccurrences(of: "\t", with: "    "),
+                nextSegmentID: &nextSegmentID
+            )
+
+            return StreamingTextLine(id: lineIndex, segments: segments)
+        }
+    }
+
+    private static func segments(
+        from line: String,
+        nextSegmentID: inout Int
+    ) -> [StreamingTextSegment] {
+        guard !line.isEmpty else { return [] }
+
+        var segments: [StreamingTextSegment] = []
+        var current = ""
+        var currentKind: StreamingTextSegmentKind?
+
+        func appendCurrentSegment() {
+            guard let currentKind, !current.isEmpty else { return }
+            segments.append(
+                StreamingTextSegment(
+                    id: nextSegmentID,
+                    text: current,
+                    kind: currentKind
+                )
+            )
+            nextSegmentID += 1
+            current.removeAll(keepingCapacity: true)
+        }
+
+        for character in line {
+            if character.isWhitespace {
+                if currentKind != .whitespace {
+                    appendCurrentSegment()
+                    currentKind = .whitespace
+                }
+                current.append(character)
+                continue
+            }
+
+            if StreamingRenderer.isStandaloneStreamingUnit(character) {
+                appendCurrentSegment()
+                currentKind = .content
+                current = String(character)
+                appendCurrentSegment()
+                currentKind = nil
+                continue
+            }
+
+            if currentKind != .content {
+                appendCurrentSegment()
+                currentKind = .content
+            }
+            current.append(character)
+        }
+
+        appendCurrentSegment()
+        return segments
+    }
+}
+
+private struct StreamingTextLine: Identifiable {
+    let id: Int
+    let segments: [StreamingTextSegment]
+}
+
+private struct StreamingTextSegment: Identifiable {
+    let id: Int
+    let text: String
+    let kind: StreamingTextSegmentKind
+}
+
+private enum StreamingTextSegmentKind {
+    case content
+    case whitespace
+}
+
+private struct StreamingTextSegmentView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    let segment: StreamingTextSegment
+    let foregroundColor: Color
+
+    var body: some View {
+        Group {
+            if segment.kind == .whitespace {
+                Text(segment.text)
+                    .font(AppTheme.Typography.chatAssistantMessage)
+                    .hidden()
+                    .accessibilityHidden(true)
+            } else {
+                Text(segment.text)
+                    .font(AppTheme.Typography.chatAssistantMessage)
+                    .foregroundStyle(foregroundColor)
+                    .multilineTextAlignment(.leading)
+                    .allowsTightening(false)
+                    .transition(
+                        reduceMotion
+                            ? .opacity
+                            : .opacity.combined(with: .offset(y: 3))
+                    )
+            }
+        }
+        .fixedSize()
+    }
+}
+
+private struct StreamingTokenFlowLayout: Layout {
+    var itemSpacing: CGFloat = 4
+    var lineSpacing: CGFloat = 8
+
+    func sizeThatFits(
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout Void
+    ) -> CGSize {
+        let layout = arrangedRows(
+            for: subviews,
+            maxWidth: proposal.width ?? .greatestFiniteMagnitude
+        )
+
+        return CGSize(width: layout.width, height: layout.height)
+    }
+
+    func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout Void
+    ) {
+        let layout = arrangedRows(for: subviews, maxWidth: bounds.width)
+
+        for row in layout.rows {
+            for item in row.items {
+                let position = CGPoint(
+                    x: bounds.minX + item.origin.x,
+                    y: bounds.minY + item.origin.y
+                )
+                subviews[item.index].place(
+                    at: position,
+                    proposal: ProposedViewSize(item.size)
+                )
+            }
+        }
+    }
+
+    private func arrangedRows(
+        for subviews: Subviews,
+        maxWidth: CGFloat
+    ) -> StreamingTokenFlowArrangement {
+        let resolvedMaxWidth = max(maxWidth, 1)
+        var rows: [StreamingTokenFlowRow] = []
+        var currentItems: [StreamingTokenFlowItem] = []
+        var currentRowWidth: CGFloat = 0
+        var currentRowHeight: CGFloat = 0
+        var currentY: CGFloat = 0
+        var maxRowWidth: CGFloat = 0
+
+        func commitRow() {
+            guard !currentItems.isEmpty else { return }
+
+            rows.append(
+                StreamingTokenFlowRow(
+                    items: currentItems,
+                    height: currentRowHeight
+                )
+            )
+            maxRowWidth = max(maxRowWidth, currentRowWidth)
+            currentY += currentRowHeight + lineSpacing
+            currentItems.removeAll(keepingCapacity: true)
+            currentRowWidth = 0
+            currentRowHeight = 0
+        }
+
+        for index in subviews.indices {
+            let size = subviews[index].sizeThatFits(.unspecified)
+            let proposedWidth = currentItems.isEmpty ? size.width : currentRowWidth + itemSpacing + size.width
+
+            if !currentItems.isEmpty, proposedWidth > resolvedMaxWidth {
+                commitRow()
+            }
+
+            let originX = currentItems.isEmpty ? 0 : currentRowWidth + itemSpacing
+            let originY = currentY
+
+            currentItems.append(
+                StreamingTokenFlowItem(
+                    index: index,
+                    size: size,
+                    origin: CGPoint(x: originX, y: originY)
+                )
+            )
+            currentRowWidth = originX + size.width
+            currentRowHeight = max(currentRowHeight, size.height)
+        }
+
+        commitRow()
+
+        let height: CGFloat
+        if let lastRow = rows.last {
+            height = lastRow.items.first.map { $0.origin.y + lastRow.height } ?? 0
+        } else {
+            height = 0
+        }
+
+        return StreamingTokenFlowArrangement(
+            rows: rows,
+            width: maxRowWidth,
+            height: height
+        )
+    }
+}
+
+private struct StreamingTokenFlowArrangement {
+    let rows: [StreamingTokenFlowRow]
+    let width: CGFloat
+    let height: CGFloat
+}
+
+private struct StreamingTokenFlowRow {
+    let items: [StreamingTokenFlowItem]
+    let height: CGFloat
+}
+
+private struct StreamingTokenFlowItem {
+    let index: Int
+    let size: CGSize
+    let origin: CGPoint
 }
 
 private struct PlainRichMessageText: View {
