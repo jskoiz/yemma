@@ -253,9 +253,16 @@ public struct ChatView: View {
         ZStack {
             AppBackground()
 
-            VStack(spacing: 0) {
+            ProgressiveBlurHeaderHost(
+                initialHeaderHeight: 68,
+                maxBlurRadius: 10,
+                fadeExtension: 60,
+                tintOpacityTop: 0.26,
+                tintOpacityMiddle: 0.08
+            ) { headerHeight in
+                conversationContent(topInset: headerHeight)
+            } header: {
                 topBar
-                conversationContent
             }
 
             if let toastMessage {
@@ -303,7 +310,7 @@ public struct ChatView: View {
 
     // MARK: - Conversation content with auto-scroll
 
-    private var conversationContent: some View {
+    private func conversationContent(topInset: CGFloat) -> some View {
         GeometryReader { geometry in
             ScrollViewReader { proxy in
                 ZStack(alignment: .bottomTrailing) {
@@ -343,6 +350,9 @@ public struct ChatView: View {
                         )
                     }
                     .coordinateSpace(name: scrollCoordinateSpaceName)
+                    .safeAreaInset(edge: .top, spacing: 0) {
+                        Color.clear.frame(height: topInset)
+                    }
                     .scrollDismissesKeyboard(.interactively)
                     .contentShape(Rectangle())
                     .onTapGesture {
@@ -1923,11 +1933,13 @@ private struct ChatSidebarView: View {
         ZStack {
             UtilityBackground()
 
-            VStack(spacing: AppTheme.Layout.sectionSpacing) {
-                header
-                    .padding(.horizontal, AppTheme.Layout.screenPadding)
-                    .padding(.top, 20)
-
+            ProgressiveBlurHeaderHost(
+                initialHeaderHeight: 116,
+                maxBlurRadius: 14,
+                fadeExtension: 92,
+                tintOpacityTop: 0.68,
+                tintOpacityMiddle: 0.28
+            ) { headerHeight in
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: AppTheme.Layout.sectionSpacing) {
                         everydaySection
@@ -1936,8 +1948,17 @@ private struct ChatSidebarView: View {
                         aboutSection
                     }
                     .padding(.horizontal, AppTheme.Layout.screenPadding)
+                    .padding(.top, 34)
                     .padding(.bottom, 28)
                 }
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    Color.clear.frame(height: headerHeight)
+                }
+            } header: {
+                header
+                    .padding(.horizontal, AppTheme.Layout.screenPadding)
+                    .padding(.top, 12)
+                    .padding(.bottom, 12)
             }
         }
         .task {
@@ -2011,6 +2032,7 @@ private struct ChatSidebarView: View {
                 Text("Yemma 4")
                     .font(.system(size: 24, weight: .semibold, design: .serif))
                     .foregroundStyle(AppTheme.textPrimary)
+                    .shadow(color: Color.white.opacity(0.18), radius: 10, x: 0, y: 2)
 
                 Text("Chats and quick controls")
                     .font(AppTheme.Typography.utilityCaption)

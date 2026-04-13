@@ -206,17 +206,32 @@ public struct SettingsView: View {
             ZStack {
                 UtilityBackground()
 
-                ScrollView(showsIndicators: false) {
-                    VStack(spacing: AppTheme.Layout.sectionSpacing) {
-                        header
-                        everydaySection
-                        modelStorageSection
-                        trustSection
-                        aboutSection
+                ProgressiveBlurHeaderHost(
+                    initialHeaderHeight: 88,
+                    maxBlurRadius: 12,
+                    fadeExtension: 88,
+                    tintOpacityTop: 0.66,
+                    tintOpacityMiddle: 0.24
+                ) { headerHeight in
+                    ScrollView(showsIndicators: false) {
+                        VStack(spacing: AppTheme.Layout.sectionSpacing) {
+                            everydaySection
+                            modelStorageSection
+                            trustSection
+                            aboutSection
+                        }
+                        .padding(.horizontal, AppTheme.Layout.screenPadding)
+                        .padding(.top, 28)
+                        .padding(.bottom, 28)
                     }
-                    .padding(.horizontal, AppTheme.Layout.screenPadding)
-                    .padding(.top, 20)
-                    .padding(.bottom, 28)
+                    .safeAreaInset(edge: .top, spacing: 0) {
+                        Color.clear.frame(height: headerHeight)
+                    }
+                } header: {
+                    header
+                        .padding(.horizontal, AppTheme.Layout.screenPadding)
+                        .padding(.top, 12)
+                        .padding(.bottom, 12)
                 }
             }
             .toolbar(.hidden, for: .navigationBar)
