@@ -35,6 +35,8 @@
 		E1000006 /* MLXModelSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1000007 /* MLXModelSupport.swift */; };
 		E1000010 /* YemmaPromptPlanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1000011 /* YemmaPromptPlanner.swift */; };
 		E1000012 /* Gemma4SmokeAutomation.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1000013 /* Gemma4SmokeAutomation.swift */; };
+		F1000001 /* BackgroundModelDownloadCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1000002 /* BackgroundModelDownloadCoordinator.swift */; };
+		F1000003 /* Yemma4AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1000004 /* Yemma4AppDelegate.swift */; };
 
 /* End PBXBuildFile section */
 
@@ -62,6 +64,8 @@
 		E1000007 /* MLXModelSupport.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MLXModelSupport.swift; sourceTree = "<group>"; };
 		E1000011 /* YemmaPromptPlanner.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = YemmaPromptPlanner.swift; sourceTree = "<group>"; };
 		E1000013 /* Gemma4SmokeAutomation.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = Gemma4SmokeAutomation.swift; sourceTree = "<group>"; };
+		F1000002 /* BackgroundModelDownloadCoordinator.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BackgroundModelDownloadCoordinator.swift; sourceTree = "<group>"; };
+		F1000004 /* Yemma4AppDelegate.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = Yemma4AppDelegate.swift; sourceTree = "<group>"; };
 
 /* End PBXFileReference section */
 
@@ -118,6 +122,7 @@
 			children = (
 				B10000017 /* Appearance.swift */,
 				B10000002 /* Yemma4App.swift */,
+				F1000004 /* Yemma4AppDelegate.swift */,
 				B10000004 /* ContentView.swift */,
 				B10000006 /* Assets.xcassets */,
 				5B7C0764582A88CC0118AAB9 /* Models */,
@@ -141,6 +146,7 @@
 			isa = PBXGroup;
 			children = (
 				8AA2B0C22D410A8900E8C001 /* AppDiagnostics.swift */,
+				F1000002 /* BackgroundModelDownloadCoordinator.swift */,
 				E1000013 /* Gemma4SmokeAutomation.swift */,
 				70EEE36ABE229B869B690BFB /* LLMService.swift */,
 				E1000007 /* MLXModelSupport.swift */,
@@ -241,9 +247,11 @@
 			files = (
 				B10000016 /* Appearance.swift in Sources */,
 				B10000001 /* Yemma4App.swift in Sources */,
+				F1000003 /* Yemma4AppDelegate.swift in Sources */,
 				B10000003 /* ContentView.swift in Sources */,
 				C18F96B6430B9FFB84F7095B /* ChatMessage.swift in Sources */,
 				8AA2B0C32D410A8900E8C001 /* AppDiagnostics.swift in Sources */,
+				F1000001 /* BackgroundModelDownloadCoordinator.swift in Sources */,
 				E1000012 /* Gemma4SmokeAutomation.swift in Sources */,
 				E1000006 /* MLXModelSupport.swift in Sources */,
 				8804C30D1CAED09270D51D6D /* LLMService.swift in Sources */,

@@ -104,44 +104,92 @@ struct EmptyStateView: View {
     }
 
     private var statusBanner: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 10) {
-                Image(systemName: statusSystemImage)
-                    .font(.system(size: 14, weight: .semibold))
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(alignment: .top, spacing: 12) {
+                    ZStack {
+                        Circle()
+                            .fill(statusIconBackground)
+                            .frame(width: 34, height: 34)
 
-                Text(statusText)
-                    .font(AppTheme.Typography.utilityCaption)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+                        Image(systemName: statusSystemImage)
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(statusAccentColor)
+                    }
+                    .frame(width: 34)
 
-            if let statusDetailText {
-                Text(statusDetailText)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(AppTheme.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(statusText)
+                            .font(AppTheme.Typography.utilityRowTitle.weight(.semibold))
+                            .foregroundStyle(statusTitleColor)
+                            .fixedSize(horizontal: false, vertical: true)
 
-            if let statusProgress {
-                ProgressView(value: min(max(statusProgress, 0), 1))
-                    .tint(statusTextColor)
+                        if let statusDetailText {
+                            Text(statusDetailText)
+                                .font(AppTheme.Typography.utilityCaption)
+                                .foregroundStyle(AppTheme.textSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+
+                    Spacer(minLength: 0)
+
+                    if let statusProgressLabel {
+                        Text(statusProgressLabel)
+                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .foregroundStyle(statusAccentColor)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(statusIconBackground)
+                            .clipShape(Capsule())
+                    }
+                }
+
+                if let statusProgress {
+                    ProgressView(value: min(max(statusProgress, 0), 1))
+                        .tint(statusAccentColor)
+                }
             }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 16)
 
             if let primarySetupActionTitle, let onPrimarySetupAction {
-                Button(primarySetupActionTitle, action: onPrimarySetupAction)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(AppTheme.accentForeground)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(AppTheme.accent)
-                    .clipShape(Capsule())
-                    .buttonStyle(.plain)
+                Divider()
+                    .overlay(AppTheme.separator)
+                    .padding(.leading, 62)
+
+                Button(action: onPrimarySetupAction) {
+                    HStack(spacing: 12) {
+                        Image(systemName: primarySetupActionSystemImage)
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(statusAccentColor)
+                            .frame(width: 26)
+
+                        Text(primarySetupActionTitle)
+                            .font(AppTheme.Typography.utilityRowTitle.weight(.semibold))
+                            .foregroundStyle(AppTheme.textPrimary)
+
+                        Spacer()
+
+                        Image(systemName: "arrow.right")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(AppTheme.textTertiary)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 16)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
             }
         }
-        .foregroundStyle(statusTextColor)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 11)
-        .background(statusBackground)
-        .clipShape(Capsule(style: .continuous))
+        .background(
+            RoundedRectangle(cornerRadius: AppTheme.Radius.medium, style: .continuous)
+                .fill(AppTheme.controlFill)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: AppTheme.Radius.medium, style: .continuous)
+                .stroke(AppTheme.controlBorder, lineWidth: 1)
+        )
     }
 
     private func starterButton(_ starter: ChatStarter) -> some View {
@@ -212,20 +260,49 @@ struct EmptyStateView: View {
         return statusIsFailure ? "exclamationmark.triangle.fill" : "bolt.circle.fill"
     }
 
-    private var statusTextColor: Color {
+    private var statusAccentColor: Color {
         if !supportsLocalModelRuntime {
-            return AppTheme.textPrimary
+            return AppTheme.textSecondary
         }
 
         return statusIsFailure ? AppTheme.destructive : AppTheme.accent
     }
 
-    private var statusBackground: Color {
+    private var statusTitleColor: Color {
+        statusIsFailure ? AppTheme.destructive : AppTheme.textPrimary
+    }
+
+    private var statusIconBackground: Color {
         if !supportsLocalModelRuntime {
-            return AppTheme.controlFill
+            return AppTheme.chipFill
         }
 
         return statusIsFailure ? AppTheme.destructive.opacity(0.12) : AppTheme.accentSoft
+    }
+
+    private var statusProgressLabel: String? {
+        guard let statusProgress else { return nil }
+        return "\(Int(min(max(statusProgress, 0), 1) * 100))%"
+    }
+
+    private var primarySetupActionSystemImage: String {
+        guard let title = primarySetupActionTitle?.lowercased() else {
+            return "arrow.right.circle.fill"
+        }
+
+        if title.contains("resume") || title.contains("download") {
+            return "arrow.down.circle.fill"
+        }
+
+        if title.contains("retry") {
+            return "arrow.clockwise.circle.fill"
+        }
+
+        if title.contains("load") {
+            return "bolt.circle.fill"
+        }
+
+        return "arrow.right.circle.fill"
     }
 }
 

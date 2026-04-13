@@ -124,6 +124,7 @@ public enum Yemma4DebugOptions {
 
 @main
 public struct Yemma4App: App {
+    @UIApplicationDelegateAdaptor(Yemma4AppDelegate.self) private var appDelegate
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage(AppearancePreference.storageKey) private var appearancePreferenceRaw = AppearancePreference.system.rawValue
     @State private var diagnostics: AppDiagnostics
@@ -190,6 +191,9 @@ public struct Yemma4App: App {
                         category: "startup",
                         metadata: ["elapsedMs": StartupTiming.elapsedMs()]
                     )
+                    Task {
+                        await modelDownloader.appDidBecomeActive()
+                    }
                 }
                 .onChange(of: scenePhase) { _, newPhase in
                     AppDiagnostics.shared.record(
@@ -200,6 +204,19 @@ public struct Yemma4App: App {
                             "elapsedMs": StartupTiming.elapsedMs()
                         ]
                     )
+
+                    switch newPhase {
+                    case .active:
+                        Task {
+                            await modelDownloader.appDidBecomeActive()
+                        }
+                    case .background:
+                        modelDownloader.appDidEnterBackground()
+                    case .inactive:
+                        break
+                    @unknown default:
+                        break
+                    }
                 }
         }
     }
