@@ -78,6 +78,8 @@ struct ConversationBrowserSheet: View {
                         }
                     }
                 }
+                .frame(maxWidth: 760)
+                .frame(maxWidth: .infinity)
                 .padding(.horizontal, AppTheme.Layout.screenPadding)
                 .padding(.bottom, 28)
             }

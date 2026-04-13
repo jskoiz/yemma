@@ -99,9 +99,9 @@ public struct ChatView: View {
     public var body: some View {
         NavigationStack {
             GeometryReader { geometry in
-                let sidebarWidth = geometry.size.width
+                let sidebarWidth = sidebarWidth(for: geometry.size.width)
                 let sidebarProgress = sidebarRevealProgress(sidebarWidth: sidebarWidth)
-                let shellOffset = sidebarProgress * (geometry.size.width + 12)
+                let shellOffset = sidebarProgress * (sidebarWidth + 12)
 
                 ZStack(alignment: .leading) {
                     UtilityBackground()
@@ -141,10 +141,11 @@ public struct ChatView: View {
                             }
                         )
                         .frame(width: sidebarWidth)
+                        .frame(maxHeight: .infinity)
                         .offset(x: sidebarOffset(sidebarWidth: sidebarWidth))
                     }
 
-                    mainShell
+                    mainShell(containerWidth: geometry.size.width)
                         .frame(width: geometry.size.width, height: geometry.size.height)
                         .overlay {
                             if sidebarProgress > 0.001 {
@@ -249,8 +250,10 @@ public struct ChatView: View {
         }
     }
 
-    private var mainShell: some View {
-        ZStack {
+    private func mainShell(containerWidth: CGFloat) -> some View {
+        let contentWidth = contentColumnWidth(for: containerWidth)
+
+        return ZStack {
             AppBackground()
 
             ProgressiveBlurHeaderHost(
@@ -260,9 +263,9 @@ public struct ChatView: View {
                 tintOpacityTop: 0.26,
                 tintOpacityMiddle: 0.08
             ) { headerHeight in
-                conversationContent(topInset: headerHeight)
+                conversationContent(topInset: headerHeight, containerWidth: containerWidth)
             } header: {
-                topBar
+                topBar(maxContentWidth: contentWidth)
             }
 
             if let toastMessage {
@@ -279,11 +282,11 @@ public struct ChatView: View {
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            composerSection
+            composerSection(maxContentWidth: contentWidth)
         }
     }
 
-    private var topBar: some View {
+    private func topBar(maxContentWidth: CGFloat) -> some View {
         HStack(spacing: 12) {
             CircleIconButton(
                 systemName: "line.3.horizontal",
@@ -294,6 +297,14 @@ public struct ChatView: View {
             .accessibilityHint("Browse saved chats and quick settings.")
 
             Spacer(minLength: 0)
+
+            if maxContentWidth >= 720 {
+                Text("Yemma 4")
+                    .font(.system(size: 18, weight: .semibold, design: .serif))
+                    .foregroundStyle(AppTheme.textPrimary)
+
+                Spacer(minLength: 0)
+            }
 
             CircleIconButton(systemName: "square.and.pencil") {
                 Task { @MainActor in
@@ -306,12 +317,16 @@ public struct ChatView: View {
         .padding(.horizontal, 16)
         .padding(.top, 6)
         .padding(.bottom, 12)
+        .frame(maxWidth: maxContentWidth)
+        .frame(maxWidth: .infinity)
     }
 
     // MARK: - Conversation content with auto-scroll
 
-    private func conversationContent(topInset: CGFloat) -> some View {
-        GeometryReader { geometry in
+    private func conversationContent(topInset: CGFloat, containerWidth: CGFloat) -> some View {
+        let contentWidth = contentColumnWidth(for: containerWidth)
+
+        return GeometryReader { geometry in
             ScrollViewReader { proxy in
                 ZStack(alignment: .bottomTrailing) {
                     ScrollView(showsIndicators: false) {
@@ -341,7 +356,8 @@ public struct ChatView: View {
                         .padding(.horizontal, 16)
                         .padding(.top, 8)
                         .padding(.bottom, 18)
-                        .frame(maxWidth: .infinity, minHeight: geometry.size.height, alignment: .top)
+                        .frame(maxWidth: contentWidth, minHeight: geometry.size.height, alignment: .top)
+                        .frame(maxWidth: .infinity, alignment: .top)
                         .animation(
                             reduceMotion
                                 ? nil
@@ -351,7 +367,7 @@ public struct ChatView: View {
                     }
                     .coordinateSpace(name: scrollCoordinateSpaceName)
                     .safeAreaInset(edge: .top, spacing: 0) {
-                        Color.clear.frame(height: topInset)
+                        Color.clear.frame(height: topInset + transcriptHeaderClearance(for: containerWidth))
                     }
                     .scrollDismissesKeyboard(.interactively)
                     .contentShape(Rectangle())
@@ -381,7 +397,7 @@ public struct ChatView: View {
 
                     if shouldShowJumpToLatest {
                         jumpToLatestButton(proxy: proxy)
-                            .padding(.trailing, 16)
+                            .padding(.trailing, max(16, (containerWidth - contentWidth) / 2))
                             .padding(.bottom, 12)
                     }
                 }
@@ -593,7 +609,7 @@ public struct ChatView: View {
 
     // MARK: - Composer
 
-    private var composerSection: some View {
+    private func composerSection(maxContentWidth: CGFloat) -> some View {
         VStack(spacing: 12) {
             if shouldShowTypingIndicator {
                 typingIndicator
@@ -661,6 +677,8 @@ public struct ChatView: View {
         .padding(.horizontal, 16)
         .padding(.top, 10)
         .padding(.bottom, 14)
+        .frame(maxWidth: maxContentWidth)
+        .frame(maxWidth: .infinity)
         .background(
             LinearGradient(
                 colors: [Color.clear, AppTheme.composerFadeMiddle, AppTheme.composerFadeBottom],
@@ -1247,6 +1265,25 @@ public struct ChatView: View {
 
     private var isSidebarPresented: Bool {
         isSidebarOpen || sidebarDragOffset > 0
+    }
+
+    private func sidebarWidth(for containerWidth: CGFloat) -> CGFloat {
+        let proposedWidth =
+            containerWidth >= 900
+                ? containerWidth * 0.38
+                : containerWidth * 0.84
+        return min(max(320, proposedWidth), max(containerWidth - 28, 320))
+    }
+
+    private func contentColumnWidth(for containerWidth: CGFloat) -> CGFloat {
+        let availableWidth = max(containerWidth - 32, 0)
+        let maximumWidth: CGFloat = containerWidth >= 900 ? 820 : 680
+        return min(availableWidth, maximumWidth)
+    }
+
+    private func transcriptHeaderClearance(for containerWidth: CGFloat) -> CGFloat {
+        guard !messages.isEmpty else { return 0 }
+        return containerWidth >= 720 ? 34 : 14
     }
 
     private func toggleSidebar() {

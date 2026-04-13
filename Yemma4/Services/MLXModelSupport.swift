@@ -2,6 +2,46 @@ import Foundation
 import MLXLMCommon
 import MLXVLM
 
+private struct Gemma4ProcessorAssetContract: Decodable {
+    let imageSeqLength: Int
+    let imageSoftTokenBudget: Int
+    let patchSize: Int?
+    let poolingKernelSize: Int?
+
+    private struct ImageProcessor: Decodable {
+        let softTokenBudget: Int?
+        let patchSize: Int?
+        let poolingKernelSize: Int?
+
+        enum CodingKeys: String, CodingKey {
+            case softTokenBudget = "soft_token_budget"
+            case patchSize = "patch_size"
+            case poolingKernelSize = "pooling_kernel_size"
+        }
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case imageSeqLength = "image_seq_length"
+        case imageProcessor = "image_processor"
+        case softTokenBudget = "soft_token_budget"
+        case patchSize = "patch_size"
+        case poolingKernelSize = "pooling_kernel_size"
+    }
+
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let nestedImageProcessor = try container.decodeIfPresent(ImageProcessor.self, forKey: .imageProcessor)
+        let fallbackSoftTokenBudget = try container.decodeIfPresent(Int.self, forKey: .softTokenBudget)
+        let fallbackPatchSize = try container.decodeIfPresent(Int.self, forKey: .patchSize)
+        let fallbackPoolingKernelSize = try container.decodeIfPresent(Int.self, forKey: .poolingKernelSize)
+
+        imageSeqLength = try container.decodeIfPresent(Int.self, forKey: .imageSeqLength) ?? 280
+        imageSoftTokenBudget = nestedImageProcessor?.softTokenBudget ?? fallbackSoftTokenBudget ?? imageSeqLength
+        patchSize = nestedImageProcessor?.patchSize ?? fallbackPatchSize
+        poolingKernelSize = nestedImageProcessor?.poolingKernelSize ?? fallbackPoolingKernelSize
+    }
+}
+
 enum Gemma4MLXSupport {
     static let repositoryID = "mlx-community/gemma-4-e2b-it-4bit"
     static let legacyRepositoryIDs = [
@@ -32,7 +72,7 @@ enum Gemma4MLXSupport {
             using: decoder
         )
         let processorConfiguration = try decodeJSON(
-            Gemma4ProcessorConfiguration.self,
+            Gemma4ProcessorAssetContract.self,
             from: validatedDirectory.processorConfigURL,
             fileName: validatedDirectory.processorConfigURL.lastPathComponent,
             using: decoder
@@ -44,12 +84,12 @@ enum Gemma4MLXSupport {
         )
     }
 
-    static func validateAssetContract(
+    private static func validateAssetContract(
         modelConfiguration: Gemma4Configuration,
-        processorConfiguration: Gemma4ProcessorConfiguration
+        processorConfiguration: Gemma4ProcessorAssetContract
     ) throws {
         let processorSoftTokens = processorConfiguration.imageSeqLength
-        let processorImageSoftTokens = processorConfiguration.imageProcessor.softTokenBudget
+        let processorImageSoftTokens = processorConfiguration.imageSoftTokenBudget
         let modelSoftTokens = modelConfiguration.visionSoftTokensPerImage
         let modelVisionDefault = modelConfiguration.visionConfiguration.defaultOutputLength
 
@@ -77,26 +117,24 @@ enum Gemma4MLXSupport {
             )
         }
 
-        guard
-            processorConfiguration.imageProcessor.patchSize
-                == modelConfiguration.visionConfiguration.patchSize
-        else {
-            throw Gemma4AssetValidationError.mismatch(
-                key: "vision patch size",
-                expected: String(modelConfiguration.visionConfiguration.patchSize),
-                actual: String(processorConfiguration.imageProcessor.patchSize)
-            )
+        if let processorPatchSize = processorConfiguration.patchSize {
+            guard processorPatchSize == modelConfiguration.visionConfiguration.patchSize else {
+                throw Gemma4AssetValidationError.mismatch(
+                    key: "vision patch size",
+                    expected: String(modelConfiguration.visionConfiguration.patchSize),
+                    actual: String(processorPatchSize)
+                )
+            }
         }
 
-        guard
-            processorConfiguration.imageProcessor.poolingKernelSize
-                == modelConfiguration.visionConfiguration.poolingKernelSize
-        else {
-            throw Gemma4AssetValidationError.mismatch(
-                key: "vision pooling kernel size",
-                expected: String(modelConfiguration.visionConfiguration.poolingKernelSize),
-                actual: String(processorConfiguration.imageProcessor.poolingKernelSize)
-            )
+        if let processorPoolingKernelSize = processorConfiguration.poolingKernelSize {
+            guard processorPoolingKernelSize == modelConfiguration.visionConfiguration.poolingKernelSize else {
+                throw Gemma4AssetValidationError.mismatch(
+                    key: "vision pooling kernel size",
+                    expected: String(modelConfiguration.visionConfiguration.poolingKernelSize),
+                    actual: String(processorPoolingKernelSize)
+                )
+            }
         }
     }
 

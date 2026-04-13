@@ -50,6 +50,7 @@ private struct SetupEducationCard: Identifiable {
 }
 
 public struct OnboardingView: View {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(ModelDownloader.self) private var modelDownloader
     @Environment(LLMService.self) private var llmService
     @State private var selectedCardID = SetupEducationCard.defaults.first?.id
@@ -105,15 +106,21 @@ public struct OnboardingView: View {
                 compactIntroShell
             } else {
                 ScrollView(showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 20) {
-                        header
-                        progressModule
-                        if shouldShowEducationSection {
-                            educationGuideSection
+                    Group {
+                        if usesWideSetupLayout, shouldShowEducationSection {
+                            HStack(alignment: .top, spacing: 24) {
+                                primarySetupColumn
+                                    .frame(maxWidth: 500, alignment: .leading)
+
+                                educationGuideSection
+                                    .frame(maxWidth: 420, alignment: .leading)
+                            }
+                            .frame(maxWidth: 1040, alignment: .leading)
+                        } else {
+                            primarySetupColumn
+                                .frame(maxWidth: usesWideSetupLayout ? 680 : 560, alignment: .leading)
                         }
-                        actionSection
                     }
-                    .frame(maxWidth: 560)
                     .padding(.horizontal, 20)
                     .padding(.top, 28)
                     .padding(.bottom, 32)
@@ -147,6 +154,14 @@ public struct OnboardingView: View {
                     recordFirstTouchIfNeeded()
                 }
         )
+    }
+
+    private var primarySetupColumn: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            header
+            progressModule
+            actionSection
+        }
     }
 
     private var compactIntroShell: some View {
@@ -187,7 +202,7 @@ public struct OnboardingView: View {
 
             Spacer(minLength: 0)
         }
-        .frame(maxWidth: 560, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: introShellMaxWidth, maxHeight: .infinity, alignment: .topLeading)
         .padding(.horizontal, 20)
         .padding(.top, 28)
         .padding(.bottom, 32)
@@ -792,6 +807,14 @@ public struct OnboardingView: View {
 
     private var usesCompactIntroShell: Bool {
         setupState == .intro
+    }
+
+    private var usesWideSetupLayout: Bool {
+        horizontalSizeClass == .regular
+    }
+
+    private var introShellMaxWidth: CGFloat {
+        usesWideSetupLayout ? 680 : 560
     }
 
     private var continueActionSubtitle: String {

@@ -41,6 +41,8 @@ struct ChatStarter: Identifiable, Hashable {
 }
 
 struct EmptyStateView: View {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
     let isModelLoaded: Bool
     let isModelLoading: Bool
     let supportsLocalModelRuntime: Bool
@@ -73,34 +75,61 @@ struct EmptyStateView: View {
                 }
 
                 if !starters.isEmpty {
-                    VStack(spacing: 0) {
-                        ForEach(Array(starters.enumerated()), id: \.element.id) { index, starter in
-                            starterButton(starter)
-
-                            if index != starters.count - 1 {
-                                Divider()
-                                    .overlay(AppTheme.separator)
-                                    .padding(.leading, 52)
-                            }
-                        }
-                    }
-                    .padding(.vertical, 4)
-                    .background(
-                        RoundedRectangle(cornerRadius: AppTheme.Radius.medium, style: .continuous)
-                            .fill(AppTheme.controlFill)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: AppTheme.Radius.medium, style: .continuous)
-                            .stroke(AppTheme.controlBorder, lineWidth: 1)
-                    )
+                    starterSurface
                 }
             }
-            .frame(maxWidth: 540, alignment: .leading)
+            .frame(maxWidth: starterContentMaxWidth, alignment: .leading)
             .padding(.horizontal, 20)
 
             Spacer(minLength: 24)
         }
         .frame(maxWidth: .infinity, minHeight: 320)
+    }
+
+    private var usesStarterGrid: Bool {
+        horizontalSizeClass == .regular && starters.count > 1
+    }
+
+    private var starterContentMaxWidth: CGFloat {
+        usesStarterGrid ? 720 : 560
+    }
+
+    @ViewBuilder
+    private var starterSurface: some View {
+        if usesStarterGrid {
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+                ForEach(starters) { starter in
+                    starterButton(starter)
+                        .background(starterBackground)
+                        .overlay(starterOutline)
+                }
+            }
+        } else {
+            VStack(spacing: 0) {
+                ForEach(Array(starters.enumerated()), id: \.element.id) { index, starter in
+                    starterButton(starter)
+
+                    if index != starters.count - 1 {
+                        Divider()
+                            .overlay(AppTheme.separator)
+                            .padding(.leading, 52)
+                    }
+                }
+            }
+            .padding(.vertical, 4)
+            .background(starterBackground)
+            .overlay(starterOutline)
+        }
+    }
+
+    private var starterBackground: some View {
+        RoundedRectangle(cornerRadius: AppTheme.Radius.medium, style: .continuous)
+            .fill(AppTheme.controlFill)
+    }
+
+    private var starterOutline: some View {
+        RoundedRectangle(cornerRadius: AppTheme.Radius.medium, style: .continuous)
+            .stroke(AppTheme.controlBorder, lineWidth: 1)
     }
 
     private var statusBanner: some View {
