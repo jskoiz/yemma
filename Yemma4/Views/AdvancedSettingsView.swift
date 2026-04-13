@@ -35,6 +35,8 @@ struct AdvancedSettingsView: View {
                         advancedSection
                         resetSection
                     }
+                    .frame(maxWidth: 760)
+                    .frame(maxWidth: .infinity)
                     .padding(.horizontal, AppTheme.Layout.screenPadding)
                     .padding(.top, 28)
                     .padding(.bottom, 28)

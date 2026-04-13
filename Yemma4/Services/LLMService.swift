@@ -313,8 +313,7 @@ private struct Gemma4ResponseTokenParser {
     init(tokenizer: any MLXLMCommon.Tokenizer) {
         self.tokenizer = tokenizer
         self.detokenizer = MLXLMCommon.NaiveStreamingDetokenizer(
-            tokenizer: tokenizer,
-            skipSpecialTokens: true
+            tokenizer: tokenizer
         )
         self.suppressedBlockTokenIDs = Dictionary(
             uniqueKeysWithValues: Self.suppressedBlocks.compactMap { start, end in

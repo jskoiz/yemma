@@ -220,6 +220,8 @@ public struct SettingsView: View {
                             trustSection
                             aboutSection
                         }
+                        .frame(maxWidth: 760)
+                        .frame(maxWidth: .infinity)
                         .padding(.horizontal, AppTheme.Layout.screenPadding)
                         .padding(.top, 28)
                         .padding(.bottom, 28)
