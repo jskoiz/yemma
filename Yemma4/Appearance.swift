@@ -1,6 +1,8 @@
 import SwiftUI
 
 #if canImport(UIKit)
+import CoreImage.CIFilterBuiltins
+import QuartzCore
 import UIKit
 #endif
 
@@ -281,6 +283,103 @@ struct UtilityBackground: View {
     }
 }
 
+private struct ProgressiveHeaderHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+struct ProgressiveBlurHeaderHost<Header: View, Content: View>: View {
+    var initialHeaderHeight: CGFloat = 88
+    var maxBlurRadius: CGFloat = 12
+    var fadeExtension: CGFloat = 76
+    var tintOpacityTop: Double = 0.58
+    var tintOpacityMiddle: Double = 0.18
+    @ViewBuilder var content: (CGFloat) -> Content
+    @ViewBuilder var header: () -> Header
+
+    @State private var headerHeight: CGFloat
+    @Environment(\.colorScheme) private var colorScheme
+
+    init(
+        initialHeaderHeight: CGFloat = 88,
+        maxBlurRadius: CGFloat = 12,
+        fadeExtension: CGFloat = 76,
+        tintOpacityTop: Double = 0.58,
+        tintOpacityMiddle: Double = 0.18,
+        @ViewBuilder content: @escaping (CGFloat) -> Content,
+        @ViewBuilder header: @escaping () -> Header
+    ) {
+        self.initialHeaderHeight = initialHeaderHeight
+        self.maxBlurRadius = maxBlurRadius
+        self.fadeExtension = fadeExtension
+        self.tintOpacityTop = tintOpacityTop
+        self.tintOpacityMiddle = tintOpacityMiddle
+        self.content = content
+        self.header = header
+        _headerHeight = State(initialValue: initialHeaderHeight)
+    }
+
+    var body: some View {
+        ZStack(alignment: .top) {
+            content(headerHeight)
+
+            let totalHeight = headerHeight + fadeExtension
+            VariableBlurView(
+                maxBlurRadius: maxBlurRadius,
+                direction: .blurredTopClearBottom,
+                startOffset: -0.14
+            )
+            .overlay {
+                LinearGradient(
+                    stops: [
+                        .init(color: fadeTint.opacity(tintOpacityTop), location: 0),
+                        .init(color: fadeTint.opacity(tintOpacityMiddle), location: min(0.72, 88 / totalHeight)),
+                        .init(color: fadeTint.opacity(0), location: 1)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            }
+            .mask {
+                LinearGradient(
+                    stops: [
+                        .init(color: .black, location: 0),
+                        .init(color: .black, location: min(0.42, headerHeight / totalHeight)),
+                        .init(color: .black.opacity(0.78), location: min(0.74, (headerHeight + 24) / totalHeight)),
+                        .init(color: .clear, location: 1)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            }
+            .frame(height: totalHeight)
+            .ignoresSafeArea(edges: .top)
+            .allowsHitTesting(false)
+
+            header()
+                .background {
+                    GeometryReader { geometry in
+                        Color.clear.preference(
+                            key: ProgressiveHeaderHeightKey.self,
+                            value: geometry.size.height
+                        )
+                    }
+                }
+        }
+        .onPreferenceChange(ProgressiveHeaderHeightKey.self) { nextHeight in
+            guard nextHeight > 0, abs(nextHeight - headerHeight) > 0.5 else { return }
+            headerHeight = nextHeight
+        }
+    }
+
+    private var fadeTint: Color {
+        colorScheme == .dark ? .black : .white
+    }
+}
+
 struct UtilitySection<Content: View>: View {
     let title: String
     @ViewBuilder let content: Content
@@ -344,3 +443,97 @@ extension View {
         brandCard(cornerRadius: cornerRadius)
     }
 }
+
+#if canImport(UIKit)
+enum VariableBlurDirection {
+    case blurredTopClearBottom
+    case blurredBottomClearTop
+}
+
+struct VariableBlurView: UIViewRepresentable {
+    var maxBlurRadius: CGFloat = 20
+    var direction: VariableBlurDirection = .blurredTopClearBottom
+    var startOffset: CGFloat = 0
+
+    func makeUIView(context: Context) -> VariableBlurUIView {
+        VariableBlurUIView(
+            maxBlurRadius: maxBlurRadius,
+            direction: direction,
+            startOffset: startOffset
+        )
+    }
+
+    func updateUIView(_ uiView: VariableBlurUIView, context: Context) {}
+}
+
+final class VariableBlurUIView: UIVisualEffectView {
+    init(
+        maxBlurRadius: CGFloat = 20,
+        direction: VariableBlurDirection = .blurredTopClearBottom,
+        startOffset: CGFloat = 0
+    ) {
+        super.init(effect: UIBlurEffect(style: .regular))
+
+        let className = String("retliFAC".reversed())
+        guard let filterClass = NSClassFromString(className) as? NSObject.Type else { return }
+
+        let selectorName = String(":epyThtiWretlif".reversed())
+        guard
+            let variableBlur = filterClass
+                .perform(NSSelectorFromString(selectorName), with: "variableBlur")
+                .takeUnretainedValue() as? NSObject
+        else {
+            return
+        }
+
+        variableBlur.setValue(maxBlurRadius, forKey: "inputRadius")
+        variableBlur.setValue(
+            makeGradientImage(startOffset: startOffset, direction: direction),
+            forKey: "inputMaskImage"
+        )
+        variableBlur.setValue(true, forKey: "inputNormalizeEdges")
+
+        let backdropLayer = subviews.first?.layer
+        backdropLayer?.filters = [variableBlur]
+
+        for subview in subviews.dropFirst() {
+            subview.alpha = 0
+        }
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func didMoveToWindow() {
+        guard let window, let backdropLayer = subviews.first?.layer else { return }
+        backdropLayer.setValue(window.traitCollection.displayScale, forKey: "scale")
+    }
+
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {}
+
+    private func makeGradientImage(
+        width: CGFloat = 100,
+        height: CGFloat = 100,
+        startOffset: CGFloat,
+        direction: VariableBlurDirection
+    ) -> CGImage {
+        let gradient = CIFilter.linearGradient()
+        gradient.color0 = CIColor.black
+        gradient.color1 = CIColor.clear
+        gradient.point0 = CGPoint(x: 0, y: height)
+        gradient.point1 = CGPoint(x: 0, y: startOffset * height)
+
+        if case .blurredBottomClearTop = direction {
+            gradient.point0.y = 0
+            gradient.point1.y = height - gradient.point1.y
+        }
+
+        return CIContext().createCGImage(
+            gradient.outputImage!,
+            from: CGRect(x: 0, y: 0, width: width, height: height)
+        )!
+    }
+}
+#endif
