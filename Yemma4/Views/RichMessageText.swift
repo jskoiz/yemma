@@ -85,7 +85,27 @@ struct RichMessageText: View {
 
     var body: some View {
         Group {
-            if isStreaming {
+            if shouldRenderMarkdown {
+                if isStreaming {
+                    Markdown(text)
+                        .markdownTheme(chatMarkdownTheme)
+                        .markdownSoftBreakMode(.lineBreak)
+                        .foregroundStyle(foregroundColor)
+                        .tint(AppTheme.accent)
+                        .textSelection(.disabled)
+                        .lineSpacing(6)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Markdown(text)
+                        .markdownTheme(chatMarkdownTheme)
+                        .markdownSoftBreakMode(.lineBreak)
+                        .foregroundStyle(foregroundColor)
+                        .tint(AppTheme.accent)
+                        .textSelection(.enabled)
+                        .lineSpacing(6)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            } else if isStreaming {
                 StreamingRichMessageText(
                     text: text,
                     foregroundColor: foregroundColor
@@ -95,15 +115,6 @@ struct RichMessageText: View {
                         ? .opacity
                         : .opacity.combined(with: .offset(y: 2))
                 )
-            } else if shouldRenderMarkdown {
-                Markdown(text)
-                    .markdownTheme(chatMarkdownTheme)
-                    .markdownSoftBreakMode(.lineBreak)
-                    .foregroundStyle(foregroundColor)
-                    .tint(AppTheme.accent)
-                    .textSelection(.enabled)
-                    .lineSpacing(6)
-                    .fixedSize(horizontal: false, vertical: true)
             } else {
                 PlainRichMessageText(
                     text: text,
@@ -137,9 +148,7 @@ private struct StreamingRichMessageText: View {
 
     private var animatedSegmentIDs: [Int] {
         lines.flatMap { line in
-            line.segments.compactMap { segment in
-                segment.kind == .content ? segment.id : nil
-            }
+            line.tokens.map(\.id)
         }
     }
 
@@ -151,7 +160,7 @@ private struct StreamingRichMessageText: View {
                     .hidden()
             } else {
                 ForEach(lines) { line in
-                    if line.segments.isEmpty {
+                    if line.tokens.isEmpty {
                         Color.clear
                             .frame(maxWidth: .infinity, minHeight: blankLineHeight, alignment: .leading)
                     } else {
@@ -159,9 +168,9 @@ private struct StreamingRichMessageText: View {
                             itemSpacing: wordSpacing,
                             lineSpacing: lineSpacing
                         ) {
-                            ForEach(line.segments) { segment in
-                                StreamingTextSegmentView(
-                                    segment: segment,
+                            ForEach(line.tokens) { token in
+                                StreamingWordTokenView(
+                                    token: token.text,
                                     foregroundColor: foregroundColor
                                 )
                             }
@@ -176,115 +185,88 @@ private struct StreamingRichMessageText: View {
 
     private static func lines(from text: String) -> [StreamingTextLine] {
         let normalized = text.replacingOccurrences(of: "\r\n", with: "\n")
-        var nextSegmentID = 0
+        var nextTokenID = 0
 
         return normalized.components(separatedBy: "\n").enumerated().map { lineIndex, rawLine in
-            let segments = segments(
-                from: rawLine.replacingOccurrences(of: "\t", with: "    "),
-                nextSegmentID: &nextSegmentID
+            let tokens = tokens(
+                from: rawLine,
+                nextTokenID: &nextTokenID
             )
 
-            return StreamingTextLine(id: lineIndex, segments: segments)
+            return StreamingTextLine(id: lineIndex, tokens: tokens)
         }
     }
 
-    private static func segments(
+    private static func tokens(
         from line: String,
-        nextSegmentID: inout Int
-    ) -> [StreamingTextSegment] {
+        nextTokenID: inout Int
+    ) -> [StreamingWordToken] {
         guard !line.isEmpty else { return [] }
 
-        var segments: [StreamingTextSegment] = []
+        var tokens: [StreamingWordToken] = []
         var current = ""
-        var currentKind: StreamingTextSegmentKind?
 
-        func appendCurrentSegment() {
-            guard let currentKind, !current.isEmpty else { return }
-            segments.append(
-                StreamingTextSegment(
-                    id: nextSegmentID,
-                    text: current,
-                    kind: currentKind
+        func appendCurrentToken() {
+            guard !current.isEmpty else { return }
+            tokens.append(
+                StreamingWordToken(
+                    id: nextTokenID,
+                    text: current
                 )
             )
-            nextSegmentID += 1
+            nextTokenID += 1
             current.removeAll(keepingCapacity: true)
         }
 
         for character in line {
             if character.isWhitespace {
-                if currentKind != .whitespace {
-                    appendCurrentSegment()
-                    currentKind = .whitespace
-                }
-                current.append(character)
+                appendCurrentToken()
                 continue
             }
 
             if StreamingRenderer.isStandaloneStreamingUnit(character) {
-                appendCurrentSegment()
-                currentKind = .content
+                appendCurrentToken()
                 current = String(character)
-                appendCurrentSegment()
-                currentKind = nil
+                appendCurrentToken()
                 continue
             }
 
-            if currentKind != .content {
-                appendCurrentSegment()
-                currentKind = .content
-            }
             current.append(character)
         }
 
-        appendCurrentSegment()
-        return segments
+        appendCurrentToken()
+        return tokens
     }
 }
 
 private struct StreamingTextLine: Identifiable {
     let id: Int
-    let segments: [StreamingTextSegment]
+    let tokens: [StreamingWordToken]
 }
 
-private struct StreamingTextSegment: Identifiable {
+private struct StreamingWordToken: Identifiable {
     let id: Int
     let text: String
-    let kind: StreamingTextSegmentKind
 }
 
-private enum StreamingTextSegmentKind {
-    case content
-    case whitespace
-}
-
-private struct StreamingTextSegmentView: View {
+private struct StreamingWordTokenView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    let segment: StreamingTextSegment
+    let token: String
     let foregroundColor: Color
 
     var body: some View {
-        Group {
-            if segment.kind == .whitespace {
-                Text(segment.text)
-                    .font(AppTheme.Typography.chatAssistantMessage)
-                    .hidden()
-                    .accessibilityHidden(true)
-            } else {
-                Text(segment.text)
-                    .font(AppTheme.Typography.chatAssistantMessage)
-                    .foregroundStyle(foregroundColor)
-                    .multilineTextAlignment(.leading)
-                    .allowsTightening(false)
-                    .transition(
-                        reduceMotion
-                            ? .opacity
-                            : .opacity.combined(with: .offset(y: 3))
-                    )
-            }
-        }
-        .fixedSize()
+        Text(token)
+            .font(AppTheme.Typography.chatAssistantMessage)
+            .foregroundStyle(foregroundColor)
+            .multilineTextAlignment(.leading)
+            .allowsTightening(false)
+            .fixedSize()
+            .transition(
+                reduceMotion
+                    ? .opacity
+                    : .opacity.combined(with: .offset(y: 3))
+            )
     }
 }
 
