@@ -16,8 +16,8 @@ private struct SetupEducationCard: Identifiable {
             title: "Yemma downloads once, then opens straight into chat.",
             body: "The first launch saves the local model bundle on this iPhone so the app is ready when setup finishes.",
             bullets: [
-                "Keep this screen open while the bundle finishes.",
-                "If setup pauses, you can resume without starting over.",
+                "Setup can continue in the background after you start it.",
+                "If setup is interrupted, reopen Yemma and continue setup.",
                 "When setup is done, chat is ready."
             ],
             systemImage: "square.and.arrow.down.fill"
@@ -443,7 +443,7 @@ public struct OnboardingView: View {
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(AppTheme.textPrimary)
 
-                Text("You can keep reading while the download finishes.")
+                Text("You can come back to Yemma anytime to check progress.")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(AppTheme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -764,9 +764,9 @@ public struct OnboardingView: View {
         case .intro:
             return "The first run is larger because the model is stored locally on your iPhone."
         case .downloading:
-            return "You can leave and come back later. Yemma keeps the progress it already saved."
+            return "You can leave and come back later. If setup pauses, Yemma will resume from the saved files."
         case .preparing:
-            return "You can open chat while Yemma finishes loading the model in the background."
+            return "You can open chat while Yemma finishes loading the model locally."
         case .ready:
             return ""
         case .failed:

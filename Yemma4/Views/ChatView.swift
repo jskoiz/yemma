@@ -781,7 +781,7 @@ public struct ChatView: View {
             if let eta = modelDownloader.estimatedSecondsRemaining {
                 return "\(percent)% downloaded. \(formatETA(eta)) remaining."
             }
-            return "\(percent)% downloaded. You can stay here while the MLX setup continues."
+            return "\(percent)% downloaded. Yemma can keep downloading in the background."
         }
 
         if let error = modelDownloader.error {
@@ -789,7 +789,7 @@ public struct ChatView: View {
         }
 
         if modelDownloader.canResumeDownload {
-            return "Resume the download to keep setting up Yemma on this device."
+            return "Resume setup to finish preparing Yemma on this device."
         }
 
         if modelDownloader.isDownloaded, let error = llmService.lastError, !llmService.isModelLoading {
