@@ -86,7 +86,7 @@ struct EmptyStateView: View {
                         .foregroundStyle(AppTheme.textSecondary)
                 }
 
-                if !isModelLoaded {
+                if shouldShowStatusBanner {
                     statusBanner
                 }
 
@@ -259,6 +259,20 @@ struct EmptyStateView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+
+    private var shouldShowStatusBanner: Bool {
+        guard !isModelLoaded else { return false }
+
+        if !supportsLocalModelRuntime {
+            return true
+        }
+
+        if statusIsFailure || statusProgress != nil || primarySetupActionTitle != nil {
+            return true
+        }
+
+        return !isModelLoading && statusDetailText != nil
     }
 
     private var statusText: String {
