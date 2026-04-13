@@ -569,18 +569,7 @@ public struct ChatView: View {
             }
 
             if shouldRenderText {
-                Group {
-                    if isStreaming {
-                        StreamingText(text: text)
-                    } else {
-                        RichMessageText(text: text)
-                    }
-                }
-                .transition(
-                    reduceMotion
-                        ? .opacity
-                        : .opacity.combined(with: .move(edge: .bottom))
-                )
+                RichMessageText(text: text, isStreaming: isStreaming)
             }
 
             if isActionStripVisible {
@@ -588,15 +577,18 @@ public struct ChatView: View {
                     .transition(
                         reduceMotion
                             ? .opacity
-                            : .opacity.combined(with: .move(edge: .top))
+                            : .asymmetric(
+                                insertion: .opacity.combined(with: .offset(y: 3)),
+                                removal: .opacity
+                            )
                     )
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .contextMenu {
             messageContextMenu(for: message, index: index)
         }
-        .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: isStreaming)
-        .animation(reduceMotion ? nil : .spring(response: 0.28, dampingFraction: 0.9), value: isActionStripVisible)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: isActionStripVisible)
     }
 
     // MARK: - Composer
@@ -935,6 +927,9 @@ public struct ChatView: View {
 
     private func shouldShowMessageActionStrip(for message: ChatMessage, index: Int) -> Bool {
         guard !message.user.isCurrentUser else { return false }
+        if message.id == streamingMessageID, llmService.isGenerating {
+            return false
+        }
         let hasText = !message.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         guard hasText else { return false }
         return completedAssistantMessageIDs.contains(message.id)
