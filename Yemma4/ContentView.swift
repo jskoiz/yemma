@@ -51,7 +51,9 @@ struct CircleIconButton: View {
     var action: () -> Void
 
     var body: some View {
-        Button(action: action) {
+        let hitTargetSize = max(AppTheme.Layout.controlIconSize + 14, 48)
+
+        return Button(action: action) {
             ZStack {
                 Circle()
                     .fill(filled ? AppTheme.controlFill : Color.clear)
@@ -64,9 +66,9 @@ struct CircleIconButton: View {
                     .foregroundStyle(AppTheme.textPrimary)
             }
             .frame(width: AppTheme.Layout.controlIconSize, height: AppTheme.Layout.controlIconSize)
-            .frame(minWidth: 44, minHeight: 44)
-            .contentShape(Rectangle())
         }
+        .frame(width: hitTargetSize, height: hitTargetSize)
+        .contentShape(Rectangle())
         .buttonStyle(.plain)
     }
 }

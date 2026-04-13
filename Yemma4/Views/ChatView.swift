@@ -157,6 +157,7 @@ public struct ChatView: View {
                             }
                         }
                         .offset(x: shellOffset)
+                        .allowsHitTesting(!isSidebarPresented)
                         .simultaneousGesture(sidebarGesture(sidebarWidth: sidebarWidth))
                 }
             }
@@ -2019,22 +2020,22 @@ private struct ChatSidebarView: View {
 
             Spacer(minLength: 0)
 
-            Button(action: onClose) {
-                ZStack {
-                    Circle()
-                        .fill(AppTheme.controlFill)
+            ZStack {
+                Circle()
+                    .fill(AppTheme.controlFill)
 
-                    Circle()
-                        .stroke(AppTheme.controlBorder, lineWidth: 1)
+                Circle()
+                    .stroke(AppTheme.controlBorder, lineWidth: 1)
 
-                    Image(systemName: "xmark")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(AppTheme.textPrimary)
-                }
-                .frame(width: 48, height: 48)
-                .contentShape(Rectangle())
+                Image(systemName: "xmark")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(AppTheme.textPrimary)
             }
-            .buttonStyle(.plain)
+            .frame(width: 48, height: 48)
+            .contentShape(Rectangle())
+            .onTapGesture(perform: onClose)
+            .accessibilityElement()
+            .accessibilityAddTraits(.isButton)
             .accessibilityLabel("Close sidebar")
             .accessibilityHint("Returns to the chat.")
         }
