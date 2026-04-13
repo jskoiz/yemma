@@ -4,13 +4,15 @@ This repo ships Yemma 4, a fully private on-device AI chat app for iPhone. The a
 
 ## Read First
 
-Start here before changing model/runtime behavior:
+Start from the current implementation in this repo when changing model or runtime behavior:
 
-- `/Users/jk/Desktop/NEW CHAT/HANDOFF_TO_YEMMA_AGENT.md`
-- `docs/mlx-migration-strategy.md`
-- `docs/MLX_REGRESSION_POSTMORTEM.md`
+- `Yemma4/Services/LLMService.swift`
+- `Yemma4/Services/MLXModelSupport.swift`
+- `Yemma4/Services/ModelDownloader.swift`
+- `Yemma4/ContentView.swift`
+- `Yemma4/Views/OnboardingView.swift`
 
-Treat those files as the source of truth for the validated Gemma 4 MLX Swift port, the migration history, and the failure modes already investigated.
+When working on something new in this repo, always use [@build-ios-apps](plugin://build-ios-apps@openai-curated) first for the iOS-oriented workflow, build, simulator, and debugging tools.
 
 ## Current State
 
