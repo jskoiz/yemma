@@ -7,6 +7,7 @@ import UIKit
 
 struct RichMessageText: View {
     let text: String
+    var isStreaming = false
     var foregroundColor: Color = AppTheme.assistantMessageText
 
     private let chatMarkdownTheme = Theme.gitHub
@@ -41,7 +42,7 @@ struct RichMessageText: View {
         }
         .paragraph { configuration in
             configuration.label
-                .markdownMargin(top: 0, bottom: 6)
+                .markdownMargin(top: 0, bottom: 8)
         }
         .listItem { configuration in
             configuration.label
@@ -81,28 +82,152 @@ struct RichMessageText: View {
         }
 
     var body: some View {
-        Markdown(text)
-            .markdownTheme(chatMarkdownTheme)
-            .foregroundStyle(foregroundColor)
-            .tint(AppTheme.accent)
-            .textSelection(.enabled)
-            .lineSpacing(3)
-            .fixedSize(horizontal: false, vertical: true)
+        Group {
+            if shouldRenderMarkdown {
+                if isStreaming {
+                    Markdown(text)
+                        .markdownTheme(chatMarkdownTheme)
+                        .markdownSoftBreakMode(.lineBreak)
+                        .foregroundStyle(foregroundColor)
+                        .tint(AppTheme.accent)
+                        .textSelection(.disabled)
+                        .lineSpacing(3)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Markdown(text)
+                        .markdownTheme(chatMarkdownTheme)
+                        .markdownSoftBreakMode(.lineBreak)
+                        .foregroundStyle(foregroundColor)
+                        .tint(AppTheme.accent)
+                        .textSelection(.enabled)
+                        .lineSpacing(3)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            } else {
+                PlainRichMessageText(
+                    text: text,
+                    isStreaming: isStreaming,
+                    foregroundColor: foregroundColor
+                )
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var shouldRenderMarkdown: Bool {
+        !isStreaming && MarkdownHeuristics.looksLikeMarkdown(text)
     }
 }
 
-/// Lightweight plain-text view used during streaming to avoid markdown layout churn.
-struct StreamingText: View {
+private struct PlainRichMessageText: View {
     let text: String
-    var foregroundColor: Color = AppTheme.assistantMessageText
+    var isStreaming = false
+    var foregroundColor: Color
+
+    private var paragraphs: [String] {
+        Self.paragraphs(from: text)
+    }
 
     var body: some View {
-        Text(text)
-            .font(AppTheme.Typography.chatAssistantMessage)
-            .foregroundStyle(foregroundColor)
-            .lineSpacing(3)
-            .textSelection(.enabled)
-            .fixedSize(horizontal: false, vertical: true)
+        Group {
+            if isStreaming {
+                content
+                    .textSelection(.disabled)
+            } else {
+                content
+                    .textSelection(.enabled)
+            }
+        }
+    }
+
+    private var content: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            ForEach(Array(paragraphs.enumerated()), id: \.offset) { _, paragraph in
+                Text(paragraph)
+                    .font(AppTheme.Typography.chatAssistantMessage)
+                    .foregroundStyle(foregroundColor)
+                    .multilineTextAlignment(.leading)
+                    .allowsTightening(false)
+                    .lineSpacing(3)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private static func paragraphs(from text: String) -> [String] {
+        let normalizedText = text.replacingOccurrences(of: "\r\n", with: "\n")
+        let lines = normalizedText.components(separatedBy: "\n")
+        var paragraphs: [String] = []
+        var currentParagraph: [String] = []
+
+        for line in lines {
+            if line.trimmingCharacters(in: .whitespaces).isEmpty {
+                if !currentParagraph.isEmpty {
+                    paragraphs.append(currentParagraph.joined(separator: "\n"))
+                    currentParagraph.removeAll()
+                }
+            } else {
+                currentParagraph.append(line)
+            }
+        }
+
+        if !currentParagraph.isEmpty {
+            paragraphs.append(currentParagraph.joined(separator: "\n"))
+        }
+
+        let trimmedText = normalizedText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if paragraphs.isEmpty, !trimmedText.isEmpty {
+            return [trimmedText]
+        }
+
+        return paragraphs
+    }
+}
+
+private enum MarkdownHeuristics {
+    static func looksLikeMarkdown(_ text: String) -> Bool {
+        let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedText.isEmpty else { return false }
+
+        if trimmedText.contains("```")
+            || trimmedText.contains("`")
+            || trimmedText.contains("[")
+                && trimmedText.contains("](")
+            || trimmedText.contains("**")
+            || trimmedText.contains("__")
+            || trimmedText.contains("~~")
+        {
+            return true
+        }
+
+        for rawLine in trimmedText.components(separatedBy: "\n") {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            guard !line.isEmpty else { continue }
+
+            if line.hasPrefix("#")
+                || line.hasPrefix(">")
+                || line.hasPrefix("- ")
+                || line.hasPrefix("* ")
+                || line.hasPrefix("+ ")
+                || line.hasPrefix("- [")
+                || line.hasPrefix("* [")
+                || startsWithOrderedListMarker(line)
+            {
+                return true
+            }
+        }
+
+        return false
+    }
+
+    private static func startsWithOrderedListMarker(_ line: String) -> Bool {
+        let digitPrefix = line.prefix(while: \.isNumber)
+        guard !digitPrefix.isEmpty else { return false }
+
+        let remainder = line.dropFirst(digitPrefix.count)
+        return remainder.hasPrefix(". ") || remainder.hasPrefix(") ")
     }
 }
 

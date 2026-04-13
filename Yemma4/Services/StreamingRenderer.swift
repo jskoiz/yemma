@@ -110,6 +110,13 @@ struct StreamingRenderer: Sendable {
         sanitize(text)
     }
 
+    /// Streaming-only pass that keeps the trailing in-progress fragment off screen
+    /// until a word or punctuation boundary lands. This reduces reflow flicker at
+    /// line endings while the next word is still arriving token-by-token.
+    static func streamingVisibleText(_ text: String) -> String {
+        trimTrailingUnstableFragment(from: sanitize(text))
+    }
+
     // MARK: - Pipeline Steps
 
     /// Repeatedly strips a leading role prefix and trims whitespace until the
@@ -187,6 +194,26 @@ struct StreamingRenderer: Sendable {
 
         return text
     }
+
+    private static func trimTrailingUnstableFragment(from text: String) -> String {
+        guard let lastCharacter = text.last else { return text }
+        guard !isStableStreamingBoundary(lastCharacter) else { return text }
+
+        guard let boundaryIndex = text.lastIndex(where: isStableStreamingBoundary) else {
+            return text
+        }
+
+        let stablePrefix = String(text[...boundaryIndex])
+        return stablePrefix.trimmingCharacters(in: .whitespaces)
+    }
+
+    private static func isStableStreamingBoundary(_ character: Character) -> Bool {
+        if character.isWhitespace || character.isNewline {
+            return true
+        }
+
+        return ".,!?;:)]}\"'".contains(character)
+    }
 }
 
 struct StreamingRenderUpdate: Sendable {
@@ -225,7 +252,9 @@ struct StreamingUpdatePolicy: Sendable {
             return StreamingRenderUpdate(visibleText: nil, shouldStop: shouldStop, didAdvance: false)
         }
 
-        let visibleText = StreamingRenderer.sanitize(rawText)
+        let visibleText = shouldStop
+            ? StreamingRenderer.finalize(rawText)
+            : StreamingRenderer.streamingVisibleText(rawText)
         let didAdvance = visibleText != lastVisibleText
 
         lastFlush = now
