@@ -10,10 +10,12 @@ struct ChatStarter: Identifiable, Hashable {
     let subtitle: String
     let prompt: String
     let systemImage: String
+    var promptVariants: [String] = []
     var behavior: ChatStarterBehavior = .promptOnly
     var sendsImmediately = false
 
     var id: String { title }
+    var prompts: [String] { [prompt] + promptVariants }
 
     static let defaults: [ChatStarter] = [
         ChatStarter(
@@ -28,6 +30,14 @@ struct ChatStarter: Identifiable, Hashable {
             subtitle: "Share a short history or science fact I probably do not know",
             prompt: "Teach me one short surprising fact from history or science that most people do not know. Keep it clear and under three short paragraphs.",
             systemImage: "sparkles",
+            promptVariants: [
+                "Teach me one little-known history fact that sounds made up but is true. Explain it clearly in under three short paragraphs.",
+                "Teach me one surprising science fact about the natural world that most people do not know. Keep it clear and under three short paragraphs.",
+                "Teach me something unexpected about the human body or brain. Make it easy to understand and keep it under three short paragraphs.",
+                "Teach me one fascinating fact from archaeology or ancient history that most people miss. Explain why it matters in under three short paragraphs.",
+                "Teach me one weird but true fact about animals, plants, or evolution. Keep it clear and under three short paragraphs.",
+                "Teach me one clever invention or engineering fact that changed everyday life in a surprising way. Keep it concise and under three short paragraphs."
+            ],
             sendsImmediately: true
         ),
         ChatStarter(
@@ -35,6 +45,14 @@ struct ChatStarter: Identifiable, Hashable {
             subtitle: "Give me one interesting fact with a quick explanation",
             prompt: "Tell me one interesting random fact and explain why it is surprising in a few sentences. Keep it concise.",
             systemImage: "lightbulb",
+            promptVariants: [
+                "Tell me one unexpected fact about space, the ocean, or Earth and explain why it is surprising in a few concise sentences.",
+                "Give me one strange but true fact about human behavior or biology and explain why it catches people off guard. Keep it concise.",
+                "Share one random fact about animals or nature that sounds fake but is true, then explain why it is surprising. Keep it concise.",
+                "Tell me one interesting fact from technology or math and give a quick explanation for why it matters. Keep it concise.",
+                "Give me one fun fact from language, culture, or history and explain the surprising part in a few sentences.",
+                "Tell me one random fact that would make someone say \"wait, really?\" and explain it briefly."
+            ],
             sendsImmediately: true
         )
     ]
@@ -105,58 +123,57 @@ struct EmptyStateView: View {
 
     private var statusBanner: some View {
         VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(alignment: .top, spacing: 12) {
-                    ZStack {
-                        Circle()
-                            .fill(statusIconBackground)
-                            .frame(width: 34, height: 34)
+            HStack(alignment: .center, spacing: 12) {
+                Image(systemName: statusSystemImage)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(statusAccentColor)
+                    .frame(width: 26)
 
-                        Image(systemName: statusSystemImage)
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(statusAccentColor)
-                    }
-                    .frame(width: 34)
+                Text(statusText)
+                    .font(AppTheme.Typography.utilityRowTitle.weight(.semibold))
+                    .foregroundStyle(statusTitleColor)
+                    .fixedSize(horizontal: false, vertical: true)
 
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text(statusText)
-                            .font(AppTheme.Typography.utilityRowTitle.weight(.semibold))
-                            .foregroundStyle(statusTitleColor)
-                            .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
 
-                        if let statusDetailText {
-                            Text(statusDetailText)
-                                .font(AppTheme.Typography.utilityCaption)
-                                .foregroundStyle(AppTheme.textSecondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-
-                    Spacer(minLength: 0)
-
-                    if let statusProgressLabel {
-                        Text(statusProgressLabel)
-                            .font(.system(size: 12, weight: .semibold, design: .rounded))
-                            .foregroundStyle(statusAccentColor)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(statusIconBackground)
-                            .clipShape(Capsule())
-                    }
-                }
-
-                if let statusProgress {
-                    ProgressView(value: min(max(statusProgress, 0), 1))
-                        .tint(statusAccentColor)
+                if let statusProgressLabel {
+                    Text(statusProgressLabel)
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .foregroundStyle(statusAccentColor)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(statusIconBackground)
+                        .clipShape(Capsule())
                 }
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 16)
+            .padding(.top, 16)
+            .padding(.bottom, statusDetailText == nil && statusProgress == nil ? 16 : 12)
+
+            if statusDetailText != nil || statusProgress != nil {
+                VStack(alignment: .leading, spacing: 10) {
+                    if let statusDetailText {
+                        Text(statusDetailText)
+                            .font(AppTheme.Typography.utilityCaption)
+                            .foregroundStyle(AppTheme.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.leading, 38)
+                    }
+
+                    if let statusProgress {
+                        ProgressView(value: min(max(statusProgress, 0), 1))
+                            .tint(statusAccentColor)
+                            .padding(.leading, 38)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 14)
+            }
 
             if let primarySetupActionTitle, let onPrimarySetupAction {
                 Divider()
                     .overlay(AppTheme.separator)
-                    .padding(.leading, 62)
+                    .padding(.leading, 52)
 
                 Button(action: onPrimarySetupAction) {
                     HStack(spacing: 12) {

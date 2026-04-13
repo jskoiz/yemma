@@ -22,7 +22,7 @@ struct RichMessageText: View {
                     FontWeight(.semibold)
                     FontSize(17)
                 }
-                .markdownMargin(top: 4, bottom: 2)
+                .markdownMargin(top: 10, bottom: 14)
         }
         .heading2 { configuration in
             configuration.label
@@ -30,7 +30,7 @@ struct RichMessageText: View {
                     FontWeight(.semibold)
                     FontSize(16)
                 }
-                .markdownMargin(top: 4, bottom: 2)
+                .markdownMargin(top: 10, bottom: 14)
         }
         .heading3 { configuration in
             configuration.label
@@ -38,20 +38,20 @@ struct RichMessageText: View {
                     FontWeight(.semibold)
                     FontSize(15)
                 }
-                .markdownMargin(top: 3, bottom: 1)
+                .markdownMargin(top: 8, bottom: 12)
         }
         .paragraph { configuration in
             configuration.label
-                .markdownMargin(top: 0, bottom: 8)
+                .markdownMargin(top: 0, bottom: 16)
         }
         .listItem { configuration in
             configuration.label
-                .markdownMargin(top: 0, bottom: 0)
+                .markdownMargin(top: 2, bottom: 8)
         }
         .thematicBreak {
             Divider()
                 .overlay(AppTheme.separator)
-                .markdownMargin(top: 4, bottom: 4)
+                .markdownMargin(top: 10, bottom: 12)
         }
         .code {
             FontFamilyVariant(.monospaced)
@@ -60,7 +60,7 @@ struct RichMessageText: View {
         }
         .codeBlock { configuration in
             ChatCodeBlock(configuration: configuration)
-                .markdownMargin(top: 3, bottom: 6)
+                .markdownMargin(top: 10, bottom: 14)
         }
         .blockquote { configuration in
             HStack(spacing: 0) {
@@ -71,14 +71,14 @@ struct RichMessageText: View {
                     .markdownTextStyle { ForegroundColor(.secondary) }
                     .padding(.leading, 10)
             }
-            .markdownMargin(top: 2, bottom: 4)
+            .markdownMargin(top: 8, bottom: 14)
         }
         .table { configuration in
             ScrollView(.horizontal) {
                 configuration.label
                     .fixedSize(horizontal: false, vertical: true)
             }
-            .markdownMargin(top: 2, bottom: 6)
+            .markdownMargin(top: 10, bottom: 14)
         }
 
     var body: some View {
@@ -91,7 +91,7 @@ struct RichMessageText: View {
                         .foregroundStyle(foregroundColor)
                         .tint(AppTheme.accent)
                         .textSelection(.disabled)
-                        .lineSpacing(3)
+                        .lineSpacing(6)
                         .fixedSize(horizontal: false, vertical: true)
                 } else {
                     Markdown(text)
@@ -100,7 +100,7 @@ struct RichMessageText: View {
                         .foregroundStyle(foregroundColor)
                         .tint(AppTheme.accent)
                         .textSelection(.enabled)
-                        .lineSpacing(3)
+                        .lineSpacing(6)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             } else {
@@ -115,7 +115,7 @@ struct RichMessageText: View {
     }
 
     private var shouldRenderMarkdown: Bool {
-        !isStreaming && MarkdownHeuristics.looksLikeMarkdown(text)
+        MarkdownHeuristics.looksLikeMarkdown(text)
     }
 }
 
@@ -148,7 +148,7 @@ private struct PlainRichMessageText: View {
                     .foregroundStyle(foregroundColor)
                     .multilineTextAlignment(.leading)
                     .allowsTightening(false)
-                    .lineSpacing(3)
+                    .lineSpacing(6)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)
             }

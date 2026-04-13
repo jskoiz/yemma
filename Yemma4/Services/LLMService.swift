@@ -978,15 +978,10 @@ private extension LLMService {
 
     func makeSimulatorStream(prompt: PromptMessageInput, history: [PromptMessageInput]) -> AsyncStream<String> {
         let transcriptCount = history.count + 1
-        let response = """
-        Simulator mode reply: the local UI loop is working, but MLX inference still requires a physical iPhone.
-
-        Prompt received: \(prompt.text.isEmpty ? "[image only]" : prompt.text)
-
-        Conversation turns in memory: \(transcriptCount)
-
-        Attached images in this turn: \(prompt.images.count)
-        """
+        let response = Self.simulatorResponse(
+            for: prompt,
+            transcriptCount: transcriptCount
+        )
 
         return AsyncStream { continuation in
             let task = Task { [weak self] in
@@ -1016,6 +1011,48 @@ private extension LLMService {
                 task.cancel()
             }
         }
+    }
+
+    private static func simulatorResponse(
+        for prompt: PromptMessageInput,
+        transcriptCount: Int
+    ) -> String {
+        let promptText = prompt.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedPrompt = promptText.lowercased()
+
+        if normalizedPrompt.hasPrefix("teach me ") {
+            return """
+            # Teach Me Something
+
+            The **Anglo-Zanzibar War** in 1896 is widely considered the shortest war in recorded history, lasting about **38 to 45 minutes**.
+
+            ## Why it is surprising
+            - A full military conflict started and ended in less time than many lunch breaks.
+            - Most people imagine wars unfolding over days, months, or years.
+            - The outcome was decided almost immediately once naval bombardment began.
+
+            ## Quick facts
+
+            | Topic | Detail |
+            | --- | --- |
+            | Conflict | Anglo-Zanzibar War |
+            | Date | August 27, 1896 |
+            | Approx. duration | 38 to 45 minutes |
+            | Main reason it ended fast | British naval superiority |
+
+            **Simulator note:** this is a canned Markdown response so you can test headings, bold text, lists, and tables in the chat UI.
+            """
+        }
+
+        return """
+        Simulator mode reply: the local UI loop is working, but MLX inference still requires a physical iPhone.
+
+        Prompt received: \(promptText.isEmpty ? "[image only]" : promptText)
+
+        Conversation turns in memory: \(transcriptCount)
+
+        Attached images in this turn: \(prompt.images.count)
+        """
     }
 
     static func summarizeImageTensor(_ pixels: MLXArray) -> String {

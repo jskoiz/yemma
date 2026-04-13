@@ -43,6 +43,7 @@ public struct ChatView: View {
     @State private var isPinnedToBottom = true
     @State private var scrollViewportHeight: CGFloat = 0
     @State private var completedAssistantMessageIDs: Set<String> = []
+    @State private var lastStarterPromptIndexByID: [String: Int] = [:]
 
     private let bottomAnchorID = "conversation-bottom-anchor"
     private let scrollCoordinateSpaceName = "conversation-scroll"
@@ -789,7 +790,7 @@ public struct ChatView: View {
         }
 
         if llmService.isModelLoading {
-            return "You can explore the shell while Yemma finishes local initialization."
+            return "You can keep exploring while Yemma finishes loading in the background."
         }
 
         if modelDownloader.isDownloaded {
@@ -877,7 +878,7 @@ public struct ChatView: View {
     }
 
     private func selectStarter(_ starter: ChatStarter) {
-        draft = starter.prompt
+        draft = resolvedPrompt(for: starter)
         if starter.behavior == .promptAndPickImage {
             isComposerFocused = false
             isShowingPhotoPicker = true
@@ -899,6 +900,24 @@ public struct ChatView: View {
             ]
         )
         scheduleConversationSave()
+    }
+
+    private func resolvedPrompt(for starter: ChatStarter) -> String {
+        let prompts = starter.prompts
+        guard let firstPrompt = prompts.first else {
+            return starter.prompt
+        }
+
+        guard prompts.count > 1 else {
+            lastStarterPromptIndexByID[starter.id] = 0
+            return firstPrompt
+        }
+
+        let previousIndex = lastStarterPromptIndexByID[starter.id]
+        let candidateIndices = prompts.indices.filter { $0 != previousIndex }
+        let nextIndex = candidateIndices.randomElement() ?? 0
+        lastStarterPromptIndexByID[starter.id] = nextIndex
+        return prompts[nextIndex]
     }
 
     private func indexForMessage(_ message: ChatMessage) -> Int {
