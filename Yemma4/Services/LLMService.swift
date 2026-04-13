@@ -28,34 +28,34 @@ enum ModelLoadStage: Sendable {
     var statusText: String {
         switch self {
         case .idle:
-            return "Waiting to prepare the model."
+            return "Getting Yemma ready."
         case .preparingRuntime:
-            return "Preparing the MLX runtime."
+            return "Preparing your on-device model."
         case .loadingModel:
-            return "Loading the Gemma 4 model bundle."
+            return "Loading your model."
         case .activatingModel:
-            return "Finalizing the local chat engine."
+            return "Finishing setup."
         case .ready:
-            return "Model ready."
+            return "Yemma is ready."
         case .failed:
-            return "Model preparation failed."
+            return "Yemma could not finish getting ready."
         }
     }
 
     var compactStatusText: String {
         switch self {
         case .idle:
-            return "Waiting"
+            return "Getting ready"
         case .preparingRuntime:
-            return "Preparing runtime"
+            return "Preparing"
         case .loadingModel:
-            return "Loading bundle"
+            return "Loading"
         case .activatingModel:
-            return "Activating"
+            return "Finishing"
         case .ready:
             return "Ready"
         case .failed:
-            return "Preparation failed"
+            return "Setup failed"
         }
     }
 }
@@ -110,15 +110,37 @@ enum ResponseStylePreset: String, CaseIterable, Identifiable, Sendable {
     var summary: String {
         switch self {
         case .focused:
-            return "Shorter, tighter answers with less drift."
+            return "Brief, direct answers with minimal filler."
         case .balanced:
-            return "The default mix for everyday questions."
+            return "Clear answers with a little context when it helps."
         case .detailed:
-            return "Longer replies with a bit more explanation."
+            return "More depth, tradeoffs, and explanation when useful."
         }
     }
 
     var temperature: Double {
+        switch self {
+        case .focused:
+            return 0.3
+        case .balanced:
+            return 0.6
+        case .detailed:
+            return 0.8
+        }
+    }
+
+    var maxResponseTokens: Int {
+        switch self {
+        case .focused:
+            return 192
+        case .balanced:
+            return 512
+        case .detailed:
+            return 1024
+        }
+    }
+
+    var legacyTemperature: Double {
         switch self {
         case .focused:
             return 0.4
@@ -129,7 +151,7 @@ enum ResponseStylePreset: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    var maxResponseTokens: Int {
+    var legacyMaxResponseTokens: Int {
         switch self {
         case .focused:
             return 768
@@ -137,6 +159,54 @@ enum ResponseStylePreset: String, CaseIterable, Identifiable, Sendable {
             return 1024
         case .detailed:
             return 1536
+        }
+    }
+
+    var instructionPrompt: String {
+        switch self {
+        case .focused:
+            return """
+                Response style: Focused.
+                Prioritize brevity and directness.
+                Give the answer first.
+                Prefer one short paragraph.
+                Do not include filler, repetition, background, caveats, or extra suggestions unless necessary.
+                """
+        case .balanced:
+            return """
+                Response style: Balanced.
+                Be clear and moderately concise.
+                Give the answer first, then brief explanation if helpful.
+                Avoid repetition and unnecessary filler.
+                """
+        case .detailed:
+            return """
+                Response style: Detailed.
+                Be thorough and well-structured.
+                Give the answer first, then explain context, tradeoffs, and important caveats when helpful.
+                Use sections or lists only when they improve clarity.
+                Do not be verbose for its own sake.
+                """
+        }
+    }
+
+    var lengthTargetPrompt: String {
+        switch self {
+        case .focused:
+            return """
+                Length target: 30 to 80 words unless the user explicitly asks for more detail.
+                Format: Start with the direct answer. Add at most one short clarification if needed. Stop once the answer is sufficient.
+                """
+        case .balanced:
+            return """
+                Length target: 80 to 180 words unless the user explicitly asks for more detail.
+                Format: Answer first, then brief explanation if helpful. Prefer 1 to 3 short paragraphs.
+                """
+        case .detailed:
+            return """
+                Length target: usually 180 to 400 words when extra detail helps.
+                Format: Answer first, then add context, reasoning, tradeoffs, and caveats as needed. Exceed this only when the user clearly asks for depth.
+                """
         }
     }
 
@@ -156,6 +226,42 @@ private struct Gemma4ConversationMessage: Sendable {
 
 private enum Gemma4InputRoute: String, Sendable {
     case chat
+}
+
+private enum PromptTaskHint: String, Sendable {
+    case rewrite
+    case summarize
+    case recommendation
+    case coding
+
+    var instructionPrompt: String {
+        switch self {
+        case .rewrite:
+            return """
+                Task hint: Rewrite.
+                Return the revised text only unless the user explicitly asks for explanation, commentary, or alternatives.
+                Keep the original intent and tone constraints intact.
+                """
+        case .summarize:
+            return """
+                Task hint: Summarize.
+                Start with a short summary first.
+                Keep only the essential points and do not add new information.
+                """
+        case .recommendation:
+            return """
+                Task hint: Recommendation.
+                Give the direct recommendation first, then one brief reason why.
+                Mention tradeoffs only if they are important to making the choice.
+                """
+        case .coding:
+            return """
+                Task hint: Coding.
+                Give the fix, code, or diagnosis first.
+                Keep explanation brief unless the user explicitly asks for more detail.
+                """
+        }
+    }
 }
 
 private struct FirstTokenCandidate: Sendable {
@@ -402,10 +508,10 @@ final class LLMService: @unchecked Sendable {
     var isVisionReady = false
     var isGenerating = false
     var temperature: Double {
-        didSet { UserDefaults.standard.set(temperature, forKey: "llm_temperature") }
+        didSet { UserDefaults.standard.set(temperature, forKey: Self.temperatureDefaultsKey) }
     }
     var maxResponseTokens: Int {
-        didSet { UserDefaults.standard.set(maxResponseTokens, forKey: "llm_maxResponseTokens") }
+        didSet { UserDefaults.standard.set(maxResponseTokens, forKey: Self.maxTokensDefaultsKey) }
     }
     var lastError: String?
     var modelLoadStage: ModelLoadStage = .idle
@@ -416,6 +522,17 @@ final class LLMService: @unchecked Sendable {
 
     static let defaultTemperature: Double = ResponseStylePreset.focused.temperature
     static let defaultMaxResponseTokens: Int = ResponseStylePreset.focused.maxResponseTokens
+    private static let temperatureDefaultsKey = "llm_temperature"
+    private static let maxTokensDefaultsKey = "llm_maxResponseTokens"
+    private static let baseSystemPrompt = """
+        You are Yemma, a helpful on-device assistant.
+        Be accurate, clear, and direct.
+        Use plain language.
+        Do not repeat the user's request.
+        Do not use filler, praise, or long transitions.
+        Ask a follow-up question only when required to answer correctly.
+        Match the user's requested level of detail.
+        """
 
     @ObservationIgnored private var modelContainer: ModelContainer?
     @ObservationIgnored private var loadedModelPath: String?
@@ -428,8 +545,21 @@ final class LLMService: @unchecked Sendable {
 
     init() {
         let defaults = UserDefaults.standard
-        temperature = defaults.object(forKey: "llm_temperature") as? Double ?? Self.defaultTemperature
-        maxResponseTokens = defaults.object(forKey: "llm_maxResponseTokens") as? Int ?? Self.defaultMaxResponseTokens
+        let savedTemperature = defaults.object(forKey: Self.temperatureDefaultsKey) as? Double
+        let savedMaxResponseTokens = defaults.object(forKey: Self.maxTokensDefaultsKey) as? Int
+
+        if let migratedPreset = Self.migratedLegacyPreset(
+            temperature: savedTemperature,
+            maxResponseTokens: savedMaxResponseTokens
+        ) {
+            temperature = migratedPreset.temperature
+            maxResponseTokens = migratedPreset.maxResponseTokens
+            defaults.set(temperature, forKey: Self.temperatureDefaultsKey)
+            defaults.set(maxResponseTokens, forKey: Self.maxTokensDefaultsKey)
+        } else {
+            temperature = savedTemperature ?? Self.defaultTemperature
+            maxResponseTokens = savedMaxResponseTokens ?? Self.defaultMaxResponseTokens
+        }
     }
 
     deinit {
@@ -530,6 +660,8 @@ final class LLMService: @unchecked Sendable {
         let conversationImageCount = conversation.reduce(into: 0) { $0 += $1.imageURLs.count }
         let roleSummary = "[\(conversation.map(\.role).joined(separator: ","))]"
         let latestUserPrompt = conversation.last(where: { Self.chatRole(for: $0.role) == .user })?.content ?? ""
+        let responseStyle = activeResponseStylePreset?.rawValue ?? "custom"
+        let taskHint = Self.promptTaskHint(for: latestUserPrompt)
 
         AppDiagnostics.shared.record(
             "Generation requested",
@@ -538,7 +670,9 @@ final class LLMService: @unchecked Sendable {
                 "messages": conversation.count,
                 "images": conversationImageCount,
                 "route": promptRoute.rawValue,
-                "mode": promptMode
+                "mode": promptMode,
+                "style": responseStyle,
+                "taskHint": taskHint?.rawValue ?? "none"
             ]
         )
         AppDiagnostics.shared.record(
@@ -547,7 +681,9 @@ final class LLMService: @unchecked Sendable {
             metadata: [
                 "route": promptRoute.rawValue,
                 "promptMessages": conversation.count,
-                "imageAttachments": conversationImageCount
+                "imageAttachments": conversationImageCount,
+                "style": responseStyle,
+                "taskHint": taskHint?.rawValue ?? "none"
             ]
         )
         AppDiagnostics.shared.record(
@@ -559,7 +695,9 @@ final class LLMService: @unchecked Sendable {
                 "latestUser": latestUserPrompt,
                 "messageCount": conversation.count,
                 "images": conversationImageCount,
-                "videos": 0
+                "videos": 0,
+                "style": responseStyle,
+                "taskHint": taskHint?.rawValue ?? "none"
             ]
         )
         logger.debug(
@@ -573,7 +711,7 @@ final class LLMService: @unchecked Sendable {
                     let rawTokenStream = try await container.perform { context in
                         let lmInput: LMInput
                         do {
-                            let userInput = Self.makeGemma4UserInput(from: conversation)
+                            let userInput = self.makeGemma4UserInput(from: conversation)
                             lmInput = try await context.processor.prepare(input: userInput)
                         } catch {
                             throw LLMServiceError.processorFailed(error)
@@ -800,6 +938,18 @@ final class LLMService: @unchecked Sendable {
             isGenerating = false
         }
     }
+
+    private static func migratedLegacyPreset(
+        temperature: Double?,
+        maxResponseTokens: Int?
+    ) -> ResponseStylePreset? {
+        guard let temperature, let maxResponseTokens else { return nil }
+
+        return ResponseStylePreset.allCases.first { preset in
+            abs(preset.legacyTemperature - temperature) < 0.01
+                && preset.legacyMaxResponseTokens == maxResponseTokens
+        }
+    }
 }
 
 private extension LLMService {
@@ -936,19 +1086,179 @@ private extension LLMService {
         }
     }
 
-    static func makeGemma4UserInput(
+    func makeGemma4UserInput(
         from messages: [Gemma4ConversationMessage]
     ) -> UserInput {
-        UserInput(
-            chat: messages.map { message in
+        let promptMessages = promptInstructionMessages(for: messages) + messages
+
+        return UserInput(
+            chat: promptMessages.map { message in
                 Chat.Message(
-                    role: chatRole(for: message.role),
+                    role: Self.chatRole(for: message.role),
                     content: message.content,
                     images: message.imageURLs.map(UserInput.Image.url)
                 )
             },
             additionalContext: Gemma4MLXSupport.templateContext
         )
+    }
+
+    func promptInstructionMessages(
+        for conversationMessages: [Gemma4ConversationMessage]
+    ) -> [Gemma4ConversationMessage] {
+        var instructionMessages = [
+            Gemma4ConversationMessage(
+                role: "system",
+                content: Self.baseSystemPrompt,
+                imageURLs: []
+            )
+        ]
+
+        if let stylePrompt = activeResponseStylePreset?.instructionPrompt {
+            instructionMessages.append(
+                Gemma4ConversationMessage(
+                    role: "developer",
+                    content: stylePrompt,
+                    imageURLs: []
+                )
+            )
+        }
+
+        if let lengthTargetPrompt = activeResponseStylePreset?.lengthTargetPrompt {
+            instructionMessages.append(
+                Gemma4ConversationMessage(
+                    role: "developer",
+                    content: lengthTargetPrompt,
+                    imageURLs: []
+                )
+            )
+        }
+
+        if let latestUserPrompt = conversationMessages.last(where: { Self.chatRole(for: $0.role) == .user })?.content,
+            let taskHint = Self.promptTaskHint(for: latestUserPrompt)
+        {
+            instructionMessages.append(
+                Gemma4ConversationMessage(
+                    role: "developer",
+                    content: taskHint.instructionPrompt,
+                    imageURLs: []
+                )
+            )
+        }
+
+        return instructionMessages
+    }
+
+    static func promptTaskHint(for prompt: String) -> PromptTaskHint? {
+        let normalizedPrompt = prompt
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+
+        guard !normalizedPrompt.isEmpty else { return nil }
+
+        if looksLikeRewriteTask(normalizedPrompt) {
+            return .rewrite
+        }
+
+        if looksLikeSummarizeTask(normalizedPrompt) {
+            return .summarize
+        }
+
+        if looksLikeCodingTask(normalizedPrompt) {
+            return .coding
+        }
+
+        if looksLikeRecommendationTask(normalizedPrompt) {
+            return .recommendation
+        }
+
+        return nil
+    }
+
+    static func looksLikeRewriteTask(_ prompt: String) -> Bool {
+        let rewriteIndicators = [
+            "rewrite",
+            "rephrase",
+            "revise",
+            "edit this",
+            "polish this",
+            "improve this writing",
+            "make this sound",
+            "fix grammar",
+            "rewrite this",
+            "rewrite my",
+            "rewrite the",
+        ]
+
+        guard containsAny(rewriteIndicators, in: prompt) else { return false }
+        return !looksLikeCodingTask(prompt)
+    }
+
+    static func looksLikeSummarizeTask(_ prompt: String) -> Bool {
+        containsAny(
+            [
+                "summarize",
+                "summary",
+                "tl;dr",
+                "tldr",
+                "condense",
+                "brief summary",
+                "short summary",
+            ],
+            in: prompt
+        )
+    }
+
+    static func looksLikeRecommendationTask(_ prompt: String) -> Bool {
+        containsAny(
+            [
+                "should i",
+                "what should i",
+                "which should i",
+                "which one should i",
+                "recommend",
+                "recommendation",
+                "best option",
+                "best way",
+                "which is better",
+                "worth it",
+                "advice",
+                "pick one",
+            ],
+            in: prompt
+        )
+    }
+
+    static func looksLikeCodingTask(_ prompt: String) -> Bool {
+        containsAny(
+            [
+                "code",
+                "bug",
+                "debug",
+                "stack trace",
+                "exception",
+                "compiler",
+                "compile",
+                "xcode",
+                "swift",
+                "python",
+                "javascript",
+                "typescript",
+                "react",
+                "sql",
+                "function",
+                "class",
+                "error",
+                "crash",
+                "fix this code",
+                "why is my code",
+            ],
+            in: prompt
+        )
+    }
+
+    static func containsAny(_ candidates: [String], in prompt: String) -> Bool {
+        candidates.contains { prompt.contains($0) }
     }
 
     static func chatRole(for role: String) -> Chat.Message.Role {

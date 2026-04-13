@@ -94,7 +94,6 @@ public struct ContentView: View {
     private let forceOnboardingOnSimulator = Yemma4DebugOptions.forceOnboardingOnSimulator
     @State private var modelLoadError: String?
     @State private var loadedModelSignature: String?
-    @State private var launchValidatedModelPath: String?
     @State private var isShowingOnboardingPreview = false
     @State private var didRecordShellVisible = false
     @State private var didRecordTextReady = false
@@ -106,9 +105,6 @@ public struct ContentView: View {
     public var body: some View {
         currentRootScreen
         .onAppear {
-            if launchValidatedModelPath == nil {
-                launchValidatedModelPath = modelDownloader.modelPath
-            }
             AppDiagnostics.shared.record(
                 "startup: view_appeared",
                 category: "startup",
@@ -130,17 +126,12 @@ public struct ContentView: View {
             guard let modelPath = modelDownloader.modelPath else { return }
             await Task.yield()
             guard !Task.isCancelled else { return }
-            guard modelPath != launchValidatedModelPath else { return }
             guard !llmService.isTextModelReady && !llmService.isModelLoading else {
                 await loadModelIfNeeded()
                 return
             }
-
-            if supportsLocalModelRuntime, modelDownloader.isDownloaded {
-                // Let the shell become interactive before the heavy local warmup starts.
-                try? await Task.sleep(for: .seconds(1.5))
-            }
             guard !Task.isCancelled else { return }
+            guard supportsLocalModelRuntime, !modelPath.isEmpty else { return }
             await loadModelIfNeeded()
         }
         .onChange(of: shouldShowChat) { _, _ in

@@ -281,6 +281,18 @@ public struct ChatView: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             composerSection
         }
+        .allowsHitTesting(!shouldBlockStartupInteraction)
+        .overlay {
+            if shouldShowStartupOverlay {
+                startupLoadingOverlay
+                    .transition(
+                        reduceMotion
+                            ? .opacity
+                            : .opacity.combined(with: .scale(scale: 0.98))
+                    )
+            }
+        }
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.28), value: shouldShowStartupOverlay)
     }
 
     private var topBar: some View {
@@ -763,15 +775,15 @@ public struct ChatView: View {
         }
 
         if modelDownloader.isDownloading {
-            return "Downloading the Gemma 4 MLX bundle."
+            return "Downloading your on-device model."
         }
 
         if modelDownloader.canResumeDownload {
-            return "Setup paused before the download finished."
+            return "Setup paused before Yemma finished downloading."
         }
 
         if modelDownloader.error != nil {
-            return "The model bundle download needs attention."
+            return "Yemma needs help finishing setup."
         }
 
         if llmService.isModelLoading {
@@ -779,10 +791,10 @@ public struct ChatView: View {
         }
 
         if modelDownloader.isDownloaded, llmService.lastError != nil {
-            return "Yemma could not finish preparing the MLX model bundle."
+            return "Yemma could not finish getting ready."
         }
 
-        return "Load your on-device Gemma 4 model."
+        return "Getting Yemma ready."
     }
 
     private var modelStatusDetailText: String? {
@@ -811,11 +823,7 @@ public struct ChatView: View {
         }
 
         if llmService.isModelLoading {
-            return "You can keep exploring while Yemma finishes loading in the background."
-        }
-
-        if modelDownloader.isDownloaded {
-            return "Startup stays responsive. Load the MLX model only when you are ready to chat."
+            return "Almost there. Yemma is waking up now."
         }
 
         return nil
@@ -852,10 +860,6 @@ public struct ChatView: View {
             return "Retry model load"
         }
 
-        if modelDownloader.isDownloaded, !llmService.isTextModelReady, !llmService.isModelLoading {
-            return "Load model"
-        }
-
         return nil
     }
 
@@ -872,11 +876,71 @@ public struct ChatView: View {
             return onRetryModelLoad
         }
 
-        if modelDownloader.isDownloaded, !llmService.isTextModelReady, !llmService.isModelLoading {
-            return onRetryModelLoad
-        }
-
         return nil
+    }
+
+    private var shouldShowStartupOverlay: Bool {
+        supportsLocalModelRuntime
+            && modelDownloader.isDownloaded
+            && !llmService.isTextModelReady
+            && llmService.lastError == nil
+    }
+
+    private var shouldBlockStartupInteraction: Bool {
+        shouldShowStartupOverlay || isSidebarPresented
+    }
+
+    private var startupLoadingOverlay: some View {
+        ZStack {
+            Rectangle()
+                .fill(.ultraThinMaterial)
+                .ignoresSafeArea()
+
+            Rectangle()
+                .fill(AppTheme.backgroundBottom.opacity(0.42))
+                .ignoresSafeArea()
+
+            VStack(spacing: 22) {
+                StartupLoadingAnimationView()
+
+                VStack(spacing: 8) {
+                    Text("Loading now")
+                        .font(.system(size: 24, weight: .bold))
+                        .foregroundStyle(AppTheme.textPrimary)
+
+                    Text(startupLoadingMessage)
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(AppTheme.textSecondary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                TypingDotsView()
+                    .padding(.top, 2)
+            }
+            .frame(maxWidth: 280)
+            .padding(.horizontal, 28)
+            .padding(.vertical, 30)
+            .glassCard(cornerRadius: 30)
+            .padding(.horizontal, 28)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Loading now. \(startupLoadingMessage)")
+        }
+    }
+
+    private var startupLoadingMessage: String {
+        switch llmService.modelLoadStage {
+        case .idle, .preparingRuntime:
+            return "Getting Yemma ready on this iPhone."
+        case .loadingModel:
+            return "Loading your on-device model."
+        case .activatingModel:
+            return "Finishing the last few setup steps."
+        case .ready:
+            return "Yemma is ready."
+        case .failed:
+            return "Yemma could not finish getting ready."
+        }
     }
 
     private func formatETA(_ seconds: Double) -> String {
@@ -1918,6 +1982,57 @@ private struct TypingDotsView: View {
         case 1: return 0.85
         default: return 0.7
         }
+    }
+}
+
+private struct StartupLoadingAnimationView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private let cycleDuration: TimeInterval = 1.6
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: reduceMotion ? 1 : 1.0 / 30.0)) { context in
+            let phase = animationPhase(for: context.date)
+
+            ZStack {
+                Circle()
+                    .stroke(AppTheme.accent.opacity(0.18), lineWidth: 1)
+                    .frame(width: 92, height: 92)
+
+                Circle()
+                    .stroke(AppTheme.accent.opacity(0.24), lineWidth: 10)
+                    .blur(radius: 2)
+                    .frame(width: 74, height: 74)
+                    .scaleEffect(0.92 + (0.12 * phase))
+                    .opacity(0.3 + (0.25 * (1 - phase)))
+
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [AppTheme.warmGlow, AppTheme.accent, AppTheme.coolGlow],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 42, height: 42)
+                    .shadow(color: AppTheme.accent.opacity(0.35), radius: 18, y: 10)
+                    .scaleEffect(0.96 + (0.08 * (1 - phase)))
+
+                Image(systemName: "bolt.fill")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundStyle(AppTheme.accentForeground)
+            }
+            .frame(width: 104, height: 104)
+        }
+        .accessibilityHidden(true)
+    }
+
+    private func animationPhase(for date: Date) -> CGFloat {
+        guard !reduceMotion else { return 0.5 }
+
+        let rawProgress = date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: cycleDuration) / cycleDuration
+        let eased = 0.5 - (0.5 * cos(rawProgress * .pi * 2))
+        return CGFloat(eased)
     }
 }
 
