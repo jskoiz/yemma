@@ -135,8 +135,11 @@ enum AppTheme {
     static let accent = dynamicColor(light: rgba(20, 20, 24), dark: rgba(244, 244, 246))
     static let accentStrong = dynamicColor(light: rgba(8, 8, 12), dark: rgba(255, 255, 255))
     static let accentSoft = dynamicColor(light: rgba(20, 20, 24, alpha: 0.12), dark: rgba(255, 255, 255, alpha: 0.16))
-    static let accentForeground = Color.white
-    static let accentSecondaryForeground = Color.white.opacity(0.76)
+    static let accentForeground = dynamicColor(light: rgba(255, 255, 255), dark: rgba(18, 20, 28))
+    static let accentSecondaryForeground = dynamicColor(
+        light: rgba(255, 255, 255, alpha: 0.76),
+        dark: rgba(18, 20, 28, alpha: 0.72)
+    )
     static let destructive = dynamicColor(light: rgba(191, 43, 55), dark: rgba(255, 107, 122))
 
     static let userBubbleTop = accent
@@ -145,7 +148,7 @@ enum AppTheme {
     static let assistantBubble = dynamicColor(light: rgba(255, 255, 255, alpha: 0.84), dark: rgba(33, 37, 49, alpha: 0.94))
     static let assistantBubbleBorder = dynamicColor(light: rgba(67, 79, 104, alpha: 0.08), dark: rgba(255, 255, 255, alpha: 0.06))
     static let assistantLabel = dynamicColor(light: rgba(94, 104, 128), dark: rgba(166, 174, 194))
-    static let userMessageText = Color.white
+    static let userMessageText = accentForeground
     static let assistantMessageText = textPrimary
     static let messageCodeBlockBackground = dynamicColor(light: rgba(22, 29, 49, alpha: 0.05), dark: rgba(255, 255, 255, alpha: 0.05))
     static let messageQuote = dynamicColor(light: rgba(20, 20, 24, alpha: 0.20), dark: rgba(255, 255, 255, alpha: 0.24))

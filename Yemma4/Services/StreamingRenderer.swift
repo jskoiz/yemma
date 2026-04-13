@@ -101,6 +101,7 @@ struct StreamingRenderer: Sendable {
 
         cleaned = stripLeadingRolePrefix(from: cleaned)
         cleaned = trimTrailingControlPrefix(from: cleaned)
+        cleaned = normalizeMarkdownFriendlySymbols(in: cleaned)
 
         return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
     }
@@ -193,6 +194,14 @@ struct StreamingRenderer: Sendable {
         }
 
         return text
+    }
+
+    private static func normalizeMarkdownFriendlySymbols(in text: String) -> String {
+        text
+            .replacingOccurrences(of: "$\\rightarrow$", with: " -> ")
+            .replacingOccurrences(of: "$\\Rightarrow$", with: " => ")
+            .replacingOccurrences(of: "\\rightarrow", with: "->")
+            .replacingOccurrences(of: "\\Rightarrow", with: "=>")
     }
 
     private static func trimTrailingUnstableFragment(from text: String) -> String {
