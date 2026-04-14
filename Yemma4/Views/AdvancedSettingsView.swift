@@ -21,8 +21,6 @@ struct AdvancedSettingsView: View {
         self.onRunDebugScenario = onRunDebugScenario
     }
 
-    private let maxTokenOptions: [Int] = [256, 512, 1024, 2048, 4096]
-
     var body: some View {
         ZStack {
             UtilityBackground()
@@ -172,7 +170,7 @@ struct AdvancedSettingsView: View {
             }
 
             Menu {
-                ForEach(maxTokenOptions, id: \.self) { count in
+                ForEach(llmService.availableMaxResponseTokenOptions, id: \.self) { count in
                     Button(tokenLabel(count)) {
                         guard llmService.maxResponseTokens != count else { return }
                         llmService.maxResponseTokens = count
@@ -207,6 +205,13 @@ struct AdvancedSettingsView: View {
                 .font(AppTheme.Typography.utilityCaption)
                 .foregroundStyle(AppTheme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
+
+            if let safetyNote = llmService.maxResponseTokenSafetyNote {
+                Text(safetyNote)
+                    .font(AppTheme.Typography.utilityCaption)
+                    .foregroundStyle(AppTheme.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .utilityRowPadding()
         .accessibilityElement(children: .contain)
