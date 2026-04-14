@@ -28,7 +28,6 @@ final class BackgroundModelDownloadCoordinator: NSObject, @unchecked Sendable {
     private struct DownloadManifest: Codable, Sendable {
         let repositoryID: String
         let revision: String
-        let createdAt: Date
         let files: [DownloadFile]
 
         var totalBytes: Int64 {
@@ -247,7 +246,6 @@ final class BackgroundModelDownloadCoordinator: NSObject, @unchecked Sendable {
         return DownloadManifest(
             repositoryID: repositoryID,
             revision: revision,
-            createdAt: Date(),
             files: files
         )
     }
@@ -332,10 +330,7 @@ final class BackgroundModelDownloadCoordinator: NSObject, @unchecked Sendable {
         }
     }
 
-    private func updateLastError(
-        _ message: String?,
-        repositoryID: String
-    ) {
+    private func updateLastError(_ message: String?) {
         let hub = HubApi.shared
         guard var state = loadState(using: hub) else {
             return
@@ -456,9 +451,9 @@ extension BackgroundModelDownloadCoordinator: URLSessionDownloadDelegate, URLSes
             }
 
             removeResumeData(for: relativePath, in: repoLocation)
-            updateLastError(nil, repositoryID: state.manifest.repositoryID)
+            updateLastError(nil)
         } catch {
-            updateLastError(error.localizedDescription, repositoryID: state.manifest.repositoryID)
+            updateLastError(error.localizedDescription)
         }
     }
 
@@ -486,7 +481,7 @@ extension BackgroundModelDownloadCoordinator: URLSessionDownloadDelegate, URLSes
             persistResumeData(resumeData, for: relativePath, in: repoLocation)
         }
 
-        updateLastError(error.localizedDescription, repositoryID: state.manifest.repositoryID)
+        updateLastError(error.localizedDescription)
     }
 
     func urlSessionDidFinishEvents(forBackgroundURLSession session: URLSession) {

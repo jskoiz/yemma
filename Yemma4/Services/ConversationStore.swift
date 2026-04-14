@@ -543,24 +543,9 @@ final class ConversationStore {
         return try? Self.decoder.decode(PersistedConversation.self, from: data)
     }
 
-    private func writeConversation(_ conversation: PersistedConversation) {
-        ioLock.lock()
-        defer { ioLock.unlock() }
-        ensureRootDirectoryLocked()
-        ensureConversationDirectoryLocked(id: conversation.id)
-        writeConversationLocked(conversation)
-    }
-
     private func writeConversationLocked(_ conversation: PersistedConversation) {
         guard let data = try? Self.encoder.encode(conversation) else { return }
         try? data.write(to: conversationURL(for: conversation.id), options: .atomic)
-    }
-
-    private func writeIndex() {
-        ioLock.lock()
-        defer { ioLock.unlock() }
-        ensureRootDirectoryLocked()
-        writeIndexLocked()
     }
 
     private func writeIndexLocked() {

@@ -57,12 +57,6 @@ struct StreamingRenderer: Sendable {
 
     // MARK: - Public API
 
-    /// Returns `true` when the accumulated text contains a response boundary marker,
-    /// indicating the model has started a new turn and streaming should stop.
-    static func shouldStopStreaming(for text: String) -> Bool {
-        responseBoundaryMarkers.contains { text.contains($0) }
-    }
-
     /// Optimized version that only checks the tail of the string.
     /// Boundary markers are short (<30 chars), so checking the last ~100 chars suffices
     /// for the streaming hot path where tokens are appended incrementally.

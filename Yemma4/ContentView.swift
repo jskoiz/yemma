@@ -73,19 +73,6 @@ struct CircleIconButton: View {
     }
 }
 
-struct PillButtonStyle: ButtonStyle {
-    var fill: Color = AppTheme.chipFill
-    var pressedFill: Color = AppTheme.chipPressedFill
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .background(configuration.isPressed ? pressedFill : fill)
-            .clipShape(Capsule())
-    }
-}
-
 public struct ContentView: View {
     @Environment(ModelDownloader.self) private var modelDownloader
     @Environment(LLMService.self) private var llmService
@@ -206,20 +193,6 @@ public struct ContentView: View {
                     || llmService.isModelLoading
                     || llmService.isTextModelReady
             )
-    }
-
-    private var isSetupComplete: Bool {
-        supportsLocalModelRuntime
-            && modelDownloader.isDownloaded
-            && llmService.isTextModelReady
-    }
-
-    private var hasModelPreparationError: Bool {
-        supportsLocalModelRuntime
-            && modelDownloader.isDownloaded
-            && !llmService.isTextModelReady
-            && !llmService.isModelLoading
-            && llmService.lastError != nil
     }
 
     @MainActor
