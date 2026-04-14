@@ -117,6 +117,9 @@ public struct ChatView: View {
                     if isSidebarPresented {
                         ChatSidebarView(
                             currentConversationID: loadedConversationID,
+                            title: "Yemma 4",
+                            subtitle: "Chats and quick controls",
+                            showsChatManagement: true,
                             onSelectConversation: { conversationID in
                                 Task { @MainActor in
                                     await switchConversation(to: conversationID)
@@ -650,6 +653,15 @@ public struct ChatView: View {
                 composerAttachmentStrip
             }
 
+            if shouldShowComposerSetupNotice {
+                composerSetupNotice
+                    .transition(
+                        reduceMotion
+                            ? .opacity
+                            : .opacity.combined(with: .move(edge: .bottom))
+                    )
+            }
+
             HStack(spacing: 10) {
                 attachmentPickerButton
 
@@ -658,8 +670,9 @@ public struct ChatView: View {
                     .font(AppTheme.Typography.chatComposer)
                     .foregroundStyle(AppTheme.textPrimary)
                     .focused($isComposerFocused)
-                    .submitLabel(.send)
+                    .submitLabel(canSubmitDraft ? .send : .return)
                     .onSubmit {
+                        guard canSubmitDraft else { return }
                         submitDraft()
                     }
 
@@ -683,11 +696,7 @@ public struct ChatView: View {
                 .disabled(!llmService.isGenerating && !canSubmitDraft)
                 .opacity((!llmService.isGenerating && !canSubmitDraft) ? 0.45 : 1)
                 .accessibilityLabel(llmService.isGenerating ? "Stop response" : "Send message")
-                .accessibilityHint(
-                    llmService.isGenerating
-                        ? "Stops the current assistant response."
-                        : "Sends your draft to Yemma."
-                )
+                .accessibilityHint(sendButtonAccessibilityHint)
             }
             .padding(8)
             .inputChrome(cornerRadius: AppTheme.Radius.medium)
@@ -712,6 +721,94 @@ public struct ChatView: View {
             .ignoresSafeArea(edges: .bottom)
         )
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: shouldShowTypingIndicator)
+    }
+
+    private var shouldShowComposerSetupNotice: Bool {
+        appSetup.supportsLocalModelRuntime && !appSetup.isTextModelReady
+    }
+
+    private var sendButtonAccessibilityHint: String {
+        if llmService.isGenerating {
+            return "Stops the current assistant response."
+        }
+
+        if canSubmitDraft {
+            return "Sends your draft to Yemma."
+        }
+
+        return "Send unlocks after the on-device model is ready."
+    }
+
+    private var composerSetupNotice: some View {
+        HStack(alignment: .top, spacing: 12) {
+            composerSetupStatusIcon
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(appSetup.chatStatusText)
+                    .font(AppTheme.Typography.utilityRowTitle)
+                    .foregroundStyle(AppTheme.textPrimary)
+
+                if let detail = appSetup.chatStatusDetailText {
+                    Text(detail)
+                        .font(AppTheme.Typography.utilityCaption)
+                        .foregroundStyle(AppTheme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            Spacer(minLength: 0)
+
+            if let actionTitle = primarySetupActionTitle,
+               let action = primarySetupAction,
+               !appSetup.isModelLoading
+            {
+                Button(actionTitle, action: action)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(AppTheme.accent)
+                    .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(AppTheme.controlFill)
+        .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.medium, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AppTheme.Radius.medium, style: .continuous)
+                .stroke(AppTheme.controlBorder, lineWidth: 1)
+        )
+        .accessibilityElement(children: .combine)
+    }
+
+    @ViewBuilder
+    private var composerSetupStatusIcon: some View {
+        if appSetup.isModelLoading {
+            ProgressView()
+                .tint(AppTheme.accent)
+        } else {
+            Image(systemName: composerSetupStatusSymbol)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(composerSetupStatusTint)
+        }
+    }
+
+    private var composerSetupStatusSymbol: String {
+        if appSetup.isDownloading {
+            return "arrow.down.circle.fill"
+        }
+
+        if appSetup.canResumeDownload {
+            return "pause.circle.fill"
+        }
+
+        if appSetup.chatRecoveryAction != nil {
+            return "exclamationmark.triangle.fill"
+        }
+
+        return "bolt.circle.fill"
+    }
+
+    private var composerSetupStatusTint: Color {
+        appSetup.chatRecoveryAction == nil ? AppTheme.accent : AppTheme.destructive
     }
 
     private var attachmentPickerButton: some View {
@@ -771,10 +868,7 @@ public struct ChatView: View {
         if !appSetup.supportsLocalModelRuntime {
             return true
         }
-        if appSetup.isModelLoading {
-            return false
-        }
-        return appSetup.isTextModelReady || appSetup.isDownloaded
+        return appSetup.isTextModelReady
     }
 
     private var modelStatusText: String {
@@ -1553,21 +1647,18 @@ public struct ChatView: View {
         let trimmedText = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedText.isEmpty || !pendingAttachments.isEmpty else { return }
         guard appSetup.isTextModelReady || !appSetup.supportsLocalModelRuntime else {
-            if appSetup.isModelLoading {
-                AppDiagnostics.shared.record("Send deferred because model is still loading", category: "ui")
-                showToast("Preparing your on-device model")
-                return
+            AppDiagnostics.shared.record(
+                "Send ignored because model is not ready",
+                category: "ui",
+                metadata: [
+                    "isDownloaded": appSetup.isDownloaded,
+                    "isModelLoading": appSetup.isModelLoading,
+                    "recoveryAction": appSetup.chatRecoveryAction?.title ?? "none"
+                ]
+            )
+            if let recoveryAction = primarySetupAction, !appSetup.isModelLoading {
+                recoveryAction()
             }
-
-            if appSetup.isDownloaded {
-                AppDiagnostics.shared.record("Send triggered explicit model load", category: "ui")
-                onRetryModelLoad?()
-                showToast("Preparing your on-device model")
-                return
-            }
-
-            AppDiagnostics.shared.record("Send blocked because model download is incomplete", category: "ui")
-            generationError = "Finish the one-time model download first."
             return
         }
         guard !llmService.isGenerating else {
@@ -1958,7 +2049,7 @@ private struct SharePayload: Identifiable {
     let text: String
 }
 
-private struct ChatSidebarView: View {
+struct ChatSidebarView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(ModelDownloader.self) private var modelDownloader
@@ -1968,6 +2059,9 @@ private struct ChatSidebarView: View {
     @AppStorage(AppearancePreference.storageKey) private var appearancePreferenceRaw = AppearancePreference.system.rawValue
 
     let currentConversationID: UUID?
+    let title: String
+    let subtitle: String
+    let showsChatManagement: Bool
     let onSelectConversation: (UUID) -> Void
     let onStartFresh: () -> Void
     let onShowOnboarding: () -> Void
@@ -1986,7 +2080,6 @@ private struct ChatSidebarView: View {
     private let repositoryURL = URL(string: "https://yemma.chat")!
     private let madeByURL = URL(string: "https://avmillabs.com")!
     private let privacyURL = URL(string: "https://yemma.chat/privacy/")!
-    private let maxTokenOptions: [Int] = [256, 512, 1024, 2048, 4096]
     private let recentConversationLimit = 5
 
     var body: some View {
@@ -2003,7 +2096,9 @@ private struct ChatSidebarView: View {
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: AppTheme.Layout.sectionSpacing) {
                         preferencesSection
-                        chatsSection
+                        if showsChatManagement {
+                            chatsSection
+                        }
                         modelSection
                         aboutSection
                         privacySection
@@ -2106,12 +2201,12 @@ private struct ChatSidebarView: View {
     private var header: some View {
         HStack(alignment: .top, spacing: 16) {
             VStack(alignment: .leading, spacing: 8) {
-                Text("Yemma 4")
+                Text(title)
                     .font(.system(size: 24, weight: .semibold, design: .serif))
                     .foregroundStyle(AppTheme.textPrimary)
                     .shadow(color: Color.white.opacity(0.18), radius: 10, x: 0, y: 2)
 
-                Text("Chats and quick controls")
+                Text(subtitle)
                     .font(AppTheme.Typography.utilityCaption)
                     .foregroundStyle(AppTheme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -2683,7 +2778,7 @@ private struct ChatSidebarView: View {
             }
 
             Menu {
-                ForEach(maxTokenOptions, id: \.self) { count in
+                ForEach(llmService.availableMaxResponseTokenOptions, id: \.self) { count in
                     Button(tokenLabel(count)) {
                         guard llmService.maxResponseTokens != count else { return }
                         llmService.maxResponseTokens = count
@@ -2718,6 +2813,13 @@ private struct ChatSidebarView: View {
                 .font(AppTheme.Typography.utilityCaption)
                 .foregroundStyle(AppTheme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
+
+            if let safetyNote = llmService.maxResponseTokenSafetyNote {
+                Text(safetyNote)
+                    .font(AppTheme.Typography.utilityCaption)
+                    .foregroundStyle(AppTheme.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)

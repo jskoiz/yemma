@@ -485,7 +485,15 @@ final class LLMService: @unchecked Sendable {
         didSet { UserDefaults.standard.set(temperature, forKey: Self.temperatureDefaultsKey) }
     }
     var maxResponseTokens: Int {
-        didSet { UserDefaults.standard.set(maxResponseTokens, forKey: Self.maxTokensDefaultsKey) }
+        didSet {
+            let normalized = Self.normalizedMaxResponseTokens(maxResponseTokens)
+            guard normalized == maxResponseTokens else {
+                maxResponseTokens = normalized
+                return
+            }
+
+            UserDefaults.standard.set(maxResponseTokens, forKey: Self.maxTokensDefaultsKey)
+        }
     }
     var lastError: String?
     var modelLoadStage: ModelLoadStage = .idle
@@ -496,6 +504,7 @@ final class LLMService: @unchecked Sendable {
 
     static let defaultTemperature: Double = ResponseStylePreset.balanced.temperature
     static let defaultMaxResponseTokens: Int = ResponseStylePreset.balanced.maxResponseTokens
+    static let supportedMaxResponseTokenOptions = [256, 512, 1024, 2048, 4096]
     private static let temperatureDefaultsKey = "llm_temperature"
     private static let maxTokensDefaultsKey = "llm_maxResponseTokens"
     private static let baseSystemPrompt = """
@@ -535,6 +544,9 @@ final class LLMService: @unchecked Sendable {
             temperature = savedTemperature ?? Self.defaultTemperature
             maxResponseTokens = savedMaxResponseTokens ?? Self.defaultMaxResponseTokens
         }
+
+        maxResponseTokens = Self.normalizedMaxResponseTokens(maxResponseTokens)
+        defaults.set(maxResponseTokens, forKey: Self.maxTokensDefaultsKey)
     }
 
     deinit {
@@ -557,9 +569,78 @@ final class LLMService: @unchecked Sendable {
         activeResponseStylePreset?.title ?? "Custom"
     }
 
+    var availableMaxResponseTokenOptions: [Int] {
+        Self.availableMaxResponseTokenOptions()
+    }
+
+    var maxResponseTokenSafetyNote: String? {
+        let deviceCeiling = Self.maxResponseTokenCeiling()
+        let highestOption = Self.supportedMaxResponseTokenOptions.last ?? deviceCeiling
+
+        if maxResponseTokens >= 2048 {
+            return "Longer replies use more memory and can slow on-device generation."
+        }
+
+        if deviceCeiling < highestOption {
+            return "This iPhone recommends up to \(Self.tokenLabel(deviceCeiling)) tokens to keep memory use steadier."
+        }
+
+        return nil
+    }
+
     func applyResponseStylePreset(_ preset: ResponseStylePreset) {
         temperature = preset.temperature
         maxResponseTokens = preset.maxResponseTokens
+    }
+
+    static func availableMaxResponseTokenOptions(
+        physicalMemory: UInt64 = ProcessInfo.processInfo.physicalMemory
+    ) -> [Int] {
+        let ceiling = maxResponseTokenCeiling(physicalMemory: physicalMemory)
+        let options = supportedMaxResponseTokenOptions.filter { $0 <= ceiling }
+        return options.isEmpty ? [defaultMaxResponseTokens] : options
+    }
+
+    private static func maxResponseTokenCeiling(
+        physicalMemory: UInt64 = ProcessInfo.processInfo.physicalMemory
+    ) -> Int {
+        let sixGigabytes = UInt64(6) * 1024 * 1024 * 1024
+        let eightGigabytes = UInt64(8) * 1024 * 1024 * 1024
+
+        if physicalMemory < sixGigabytes {
+            return 1024
+        }
+
+        if physicalMemory < eightGigabytes {
+            return 2048
+        }
+
+        return 4096
+    }
+
+    private static func normalizedMaxResponseTokens(
+        _ value: Int,
+        physicalMemory: UInt64 = ProcessInfo.processInfo.physicalMemory
+    ) -> Int {
+        let options = availableMaxResponseTokenOptions(physicalMemory: physicalMemory)
+
+        if options.contains(value) {
+            return value
+        }
+
+        if let clamped = options.last(where: { value >= $0 }) {
+            return clamped
+        }
+
+        return options.first ?? defaultMaxResponseTokens
+    }
+
+    private static func tokenLabel(_ count: Int) -> String {
+        if count >= 1024 {
+            return String(format: "%.1fK", Double(count) / 1024.0)
+        }
+
+        return "\(count)"
     }
 
     func loadModel(from path: String) async throws {
