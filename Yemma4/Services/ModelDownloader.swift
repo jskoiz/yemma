@@ -2,6 +2,8 @@ import Foundation
 import Observation
 @preconcurrency import Hub
 
+private let knownModelRepositoryIDs = [Gemma4MLXSupport.repositoryID] + Gemma4MLXSupport.legacyRepositoryIDs
+
 public struct LocalModelResources: Sendable {
     public let modelDirectoryPath: String
 }
@@ -18,7 +20,6 @@ public final class ModelDownloader {
     public var estimatedSecondsRemaining: Double?
     public var currentDownloadSpeedBytesPerSecond: Double?
 
-    private var downloadStartDate: Date?
     private var lastSpeedSampleDate: Date?
     private var lastSpeedSampleBytes: Int64 = 0
     private var currentDownloadedBytes: Int64 = 0
@@ -297,7 +298,6 @@ public final class ModelDownloader {
     }
 
     private func resetETA() {
-        downloadStartDate = nil
         estimatedSecondsRemaining = nil
         currentDownloadSpeedBytesPerSecond = nil
         lastSpeedSampleDate = nil
@@ -305,7 +305,6 @@ public final class ModelDownloader {
     }
 
     private func startETA() {
-        downloadStartDate = Date()
         estimatedSecondsRemaining = nil
         currentDownloadSpeedBytesPerSecond = nil
         lastSpeedSampleDate = Date()
@@ -340,8 +339,7 @@ public final class ModelDownloader {
 
     private func firstValidModelDirectoryAsync(using hub: HubApi) async -> (ValidatedModelDirectory, Int64)? {
         await Task.detached(priority: .utility) {
-            let repositoryIDs = [Gemma4MLXSupport.repositoryID] + Gemma4MLXSupport.legacyRepositoryIDs
-            for repositoryID in repositoryIDs {
+            for repositoryID in knownModelRepositoryIDs {
                 let location = hub.localRepoLocation(Hub.Repo(id: repositoryID))
                 guard let validatedDirectory = try? ModelDirectoryValidator.validatedDirectory(at: location) else {
                     continue
@@ -354,8 +352,7 @@ public final class ModelDownloader {
     }
 
     private func allKnownModelDirectories(using hub: HubApi) -> [URL] {
-        let repositoryIDs = [Gemma4MLXSupport.repositoryID] + Gemma4MLXSupport.legacyRepositoryIDs
-        return repositoryIDs.map { hub.localRepoLocation(Hub.Repo(id: $0)) }
+        knownModelRepositoryIDs.map { hub.localRepoLocation(Hub.Repo(id: $0)) }
     }
 
     private func purgeStaleDownloadDirectories(

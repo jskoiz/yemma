@@ -41,50 +41,24 @@ enum ModelLoadStage: Sendable {
             return "Yemma could not finish getting ready."
         }
     }
-
-    var compactStatusText: String {
-        switch self {
-        case .idle:
-            return "Getting ready"
-        case .preparingRuntime:
-            return "Preparing"
-        case .loadingModel:
-            return "Loading"
-        case .activatingModel:
-            return "Finishing"
-        case .ready:
-            return "Ready"
-        case .failed:
-            return "Setup failed"
-        }
-    }
 }
 
 enum LLMServiceError: LocalizedError {
-    case unsupportedPlatform
     case modelNotLoaded
     case modelLoadFailed(path: String)
-    case tokenizerFailed(Error)
     case assetValidationFailed(Error)
     case processorFailed(Error)
-    case generationFailed(Error)
 
     var errorDescription: String? {
         switch self {
-        case .unsupportedPlatform:
-            return "MLX does not run on the iOS Simulator. Run Yemma on a physical iPhone."
         case .modelNotLoaded:
             return "No MLX model bundle is loaded."
         case let .modelLoadFailed(path):
             return "Failed to load the MLX model bundle at \(path)."
-        case let .tokenizerFailed(error):
-            return "Tokenizer setup failed.\n\n\(error.localizedDescription)"
         case let .assetValidationFailed(error):
             return "Model asset validation failed.\n\n\(error.localizedDescription)"
         case let .processorFailed(error):
             return "Image/text preprocessing failed.\n\n\(error.localizedDescription)"
-        case let .generationFailed(error):
-            return "Generation failed.\n\n\(error.localizedDescription)"
         }
     }
 }

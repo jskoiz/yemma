@@ -11,12 +11,6 @@ struct Yemma4AutomationConfiguration: Sendable, Equatable {
     let rawTokenLoggingEnabled: Bool
     let multimodalFirstTokenTraceEnabled: Bool
 
-    static let disabled = Self(
-        autorunSmokeTest: false,
-        rawTokenLoggingEnabled: false,
-        multimodalFirstTokenTraceEnabled: false
-    )
-
     static let current = from(
         arguments: ProcessInfo.processInfo.arguments,
         environment: ProcessInfo.processInfo.environment
@@ -112,8 +106,6 @@ final class Gemma4SmokeAutomation {
 
     private let configuration: Yemma4AutomationConfiguration
     private var hasRunAutomatedSmokeTest = false
-
-    private(set) var latestSmokeReport: Gemma4SmokeReport?
 
     init(configuration: Yemma4AutomationConfiguration = .current) {
         self.configuration = configuration
@@ -357,7 +349,6 @@ final class Gemma4SmokeAutomation {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(report)
         try data.write(to: artifactURL, options: [.atomic])
-        latestSmokeReport = report
 
         AppDiagnostics.shared.record(
             "Automated smoke report saved",

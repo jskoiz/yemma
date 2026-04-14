@@ -2,6 +2,9 @@
 DerivedData/
 .build/
 .swiftpm/
+.asc/
+.codex-builds/
+.codex-derived-data-device/
 Package.resolved
 .deriveddata/
 .artifacts/

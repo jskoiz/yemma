@@ -14,10 +14,6 @@ enum Gemma4MLXSupport {
     static let templateContext: [String: any Sendable] = ["enable_thinking": false]
     static let downloadPatterns = ["*.safetensors", "*.json", "*.jinja"]
 
-    static func validateAssetContract(at modelDirectory: URL) throws {
-        try validateAssetContract(try ModelDirectoryValidator.validatedDirectory(at: modelDirectory))
-    }
-
     @discardableResult
     static func normalizeAssetContractIfNeeded(_ validatedDirectory: ValidatedModelDirectory) throws -> Bool {
         try normalizeConfigIfNeeded(at: validatedDirectory.configURL)
@@ -259,12 +255,6 @@ private enum Gemma4AssetValidationError: LocalizedError {
     }
 }
 
-enum ModelDirectoryValidationState {
-    case missing
-    case invalid
-    case valid
-}
-
 struct ValidatedModelDirectory: Sendable {
     let location: URL
     let configURL: URL
@@ -317,18 +307,6 @@ enum ModelDirectoryValidator {
         "tokenizer.json",
         "tokenizer_config.json",
     ]
-
-    static func isValidModelDirectory(_ location: URL) -> Bool {
-        (try? validatedDirectory(at: location)) != nil
-    }
-
-    static func validationState(at location: URL) -> ModelDirectoryValidationState {
-        guard FileManager.default.fileExists(atPath: location.path) else {
-            return .missing
-        }
-
-        return (try? validatedDirectory(at: location)) != nil ? .valid : .invalid
-    }
 
     static func validatedDirectory(at location: URL) throws -> ValidatedModelDirectory {
         let fileManager = FileManager.default
