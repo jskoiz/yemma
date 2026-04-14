@@ -84,11 +84,11 @@ struct EmptyStateView: View {
     var onSelectStarter: (ChatStarter) -> Void = { _ in }
 
     var body: some View {
-        VStack(spacing: 24) {
+        VStack(spacing: 20) {
             Spacer(minLength: 48)
 
-            VStack(alignment: .leading, spacing: 18) {
-                VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 8) {
                     Text("Start with a task")
                         .font(AppTheme.Typography.brandSection)
                         .foregroundStyle(AppTheme.textPrimary)
@@ -114,7 +114,7 @@ struct EmptyStateView: View {
                             }
                         }
                     }
-                    .padding(.vertical, 4)
+                    .padding(.vertical, 2)
                     .background(
                         RoundedRectangle(cornerRadius: AppTheme.Radius.medium, style: .continuous)
                             .fill(AppTheme.controlFill)
@@ -225,17 +225,20 @@ struct EmptyStateView: View {
         Button {
             onSelectStarter(starter)
         } label: {
-            HStack(spacing: 12) {
+            HStack(spacing: 10) {
                 Image(systemName: starter.systemImage)
-                    .font(.system(size: 17, weight: .semibold))
+                    .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(AppTheme.accent)
-                    .frame(width: 26)
+                    .frame(width: 24)
 
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
                         Text(starter.title)
-                            .font(AppTheme.Typography.utilityRowTitle)
+                            .font(AppTheme.Typography.utilityRowTitle.weight(.semibold))
                             .foregroundStyle(AppTheme.textPrimary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.92)
+                            .layoutPriority(1)
 
                         if starter.behavior == .promptAndPickImage {
                             Text("Photo")
@@ -254,6 +257,7 @@ struct EmptyStateView: View {
                         Text(starter.subtitle)
                             .font(AppTheme.Typography.utilityCaption)
                             .foregroundStyle(AppTheme.textSecondary)
+                            .lineLimit(2)
                             .fixedSize(horizontal: false, vertical: true)
 
                         Spacer(minLength: 0)
@@ -266,8 +270,8 @@ struct EmptyStateView: View {
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(AppTheme.textTertiary)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 16)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 13)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
