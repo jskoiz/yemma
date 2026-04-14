@@ -164,7 +164,7 @@ public struct ChatView: View {
             .toolbar(.hidden, for: .navigationBar)
             .sheet(isPresented: $showArchiveBrowser) {
                 ConversationBrowserSheet(
-                    title: "Archive",
+                    scope: .archive(recentLimit: 5),
                     currentConversationID: loadedConversationID,
                     onSelectConversation: { conversationID in
                         Task { @MainActor in
@@ -2068,7 +2068,7 @@ private struct ChatSidebarView: View {
 
     @State private var renameConversation: ConversationMetadata?
     @State private var renameTitle = ""
-    @State private var showAdvancedControls = false
+    @State private var deleteConversation: ConversationMetadata?
     @State private var showEventLog = false
     @State private var diagnosticsCopied = false
     @State private var showDeleteModelConfirmation = false
@@ -2076,8 +2076,9 @@ private struct ChatSidebarView: View {
 
     private let repositoryURL = URL(string: "https://yemma.chat")!
     private let madeByURL = URL(string: "https://avmillabs.com")!
+    private let privacyURL = URL(string: "https://yemma.chat/privacy/")!
     private let maxTokenOptions: [Int] = [256, 512, 1024, 2048, 4096]
-    private let recentConversationLimit = 10
+    private let recentConversationLimit = 5
 
     var body: some View {
         ZStack {
@@ -2092,10 +2093,11 @@ private struct ChatSidebarView: View {
             ) { headerHeight in
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: AppTheme.Layout.sectionSpacing) {
-                        everydaySection
+                        preferencesSection
                         chatsSection
                         modelSection
                         aboutSection
+                        privacySection
                     }
                     .padding(.horizontal, AppTheme.Layout.screenPadding)
                     .padding(.top, 34)
@@ -2113,12 +2115,6 @@ private struct ChatSidebarView: View {
         }
         .task {
             await conversationStore.loadIndexIfNeeded()
-            await diagnostics.loadPersistedEventsIfNeeded()
-        }
-        .alert("Diagnostics copied", isPresented: $diagnosticsCopied) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text("The recent diagnostics log is on the pasteboard.")
         }
         .confirmationDialog(
             "Delete the downloaded model?",
@@ -2148,6 +2144,28 @@ private struct ChatSidebarView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("This removes saved local chats, drafts, and attached images on this iPhone.")
+        }
+        .confirmationDialog(
+            "Delete this chat?",
+            isPresented: Binding(
+                get: { deleteConversation != nil },
+                set: { if !$0 { deleteConversation = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Delete Chat", role: .destructive) {
+                guard let deleteConversation else { return }
+                AppDiagnostics.shared.record(
+                    "Conversation deleted",
+                    category: "ui",
+                    metadata: ["conversationID": deleteConversation.id.uuidString]
+                )
+                conversationStore.deleteConversation(id: deleteConversation.id)
+                self.deleteConversation = nil
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes the chat from local history on this iPhone.")
         }
         .alert(
             "Rename Chat",
@@ -2213,8 +2231,8 @@ private struct ChatSidebarView: View {
         }
     }
 
-    private var everydaySection: some View {
-        UtilitySection("Everyday") {
+    private var preferencesSection: some View {
+        UtilitySection("Preferences") {
             VStack(alignment: .leading, spacing: 14) {
                 VStack(alignment: .leading, spacing: 10) {
                     rowHeader(title: "Response style", detail: llmService.activeResponseStyleTitle)
@@ -2224,6 +2242,11 @@ private struct ChatSidebarView: View {
                             responseStyleChip(preset)
                         }
                     }
+
+                    Text(selectedResponseStyleSummary)
+                        .font(AppTheme.Typography.utilityCaption)
+                        .foregroundStyle(AppTheme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 UtilitySectionSeparator(leadingInset: AppTheme.Layout.rowHorizontalPadding)
@@ -2269,8 +2292,8 @@ private struct ChatSidebarView: View {
     }
 
     private var chatsSection: some View {
-        let recentConversations = Array(conversationStore.conversations.prefix(recentConversationLimit))
-        let archivedConversationCount = max(conversationStore.conversations.count - recentConversationLimit, 0)
+        let recentConversations = conversationStore.recentConversations(limit: recentConversationLimit)
+        let archivedConversationCount = conversationStore.archivedConversations(limit: recentConversationLimit).count
 
         return UtilitySection("Chats") {
             Button {
@@ -2291,29 +2314,7 @@ private struct ChatSidebarView: View {
             }
 
             ForEach(Array(recentConversations.enumerated()), id: \.element.id) { index, metadata in
-                Button {
-                    AppDiagnostics.shared.record(
-                        "Conversation selected",
-                        category: "ui",
-                        metadata: [
-                            "conversationID": metadata.id.uuidString,
-                            "messageCount": metadata.messageCount
-                        ]
-                    )
-                    AppHaptics.selection()
-                    onSelectConversation(metadata.id)
-                } label: {
-                    conversationRow(metadata)
-                }
-                .buttonStyle(.plain)
-                .contextMenu {
-                    Button {
-                        renameConversation = metadata
-                        renameTitle = metadata.title
-                    } label: {
-                        Label("Rename", systemImage: "pencil")
-                    }
-                }
+                conversationListRow(metadata)
 
                 if index != recentConversations.count - 1 || archivedConversationCount > 0 {
                     UtilitySectionSeparator(leadingInset: AppTheme.Layout.rowHorizontalPadding)
@@ -2345,55 +2346,7 @@ private struct ChatSidebarView: View {
                 detail: modelSizeText
             )
             UtilitySectionSeparator()
-
-            Button {
-                AppHaptics.selection()
-                onShowOnboarding()
-            } label: {
-                actionRow(
-                    icon: "sparkles.rectangle.stack",
-                    title: "Setup status",
-                    subtitle: setupStatusDetail
-                )
-            }
-            .buttonStyle(.plain)
-
-            UtilitySectionSeparator()
-
-            Button {
-                if reduceMotion {
-                    showAdvancedControls.toggle()
-                } else {
-                    withAnimation(.easeInOut(duration: 0.22)) {
-                        showAdvancedControls.toggle()
-                    }
-                }
-                AppHaptics.selection()
-            } label: {
-                disclosureRow(
-                    icon: "gearshape.2",
-                    title: "Advanced",
-                    subtitle: "Model tuning, diagnostics, and debug tools.",
-                    isExpanded: showAdvancedControls
-                )
-            }
-            .buttonStyle(.plain)
-
-            if showAdvancedControls {
-                UtilitySectionSeparator(leadingInset: AppTheme.Layout.rowHorizontalPadding)
-                advancedCard
-            }
-
-            UtilitySectionSeparator()
-
-            destructiveRow(
-                icon: "trash",
-                title: "Delete conversation history",
-                subtitle: "Remove saved local chats, drafts, and attached images."
-            ) {
-                showClearConversationConfirmation = true
-            }
-
+            advancedRow
             UtilitySectionSeparator()
 
             destructiveRow(
@@ -2424,6 +2377,27 @@ private struct ChatSidebarView: View {
             )
             UtilitySectionSeparator()
             infoRow(icon: "info.circle", title: "Version", detail: appVersionText)
+        }
+    }
+
+    private var privacySection: some View {
+        UtilitySection("Privacy") {
+            trustRow
+            UtilitySectionSeparator()
+            linkRow(
+                icon: "hand.raised.fill",
+                title: "Privacy policy",
+                subtitle: "What stays local and how Yemma handles it.",
+                url: privacyURL
+            )
+            UtilitySectionSeparator()
+            destructiveRow(
+                icon: "trash",
+                title: "Delete conversation history",
+                subtitle: "Remove saved local chats, drafts, and attached images."
+            ) {
+                showClearConversationConfirmation = true
+            }
         }
     }
 
@@ -2472,6 +2446,100 @@ private struct ChatSidebarView: View {
                 )
         }
         .buttonStyle(.plain)
+    }
+
+    private var selectedResponseStyleSummary: String {
+        llmService.activeResponseStylePreset?.summary ?? "Custom mix of reply length and detail."
+    }
+
+    private var advancedRow: some View {
+        NavigationLink {
+            AdvancedSettingsView(
+                onShowSetupPage: onShowOnboarding,
+                onRunDebugScenario: onRunDebugScenario
+            )
+        } label: {
+            actionRow(
+                icon: "gearshape.2",
+                title: "Advanced",
+                subtitle: "Model controls, setup, diagnostics, and debug tools."
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("Opens advanced model controls, setup, diagnostics, and debug tools.")
+    }
+
+    private var trustRow: some View {
+        HStack(spacing: 14) {
+            Image(systemName: "lock.shield.fill")
+                .frame(width: AppTheme.Layout.rowIconSize)
+                .foregroundStyle(AppTheme.textPrimary)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("On-device only")
+                    .font(AppTheme.Typography.utilityRowTitle.weight(.semibold))
+                    .foregroundStyle(AppTheme.textPrimary)
+
+                Text("Chats, drafts, and attachments stay local to this iPhone.")
+                    .font(AppTheme.Typography.utilityRowDetail)
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer()
+        }
+        .utilityRowPadding()
+        .accessibilityElement(children: .combine)
+    }
+
+    private func conversationListRow(_ metadata: ConversationMetadata) -> some View {
+        HStack(alignment: .top, spacing: 0) {
+            Button {
+                AppDiagnostics.shared.record(
+                    "Conversation selected",
+                    category: "ui",
+                    metadata: [
+                        "conversationID": metadata.id.uuidString,
+                        "messageCount": metadata.messageCount
+                    ]
+                )
+                AppHaptics.selection()
+                onSelectConversation(metadata.id)
+            } label: {
+                conversationRow(metadata)
+            }
+            .buttonStyle(.plain)
+
+            conversationActionsMenu(for: metadata)
+                .padding(.trailing, AppTheme.Layout.rowHorizontalPadding)
+                .padding(.top, 8)
+        }
+    }
+
+    private func conversationActionsMenu(for metadata: ConversationMetadata) -> some View {
+        Menu {
+            Button {
+                renameConversation = metadata
+                renameTitle = metadata.title
+            } label: {
+                Label("Rename", systemImage: "pencil")
+            }
+
+            Button(role: .destructive) {
+                deleteConversation = metadata
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(AppTheme.textSecondary)
+                .frame(width: 32, height: 32)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Chat actions")
+        .accessibilityHint("Rename or delete this chat.")
     }
 
     private func conversationRow(_ metadata: ConversationMetadata) -> some View {
@@ -2861,7 +2929,7 @@ private struct ChatSidebarView: View {
             advancedActionRow(
                 icon: "arrow.counterclockwise",
                 title: "Reset to defaults",
-                detail: "Restore the focused default tuning.",
+                detail: "Restore the balanced default tuning.",
                 titleColor: AppTheme.accent,
                 trailingColor: AppTheme.accent
             )

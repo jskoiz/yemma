@@ -255,6 +255,31 @@ final class ConversationStore {
         defaults.set(id.uuidString, forKey: Self.currentConversationDefaultsKey)
     }
 
+    func recentConversations(limit: Int) -> [ConversationMetadata] {
+        guard limit > 0 else { return [] }
+
+        let sortedConversations = conversations.sorted(by: Self.sortConversations)
+        let recentSlice = Array(sortedConversations.prefix(limit))
+
+        guard let currentConversationID,
+              !recentSlice.contains(where: { $0.id == currentConversationID }),
+              let currentConversation = sortedConversations.first(where: { $0.id == currentConversationID }) else {
+            return recentSlice
+        }
+
+        var recent = recentSlice
+        if recent.count == limit {
+            recent.removeLast()
+        }
+        recent.insert(currentConversation, at: 0)
+        return recent
+    }
+
+    func archivedConversations(limit: Int) -> [ConversationMetadata] {
+        let recentIDs = Set(recentConversations(limit: limit).map(\.id))
+        return conversations.filter { !recentIDs.contains($0.id) }
+    }
+
     func loadConversation(id: UUID) -> ConversationSnapshot? {
         guard let conversation = readConversation(id: id) else {
             return nil
@@ -350,27 +375,43 @@ final class ConversationStore {
     }
 
     func deleteConversation(id: UUID) {
+        _ = deleteConversations(ids: Set([id]))
+    }
+
+    @discardableResult
+    func deleteArchivedConversations(keepingRecentLimit limit: Int) -> Int {
+        let archivedIDs = Set(archivedConversations(limit: limit).map(\.id))
+        return deleteConversations(ids: archivedIDs)
+    }
+
+    @discardableResult
+    func deleteConversations(ids: Set<UUID>) -> Int {
+        guard !ids.isEmpty else { return 0 }
+
         ioLock.lock()
         defer { ioLock.unlock() }
 
-        let removedAttachmentFiles = readConversationLocked(id: id).map { conversation in
-            ConversationAttachmentStore.removeFiles(
-                at: Self.attachmentURLs(in: conversation),
-                fileManager: fileManager,
-                baseDirectoryOverride: storageRootOverride
-            )
-        } ?? 0
+        var removedAttachmentFiles = 0
+        for id in ids {
+            removedAttachmentFiles += readConversationLocked(id: id).map { conversation in
+                ConversationAttachmentStore.removeFiles(
+                    at: Self.attachmentURLs(in: conversation),
+                    fileManager: fileManager,
+                    baseDirectoryOverride: storageRootOverride
+                )
+            } ?? 0
 
-        let directory = conversationDirectory(for: id)
-        if fileManager.fileExists(atPath: directory.path) {
-            try? fileManager.removeItem(at: directory)
+            let directory = conversationDirectory(for: id)
+            if fileManager.fileExists(atPath: directory.path) {
+                try? fileManager.removeItem(at: directory)
+            }
         }
 
-        conversations.removeAll { $0.id == id }
+        conversations.removeAll { ids.contains($0.id) }
         conversations.sort(by: Self.sortConversations)
         writeIndexLocked()
 
-        if currentConversationID == id {
+        if let currentID = currentConversationID, ids.contains(currentID) {
             if let nextConversation = conversations.first {
                 currentConversationID = nextConversation.id
                 defaults.set(nextConversation.id.uuidString, forKey: Self.currentConversationDefaultsKey)
@@ -385,11 +426,13 @@ final class ConversationStore {
                 "Conversation attachments deleted",
                 category: "storage",
                 metadata: [
-                    "conversationID": id.uuidString,
+                    "conversations": ids.count,
                     "files": removedAttachmentFiles
                 ]
             )
         }
+
+        return ids.count
     }
 
     func deleteAllConversations() {

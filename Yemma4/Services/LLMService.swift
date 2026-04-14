@@ -520,8 +520,8 @@ final class LLMService: @unchecked Sendable {
         isModelLoaded
     }
 
-    static let defaultTemperature: Double = ResponseStylePreset.focused.temperature
-    static let defaultMaxResponseTokens: Int = ResponseStylePreset.focused.maxResponseTokens
+    static let defaultTemperature: Double = ResponseStylePreset.balanced.temperature
+    static let defaultMaxResponseTokens: Int = ResponseStylePreset.balanced.maxResponseTokens
     private static let temperatureDefaultsKey = "llm_temperature"
     private static let maxTokensDefaultsKey = "llm_maxResponseTokens"
     private static let baseSystemPrompt = """

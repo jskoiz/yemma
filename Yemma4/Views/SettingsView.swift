@@ -181,7 +181,7 @@ public struct SettingsView: View {
 
     @State private var showDeleteModelConfirmation = false
     @State private var showClearConversationConfirmation = false
-    @State private var didMigrateFocusedDefault = false
+    @State private var didPersistDefaultResponseStyle = false
 
     private let onShowOnboarding: () -> Void
     private let onRunDebugScenario: ((DebugInferenceScenario) -> Void)?
@@ -215,10 +215,10 @@ public struct SettingsView: View {
                 ) { headerHeight in
                     ScrollView(showsIndicators: false) {
                         VStack(spacing: AppTheme.Layout.sectionSpacing) {
-                            everydaySection
+                            preferencesSection
                             modelStorageSection
-                            trustSection
                             aboutSection
+                            privacySection
                         }
                         .padding(.horizontal, AppTheme.Layout.screenPadding)
                         .padding(.top, 28)
@@ -237,7 +237,7 @@ public struct SettingsView: View {
             .toolbar(.hidden, for: .navigationBar)
         }
         .task {
-            migrateFocusedResponseStyleIfNeeded()
+            persistDefaultResponseStyleIfNeeded()
         }
         .confirmationDialog(
             "Delete the downloaded model?",
@@ -284,8 +284,8 @@ public struct SettingsView: View {
         .padding(.horizontal, 4)
     }
 
-    private var everydaySection: some View {
-        UtilitySection("Everyday") {
+    private var preferencesSection: some View {
+        UtilitySection("Preferences") {
             responseStyleRow
             UtilitySectionSeparator()
             appearanceRow
@@ -301,28 +301,7 @@ public struct SettingsView: View {
                 accessibilityHint: "Shows the amount of space used by the downloaded on-device model."
             )
             UtilitySectionSeparator()
-            Button {
-                AppHaptics.selection()
-                dismiss()
-                onShowOnboarding()
-            } label: {
-                utilityActionRow(
-                    icon: "sparkles.rectangle.stack",
-                    title: "Setup status",
-                    detail: "Check download progress and local setup."
-                )
-            }
-            .buttonStyle(.plain)
-            UtilitySectionSeparator()
             advancedRow
-            UtilitySectionSeparator()
-            destructiveRow(
-                icon: "trash",
-                title: "Delete conversation history",
-                accessibilityHint: "Deletes saved chats and drafts from this iPhone."
-            ) {
-                showClearConversationConfirmation = true
-            }
             UtilitySectionSeparator()
             destructiveRow(
                 icon: "externaldrive.badge.minus",
@@ -334,17 +313,9 @@ public struct SettingsView: View {
         }
     }
 
-    private var trustSection: some View {
-        UtilitySection("Privacy & Trust") {
+    private var privacySection: some View {
+        UtilitySection("Privacy") {
             trustRow
-            UtilitySectionSeparator()
-            linkRow(
-                icon: "doc.text",
-                title: "MIT license",
-                detail: "Read the app license.",
-                url: licenseURL,
-                accessibilityHint: "Opens the app license in Safari."
-            )
             UtilitySectionSeparator()
             linkRow(
                 icon: "shield.lefthalf.filled",
@@ -369,6 +340,14 @@ public struct SettingsView: View {
                 url: supportURL,
                 accessibilityHint: "Opens the support page in Safari."
             )
+            UtilitySectionSeparator()
+            destructiveRow(
+                icon: "trash",
+                title: "Delete conversation history",
+                accessibilityHint: "Deletes saved chats and drafts from this iPhone."
+            ) {
+                showClearConversationConfirmation = true
+            }
         }
     }
 
@@ -388,6 +367,14 @@ public struct SettingsView: View {
                 detail: "AVMIL Labs in Honolulu 🤙",
                 url: madeByURL,
                 accessibilityHint: "Opens the maker website in Safari."
+            )
+            UtilitySectionSeparator()
+            linkRow(
+                icon: "doc.text",
+                title: "MIT license",
+                detail: "Read the app license.",
+                url: licenseURL,
+                accessibilityHint: "Opens the app license in Safari."
             )
             UtilitySectionSeparator()
             infoRow(icon: "info.circle", title: "Version", detail: appVersionText)
@@ -502,16 +489,22 @@ public struct SettingsView: View {
 
     private var advancedRow: some View {
         NavigationLink {
-            AdvancedSettingsView(onRunDebugScenario: onRunDebugScenario)
+            AdvancedSettingsView(
+                onShowSetupPage: {
+                    dismiss()
+                    onShowOnboarding()
+                },
+                onRunDebugScenario: onRunDebugScenario
+            )
         } label: {
             utilityActionRow(
                 icon: "gearshape.2",
                 title: "Advanced",
-                detail: "Model tuning, storage, diagnostics, and debug tools."
+                detail: "Model controls, setup, diagnostics, and debug tools."
             )
         }
         .buttonStyle(.plain)
-        .accessibilityHint("Opens advanced model, storage, diagnostics, and debug controls.")
+        .accessibilityHint("Opens advanced model controls, setup, diagnostics, and debug tools.")
     }
 
     private var appearanceRow: some View {
@@ -721,9 +714,9 @@ public struct SettingsView: View {
         )
     }
 
-    private func migrateFocusedResponseStyleIfNeeded() {
-        guard !didMigrateFocusedDefault else { return }
-        didMigrateFocusedDefault = true
+    private func persistDefaultResponseStyleIfNeeded() {
+        guard !didPersistDefaultResponseStyle else { return }
+        didPersistDefaultResponseStyle = true
 
         let defaults = UserDefaults.standard
         guard defaults.object(forKey: "llm_temperature") == nil,
@@ -731,7 +724,7 @@ public struct SettingsView: View {
             return
         }
 
-        applyResponseStylePreset(.focused)
+        applyResponseStylePreset(.balanced)
     }
 
     private var modelSizeText: String {

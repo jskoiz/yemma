@@ -7,11 +7,17 @@ struct AdvancedSettingsView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var diagnosticsCopied = false
+    @State private var showDiagnostics = false
     @State private var showEventLog = false
 
+    let onShowSetupPage: (() -> Void)?
     let onRunDebugScenario: ((DebugInferenceScenario) -> Void)?
 
-    init(onRunDebugScenario: ((DebugInferenceScenario) -> Void)? = nil) {
+    init(
+        onShowSetupPage: (() -> Void)? = nil,
+        onRunDebugScenario: ((DebugInferenceScenario) -> Void)? = nil
+    ) {
+        self.onShowSetupPage = onShowSetupPage
         self.onRunDebugScenario = onRunDebugScenario
     }
 
@@ -31,9 +37,8 @@ struct AdvancedSettingsView: View {
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: AppTheme.Layout.sectionSpacing) {
                         overviewSection
-                        inferenceSection
+                        modelControlsSection
                         advancedSection
-                        resetSection
                     }
                     .padding(.horizontal, AppTheme.Layout.screenPadding)
                     .padding(.top, 28)
@@ -52,6 +57,11 @@ struct AdvancedSettingsView: View {
         .task {
             await diagnostics.loadPersistedEventsIfNeeded()
         }
+        .alert("Diagnostics copied", isPresented: $diagnosticsCopied) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("The recent diagnostics log is on the pasteboard.")
+        }
     }
 
     private var header: some View {
@@ -64,13 +74,16 @@ struct AdvancedSettingsView: View {
                     .foregroundStyle(AppTheme.textPrimary)
             }
             .accessibilityLabel("Back")
-            .accessibilityHint("Returns to the main settings screen.")
+            .accessibilityHint("Returns to the previous settings screen.")
+
             Spacer()
+
             Text("Advanced")
                 .font(AppTheme.Typography.utilityTitle)
                 .foregroundStyle(AppTheme.textPrimary)
+
             Spacer()
-            // Balance the back button
+
             Image(systemName: "chevron.left")
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(.clear)
@@ -100,16 +113,18 @@ struct AdvancedSettingsView: View {
         }
     }
 
-    private var inferenceSection: some View {
+    private var modelControlsSection: some View {
         UtilitySection("Model controls") {
             temperatureRow
             UtilitySectionSeparator()
             maxResponseTokensRow
+            UtilitySectionSeparator()
+            resetDefaultsRow
         }
     }
 
     private var temperatureRow: some View {
-        return VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 14) {
             HStack {
                 Label("Creativity", systemImage: "slider.horizontal.3")
                     .font(AppTheme.Typography.utilityRowTitle)
@@ -174,7 +189,9 @@ struct AdvancedSettingsView: View {
                     Text(tokenLabel(llmService.maxResponseTokens))
                         .font(AppTheme.Typography.utilityRowTitle)
                         .foregroundStyle(AppTheme.textPrimary)
+
                     Spacer()
+
                     Image(systemName: "chevron.up.chevron.down")
                         .font(.footnote.weight(.semibold))
                         .foregroundStyle(AppTheme.textSecondary)
@@ -196,74 +213,109 @@ struct AdvancedSettingsView: View {
         .accessibilityHint("Sets the longest reply the model is allowed to produce.")
     }
 
-    // MARK: - Advanced
+    private var resetDefaultsRow: some View {
+        Button {
+            llmService.resetAdvancedSettings()
+            AppHaptics.selection()
+            diagnostics.record("Advanced settings reset", category: "settings")
+        } label: {
+            utilityActionRow(
+                icon: "arrow.counterclockwise",
+                title: "Reset to defaults",
+                detail: "Restore the balanced default tuning.",
+                titleColor: AppTheme.accent,
+                chevronColor: AppTheme.accent
+            )
+        }
+        .buttonStyle(.plain)
+    }
 
     private var advancedSection: some View {
         UtilitySection("Advanced") {
-            diagnosticsContent
+            if onShowSetupPage != nil {
+                Button {
+                    dismiss()
+                    onShowSetupPage?()
+                } label: {
+                    utilityActionRow(
+                        icon: "sparkles.rectangle.stack",
+                        title: "Setup page",
+                        detail: "Go back anytime to view download progress and local setup."
+                    )
+                }
+                .buttonStyle(.plain)
 
-#if DEBUG
-            if onRunDebugScenario != nil {
                 UtilitySectionSeparator()
-                debugContent
             }
-#endif
-        }
-        .alert("Diagnostics copied", isPresented: $diagnosticsCopied) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text("The recent diagnostics log is on the pasteboard.")
+
+            Button {
+                toggleDiagnostics()
+            } label: {
+                disclosureRow(
+                    icon: "waveform.path.ecg",
+                    title: "Diagnostics",
+                    detail: "Inspect recent events, copy the local log, or run debug checks.",
+                    isExpanded: showDiagnostics
+                )
+            }
+            .buttonStyle(.plain)
+
+            if showDiagnostics {
+                UtilitySectionSeparator(leadingInset: AppTheme.Layout.rowHorizontalPadding)
+                diagnosticsContent
+            }
         }
     }
 
     private var diagnosticsContent: some View {
         VStack(spacing: 0) {
-            subsectionHeader(
-                title: "Diagnostics",
-                detail: "Inspect recent events, copy the local log, or clear it."
+            infoRow(
+                icon: "list.bullet.rectangle",
+                title: "Recent events",
+                detail: "\(diagnostics.recentEvents.count)"
             )
+
             UtilitySectionSeparator()
-            infoRow(icon: "waveform.path.ecg", title: "Recent events", detail: "\(diagnostics.recentEvents.count)")
-            UtilitySectionSeparator()
+
             Button {
                 diagnostics.copyToPasteboard()
                 diagnosticsCopied = true
             } label: {
-                utilityActionRow(icon: "doc.on.doc", title: "Copy diagnostics log")
+                utilityActionRow(
+                    icon: "doc.on.doc",
+                    title: "Copy diagnostics log",
+                    detail: "Put the recent local event log on the pasteboard."
+                )
             }
             .buttonStyle(.plain)
+
             UtilitySectionSeparator()
-            destructiveRow(icon: "trash", title: "Clear diagnostics log") {
+
+            Button {
                 diagnostics.clear()
+            } label: {
+                utilityActionRow(
+                    icon: "trash",
+                    title: "Clear diagnostics log",
+                    detail: "Remove recent local event history from the app.",
+                    titleColor: AppTheme.destructive,
+                    chevronColor: AppTheme.destructive
+                )
             }
+            .buttonStyle(.plain)
 
             if !diagnostics.recentEvents.isEmpty {
                 UtilitySectionSeparator()
+
                 Button {
-                    if reduceMotion {
-                        showEventLog.toggle()
-                    } else {
-                        withAnimation(.easeInOut(duration: 0.25)) {
-                            showEventLog.toggle()
-                        }
-                    }
+                    toggleEventLog()
                 } label: {
-                    HStack(spacing: 14) {
-                        Image(systemName: "list.bullet.rectangle")
-                            .frame(width: AppTheme.Layout.rowIconSize)
-                            .foregroundStyle(AppTheme.textPrimary)
-                        Text("Event log")
-                            .font(AppTheme.Typography.utilityRowTitle)
-                            .foregroundStyle(AppTheme.textPrimary)
-                        Spacer()
-                        Text("\(diagnostics.recentEvents.suffix(8).count)")
-                            .font(AppTheme.Typography.utilityRowDetail)
-                            .foregroundStyle(AppTheme.textSecondary)
-                        Image(systemName: showEventLog ? "chevron.up" : "chevron.down")
-                            .font(.footnote.weight(.semibold))
-                            .foregroundStyle(AppTheme.textSecondary)
-                    }
-                    .utilityRowPadding()
+                    disclosureRow(
+                        icon: "clock.arrow.trianglehead.counterclockwise.rotate.90",
+                        title: "Event log",
+                        detail: "Review the most recent local diagnostics events.",
+                        isExpanded: showEventLog
+                    )
                 }
                 .buttonStyle(.plain)
 
@@ -273,6 +325,50 @@ struct AdvancedSettingsView: View {
                         diagnosticEventRow(event)
                     }
                 }
+            }
+
+#if DEBUG
+            if let onRunDebugScenario {
+                UtilitySectionSeparator()
+
+                Menu {
+                    ForEach(DebugInferenceScenario.allCases) { scenario in
+                        Button {
+                            dismiss()
+                            onRunDebugScenario(scenario)
+                        } label: {
+                            Label(scenario.title, systemImage: scenario.icon)
+                        }
+                    }
+                } label: {
+                    utilityActionRow(
+                        icon: "wrench.and.screwdriver",
+                        title: "Debug scenarios",
+                        detail: "Run canned prompts to check formatting and rendering."
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+#endif
+        }
+    }
+
+    private func toggleDiagnostics() {
+        if reduceMotion {
+            showDiagnostics.toggle()
+        } else {
+            withAnimation(.easeInOut(duration: 0.25)) {
+                showDiagnostics.toggle()
+            }
+        }
+    }
+
+    private func toggleEventLog() {
+        if reduceMotion {
+            showEventLog.toggle()
+        } else {
+            withAnimation(.easeInOut(duration: 0.25)) {
+                showEventLog.toggle()
             }
         }
     }
@@ -309,85 +405,6 @@ struct AdvancedSettingsView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, AppTheme.Layout.rowHorizontalPadding)
         .padding(.vertical, 14)
-    }
-
-    private func subsectionHeader(title: String, detail: String) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title)
-                .font(AppTheme.Typography.utilityRowTitle.weight(.semibold))
-                .foregroundStyle(AppTheme.textPrimary)
-
-            Text(detail)
-                .font(AppTheme.Typography.utilityCaption)
-                .foregroundStyle(AppTheme.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, AppTheme.Layout.rowHorizontalPadding)
-        .padding(.top, 14)
-        .padding(.bottom, 12)
-    }
-
-    #if DEBUG
-    private var debugContent: some View {
-        VStack(spacing: 0) {
-            subsectionHeader(
-                title: "Debug scenarios",
-                detail: "Use canned prompts to probe formatting quality on a physical iPhone."
-            )
-
-            if let onRunDebugScenario {
-                UtilitySectionSeparator()
-                ForEach(DebugInferenceScenario.allCases) { scenario in
-                    actionDetailRow(
-                        icon: scenario.icon,
-                        title: scenario.title,
-                        detail: scenario.detail
-                    ) {
-                        dismiss()
-                        onRunDebugScenario(scenario)
-                    }
-
-                    if scenario != DebugInferenceScenario.allCases.last {
-                        UtilitySectionSeparator()
-                    }
-                }
-            }
-        }
-    }
-    #endif
-
-    private func actionDetailRow(
-        icon: String,
-        title: String,
-        detail: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            HStack(spacing: 14) {
-                Image(systemName: icon)
-                    .frame(width: AppTheme.Layout.rowIconSize)
-                    .foregroundStyle(AppTheme.textPrimary)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(title)
-                        .font(AppTheme.Typography.utilityRowTitle)
-                        .foregroundStyle(AppTheme.textPrimary)
-                    Text(detail)
-                        .font(AppTheme.Typography.utilityCaption)
-                        .foregroundStyle(AppTheme.textSecondary)
-                        .multilineTextAlignment(.leading)
-                }
-
-                Spacer()
-
-                Image(systemName: "chevron.right")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(AppTheme.textSecondary)
-            }
-            .utilityRowPadding()
-        }
-        .buttonStyle(.plain)
     }
 
     private func infoRow(icon: String, title: String, detail: String) -> some View {
@@ -430,55 +447,121 @@ struct AdvancedSettingsView: View {
         .accessibilityElement(children: .combine)
     }
 
-    private func destructiveRow(icon: String, title: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+    private func utilityActionRow(
+        icon: String,
+        title: String,
+        detail: String,
+        titleColor: Color = AppTheme.textPrimary,
+        chevronColor: Color = AppTheme.textSecondary
+    ) -> some View {
+        ViewThatFits(in: .vertical) {
             HStack(spacing: 14) {
                 Image(systemName: icon)
                     .frame(width: AppTheme.Layout.rowIconSize)
-                Text(title)
-                    .font(AppTheme.Typography.utilityRowTitle)
-                Spacer()
-            }
-            .foregroundStyle(AppTheme.destructive)
-            .utilityRowPadding()
-        }
-        .buttonStyle(.plain)
-    }
+                    .foregroundStyle(titleColor)
 
-    private func utilityActionRow(icon: String, title: String) -> some View {
-        HStack(spacing: 14) {
-            Image(systemName: icon)
-                .frame(width: AppTheme.Layout.rowIconSize)
-                .foregroundStyle(AppTheme.textPrimary)
-            Text(title)
-                .font(AppTheme.Typography.utilityRowTitle)
-                .foregroundStyle(AppTheme.textPrimary)
-            Spacer()
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(AppTheme.Typography.utilityRowTitle)
+                        .foregroundStyle(titleColor)
+
+                    Text(detail)
+                        .font(AppTheme.Typography.utilityCaption)
+                        .foregroundStyle(AppTheme.textSecondary)
+                        .multilineTextAlignment(.leading)
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(chevronColor)
+            }
+
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 14) {
+                    Image(systemName: icon)
+                        .frame(width: AppTheme.Layout.rowIconSize)
+                        .foregroundStyle(titleColor)
+
+                    Text(title)
+                        .font(AppTheme.Typography.utilityRowTitle)
+                        .foregroundStyle(titleColor)
+                }
+
+                Text(detail)
+                    .font(AppTheme.Typography.utilityCaption)
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .padding(.leading, AppTheme.Layout.rowIconSize + 14)
+
+                HStack {
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(chevronColor)
+                }
+            }
         }
         .utilityRowPadding()
+        .accessibilityElement(children: .combine)
     }
 
-    // MARK: - Reset
+    private func disclosureRow(
+        icon: String,
+        title: String,
+        detail: String,
+        isExpanded: Bool
+    ) -> some View {
+        ViewThatFits(in: .vertical) {
+            HStack(spacing: 14) {
+                Image(systemName: icon)
+                    .frame(width: AppTheme.Layout.rowIconSize)
+                    .foregroundStyle(AppTheme.textPrimary)
 
-    private var resetSection: some View {
-        UtilitySection("Reset") {
-            Button {
-                llmService.resetAdvancedSettings()
-                AppHaptics.selection()
-                diagnostics.record("Advanced settings reset", category: "settings")
-            } label: {
-                HStack(spacing: 14) {
-                    Image(systemName: "arrow.counterclockwise")
-                        .frame(width: AppTheme.Layout.rowIconSize)
-                    Text("Reset to Defaults")
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
                         .font(AppTheme.Typography.utilityRowTitle)
-                    Spacer()
+                        .foregroundStyle(AppTheme.textPrimary)
+
+                    Text(detail)
+                        .font(AppTheme.Typography.utilityCaption)
+                        .foregroundStyle(AppTheme.textSecondary)
+                        .multilineTextAlignment(.leading)
                 }
-                .foregroundStyle(AppTheme.accent)
-                .utilityRowPadding()
+
+                Spacer()
+
+                Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(AppTheme.textSecondary)
             }
-            .buttonStyle(.plain)
+
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 14) {
+                    Image(systemName: icon)
+                        .frame(width: AppTheme.Layout.rowIconSize)
+                        .foregroundStyle(AppTheme.textPrimary)
+
+                    Text(title)
+                        .font(AppTheme.Typography.utilityRowTitle)
+                        .foregroundStyle(AppTheme.textPrimary)
+                }
+
+                Text(detail)
+                    .font(AppTheme.Typography.utilityCaption)
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .padding(.leading, AppTheme.Layout.rowIconSize + 14)
+
+                HStack {
+                    Spacer()
+                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(AppTheme.textSecondary)
+                }
+            }
         }
+        .utilityRowPadding()
+        .accessibilityElement(children: .combine)
     }
 
     private func tokenLabel(_ count: Int) -> String {
