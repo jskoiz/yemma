@@ -8,6 +8,251 @@ public struct LocalModelResources: Sendable {
     public let modelDirectoryPath: String
 }
 
+enum SetupRecoveryAction {
+    case resumeDownload
+    case retryDownload
+    case retryModelLoad
+
+    var title: String {
+        switch self {
+        case .resumeDownload:
+            return "Resume download"
+        case .retryDownload:
+            return "Retry download"
+        case .retryModelLoad:
+            return "Retry model load"
+        }
+    }
+}
+
+@MainActor
+struct AppSetupSnapshot {
+    enum OnboardingPhase: String {
+        case simulator
+        case intro
+        case downloading
+        case paused
+        case preparing
+        case ready
+        case failed
+
+        var systemImage: String {
+            switch self {
+            case .simulator:
+                return "desktopcomputer"
+            case .intro:
+                return "arrow.down.circle"
+            case .downloading:
+                return "arrow.down.circle.fill"
+            case .paused:
+                return "pause.circle.fill"
+            case .preparing:
+                return "bolt.circle.fill"
+            case .ready:
+                return "checkmark.circle.fill"
+            case .failed:
+                return "exclamationmark.triangle.fill"
+            }
+        }
+    }
+
+    let supportsLocalModelRuntime: Bool
+    let isDownloaded: Bool
+    let isDownloading: Bool
+    let canResumeDownload: Bool
+    let downloadError: String?
+    let downloadProgress: Double
+    let estimatedDownloadBytes: Int64
+    let downloadedBytes: Int64
+    let remainingDownloadBytes: Int64
+    let estimatedSecondsRemaining: Double?
+    let currentDownloadSpeedBytesPerSecond: Double?
+    let isTextModelReady: Bool
+    let isModelLoading: Bool
+    let modelLoadStage: ModelLoadStage
+    let modelLoadError: String?
+
+    init(
+        supportsLocalModelRuntime: Bool,
+        modelDownloader: ModelDownloader,
+        llmService: LLMService
+    ) {
+        self.supportsLocalModelRuntime = supportsLocalModelRuntime
+        isDownloaded = modelDownloader.isDownloaded
+        isDownloading = modelDownloader.isDownloading
+        canResumeDownload = modelDownloader.canResumeDownload
+        downloadError = modelDownloader.error
+        downloadProgress = modelDownloader.downloadProgress
+        estimatedDownloadBytes = modelDownloader.estimatedDownloadBytes
+        downloadedBytes = modelDownloader.downloadedBytes
+        remainingDownloadBytes = modelDownloader.remainingDownloadBytes
+        estimatedSecondsRemaining = modelDownloader.estimatedSecondsRemaining
+        currentDownloadSpeedBytesPerSecond = modelDownloader.currentDownloadSpeedBytesPerSecond
+        isTextModelReady = llmService.isTextModelReady
+        isModelLoading = llmService.isModelLoading
+        modelLoadStage = llmService.modelLoadStage
+        modelLoadError = llmService.lastError
+    }
+
+    var canOpenChatShell: Bool {
+        supportsLocalModelRuntime && (isDownloaded || isModelLoading || isTextModelReady)
+    }
+
+    var hasModelPreparationError: Bool {
+        supportsLocalModelRuntime
+            && isDownloaded
+            && !isTextModelReady
+            && !isModelLoading
+            && modelLoadError != nil
+    }
+
+    var visibleErrorMessage: String? {
+        if hasModelPreparationError {
+            return modelLoadError
+        }
+
+        return downloadError
+    }
+
+    func onboardingPhase(isStartingDownload: Bool = false) -> OnboardingPhase {
+        if !supportsLocalModelRuntime {
+            return .simulator
+        }
+
+        if hasModelPreparationError || downloadError != nil {
+            return .failed
+        }
+
+        if isDownloaded {
+            return isTextModelReady ? .ready : .preparing
+        }
+
+        if canResumeDownload {
+            return .paused
+        }
+
+        if isDownloading || isStartingDownload {
+            return .downloading
+        }
+
+        return .intro
+    }
+
+    var chatStatusText: String {
+        if !supportsLocalModelRuntime {
+            return "Simulator mode with mock replies."
+        }
+
+        if isDownloading {
+            return "Downloading your on-device model."
+        }
+
+        if canResumeDownload {
+            return "Setup paused before Yemma finished downloading."
+        }
+
+        if downloadError != nil {
+            return "Yemma needs help finishing setup."
+        }
+
+        if isModelLoading {
+            return modelLoadStage.statusText
+        }
+
+        if hasModelPreparationError {
+            return "Yemma could not finish getting ready."
+        }
+
+        return "Getting Yemma ready."
+    }
+
+    var chatStatusDetailText: String? {
+        if !supportsLocalModelRuntime {
+            return nil
+        }
+
+        if isDownloading {
+            let percent = Int(downloadProgress * 100)
+            if let estimatedSecondsRemaining {
+                return "\(percent)% downloaded. \(Self.formatETA(estimatedSecondsRemaining)) remaining."
+            }
+            return "\(percent)% downloaded. Yemma can keep downloading in the background."
+        }
+
+        if let downloadError {
+            return downloadError
+        }
+
+        if canResumeDownload {
+            return "Resume setup to finish preparing Yemma on this device."
+        }
+
+        if hasModelPreparationError {
+            return modelLoadError
+        }
+
+        if isModelLoading {
+            return "Almost there. Yemma is waking up now."
+        }
+
+        return nil
+    }
+
+    var chatStatusProgress: Double? {
+        guard supportsLocalModelRuntime, isDownloading else { return nil }
+        return downloadProgress
+    }
+
+    var isShowingChatFailure: Bool {
+        supportsLocalModelRuntime && (downloadError != nil || hasModelPreparationError)
+    }
+
+    var chatRecoveryAction: SetupRecoveryAction? {
+        guard supportsLocalModelRuntime, !isDownloading else {
+            return nil
+        }
+
+        if canResumeDownload {
+            return .resumeDownload
+        }
+
+        if downloadError != nil {
+            return .retryDownload
+        }
+
+        if hasModelPreparationError {
+            return .retryModelLoad
+        }
+
+        return nil
+    }
+
+    var shouldShowStartupOverlay: Bool {
+        supportsLocalModelRuntime
+            && isDownloaded
+            && !isTextModelReady
+            && modelLoadError == nil
+    }
+
+    private static func formatETA(_ seconds: Double) -> String {
+        let s = max(Int(seconds), 0)
+        if s < 60 {
+            return "less than a minute"
+        }
+
+        if s < 3600 {
+            return "\(s / 60) min"
+        }
+
+        let hours = s / 3600
+        let minutes = (s % 3600) / 60
+        if minutes == 0 {
+            return "\(hours)h"
+        }
+        return "\(hours)h \(minutes)m"
+    }
+}
+
 @MainActor
 @Observable
 public final class ModelDownloader {
