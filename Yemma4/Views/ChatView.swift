@@ -96,6 +96,14 @@ public struct ChatView: View {
         self.onRetryModelLoad = onRetryModelLoad
     }
 
+    private var appSetup: AppSetupSnapshot {
+        AppSetupSnapshot(
+            supportsLocalModelRuntime: supportsLocalModelRuntime,
+            modelDownloader: modelDownloader,
+            llmService: llmService
+        )
+    }
+
     public var body: some View {
         NavigationStack {
             GeometryReader { geometry in
@@ -515,9 +523,9 @@ public struct ChatView: View {
 
     private var emptyState: some View {
         EmptyStateView(
-            isModelLoaded: llmService.isTextModelReady,
-            isModelLoading: llmService.isModelLoading,
-            supportsLocalModelRuntime: supportsLocalModelRuntime,
+            isModelLoaded: appSetup.isTextModelReady,
+            isModelLoading: appSetup.isModelLoading,
+            supportsLocalModelRuntime: appSetup.supportsLocalModelRuntime,
             modelLoadStageText: modelStatusText,
             statusDetailText: modelStatusDetailText,
             statusProgress: modelStatusProgress,
@@ -760,130 +768,50 @@ public struct ChatView: View {
         guard !isImportingAttachments else { return false }
         let hasDraft = !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         guard hasDraft || !pendingAttachments.isEmpty else { return false }
-        if !supportsLocalModelRuntime {
+        if !appSetup.supportsLocalModelRuntime {
             return true
         }
-        if llmService.isModelLoading {
+        if appSetup.isModelLoading {
             return false
         }
-        return llmService.isTextModelReady || modelDownloader.isDownloaded
+        return appSetup.isTextModelReady || appSetup.isDownloaded
     }
 
     private var modelStatusText: String {
-        if !supportsLocalModelRuntime {
-            return "Simulator mode with mock replies."
-        }
-
-        if modelDownloader.isDownloading {
-            return "Downloading your on-device model."
-        }
-
-        if modelDownloader.canResumeDownload {
-            return "Setup paused before Yemma finished downloading."
-        }
-
-        if modelDownloader.error != nil {
-            return "Yemma needs help finishing setup."
-        }
-
-        if llmService.isModelLoading {
-            return llmService.modelLoadStage.statusText
-        }
-
-        if modelDownloader.isDownloaded, llmService.lastError != nil {
-            return "Yemma could not finish getting ready."
-        }
-
-        return "Getting Yemma ready."
+        appSetup.chatStatusText
     }
 
     private var modelStatusDetailText: String? {
-        if !supportsLocalModelRuntime {
-            return nil
-        }
-
-        if modelDownloader.isDownloading {
-            let percent = Int(modelDownloader.downloadProgress * 100)
-            if let eta = modelDownloader.estimatedSecondsRemaining {
-                return "\(percent)% downloaded. \(formatETA(eta)) remaining."
-            }
-            return "\(percent)% downloaded. Yemma can keep downloading in the background."
-        }
-
-        if let error = modelDownloader.error {
-            return error
-        }
-
-        if modelDownloader.canResumeDownload {
-            return "Resume setup to finish preparing Yemma on this device."
-        }
-
-        if modelDownloader.isDownloaded, let error = llmService.lastError, !llmService.isModelLoading {
-            return error
-        }
-
-        if llmService.isModelLoading {
-            return "Almost there. Yemma is waking up now."
-        }
-
-        return nil
+        appSetup.chatStatusDetailText
     }
 
     private var modelStatusProgress: Double? {
-        guard supportsLocalModelRuntime, modelDownloader.isDownloading else { return nil }
-        return modelDownloader.downloadProgress
+        appSetup.chatStatusProgress
     }
 
     private var isShowingModelFailure: Bool {
-        supportsLocalModelRuntime && (
-            modelDownloader.error != nil
-                || (modelDownloader.isDownloaded && llmService.lastError != nil && !llmService.isModelLoading)
-        )
+        appSetup.isShowingChatFailure
     }
 
     private var primarySetupActionTitle: String? {
-        guard supportsLocalModelRuntime else { return nil }
-
-        if modelDownloader.isDownloading {
-            return nil
-        }
-
-        if modelDownloader.canResumeDownload {
-            return "Resume download"
-        }
-
-        if modelDownloader.error != nil {
-            return "Retry download"
-        }
-
-        if modelDownloader.isDownloaded, llmService.lastError != nil, !llmService.isModelLoading {
-            return "Retry model load"
-        }
-
-        return nil
+        appSetup.chatRecoveryAction?.title
     }
 
     private var primarySetupAction: (() -> Void)? {
-        guard supportsLocalModelRuntime else { return nil }
-
-        if modelDownloader.canResumeDownload || modelDownloader.error != nil {
+        switch appSetup.chatRecoveryAction {
+        case .resumeDownload, .retryDownload:
             return {
                 Task { await modelDownloader.downloadModel() }
             }
-        }
-
-        if modelDownloader.isDownloaded, llmService.lastError != nil, !llmService.isModelLoading {
+        case .retryModelLoad:
             return onRetryModelLoad
+        case nil:
+            return nil
         }
-
-        return nil
     }
 
     private var shouldShowStartupOverlay: Bool {
-        supportsLocalModelRuntime
-            && modelDownloader.isDownloaded
-            && !llmService.isTextModelReady
-            && llmService.lastError == nil
+        appSetup.shouldShowStartupOverlay
     }
 
     private var shouldBlockStartupInteraction: Bool {
@@ -941,25 +869,6 @@ public struct ChatView: View {
         case .failed:
             return "Yemma could not finish getting ready."
         }
-    }
-
-    private func formatETA(_ seconds: Double) -> String {
-        let s = max(Int(seconds), 0)
-        if s < 60 {
-            return "less than a minute"
-        }
-
-        if s < 3600 {
-            let minutes = s / 60
-            return "\(minutes) min"
-        }
-
-        let hours = s / 3600
-        let minutes = (s % 3600) / 60
-        if minutes == 0 {
-            return "\(hours)h"
-        }
-        return "\(hours)h \(minutes)m"
     }
 
     private func selectStarter(_ starter: ChatStarter) {
@@ -1643,14 +1552,14 @@ public struct ChatView: View {
     private func submitDraft() {
         let trimmedText = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedText.isEmpty || !pendingAttachments.isEmpty else { return }
-        guard llmService.isTextModelReady || !supportsLocalModelRuntime else {
-            if llmService.isModelLoading {
+        guard appSetup.isTextModelReady || !appSetup.supportsLocalModelRuntime else {
+            if appSetup.isModelLoading {
                 AppDiagnostics.shared.record("Send deferred because model is still loading", category: "ui")
                 showToast("Preparing your on-device model")
                 return
             }
 
-            if modelDownloader.isDownloaded {
+            if appSetup.isDownloaded {
                 AppDiagnostics.shared.record("Send triggered explicit model load", category: "ui")
                 onRetryModelLoad?()
                 showToast("Preparing your on-device model")
@@ -3171,34 +3080,6 @@ private struct ChatSidebarView: View {
         }
 
         return ByteCountFormatter.string(fromByteCount: totalBytes, countStyle: .file)
-    }
-
-    private var setupStatusDetail: String {
-        if modelDownloader.isDownloading {
-            return "\(Int(modelDownloader.downloadProgress * 100))% downloaded locally."
-        }
-
-        if modelDownloader.canResumeDownload {
-            return "Resume the model download and setup."
-        }
-
-        if modelDownloader.error != nil {
-            return "The local model setup needs attention."
-        }
-
-        if llmService.isModelLoading {
-            return "Loading the local model into memory."
-        }
-
-        if llmService.isTextModelReady {
-            return "Ready to chat fully on-device."
-        }
-
-        if modelDownloader.isDownloaded {
-            return "Downloaded locally. Load it when you are ready to chat."
-        }
-
-        return "Check download progress and local setup."
     }
 
     private var appVersionText: String {

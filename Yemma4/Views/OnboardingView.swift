@@ -31,32 +31,6 @@ public struct OnboardingView: View {
     @State private var didRecordInteractiveReady = false
     @State private var didRecordFirstTouch = false
 
-    private enum SetupState: String {
-        case simulator
-        case intro
-        case downloading
-        case preparing
-        case ready
-        case failed
-
-        var systemImage: String {
-            switch self {
-            case .simulator:
-                return "desktopcomputer"
-            case .intro:
-                return "arrow.down.circle"
-            case .downloading:
-                return "arrow.down.circle.fill"
-            case .preparing:
-                return "bolt.circle.fill"
-            case .ready:
-                return "checkmark.circle.fill"
-            case .failed:
-                return "exclamationmark.triangle.fill"
-            }
-        }
-    }
-
     private let supportsLocalModelRuntime: Bool
     private let onContinue: (() -> Void)?
     private let onRetryModelLoad: (() -> Void)?
@@ -69,6 +43,14 @@ public struct OnboardingView: View {
         self.supportsLocalModelRuntime = supportsLocalModelRuntime
         self.onContinue = onContinue
         self.onRetryModelLoad = onRetryModelLoad
+    }
+
+    private var appSetup: AppSetupSnapshot {
+        AppSetupSnapshot(
+            supportsLocalModelRuntime: supportsLocalModelRuntime,
+            modelDownloader: modelDownloader,
+            llmService: llmService
+        )
     }
 
     public var body: some View {
@@ -157,7 +139,7 @@ public struct OnboardingView: View {
                 SetupStatusRow(
                     systemImage: "iphone",
                     title: "Saved locally on this iPhone",
-                    trailing: Self.formatBytes(modelDownloader.estimatedDownloadBytes)
+                    trailing: Self.formatBytes(appSetup.estimatedDownloadBytes)
                 )
             }
         case .downloading:
@@ -174,7 +156,17 @@ public struct OnboardingView: View {
                         .foregroundStyle(AppTheme.textTertiary)
                 }
 
-                AnimatedProgressBar(progress: modelDownloader.downloadProgress)
+                AnimatedProgressBar(progress: appSetup.downloadProgress)
+            }
+        case .paused:
+            VStack(alignment: .leading, spacing: 12) {
+                AnimatedProgressBar(progress: appSetup.downloadProgress)
+
+                SetupStatusRow(
+                    systemImage: "pause.circle.fill",
+                    title: "Resume from saved progress",
+                    trailing: progressPercentLabel
+                )
             }
         case .preparing:
             HStack(alignment: .top, spacing: 12) {
@@ -182,7 +174,7 @@ public struct OnboardingView: View {
                     .tint(AppTheme.accent)
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(llmService.modelLoadStage.statusText)
+                    Text(appSetup.modelLoadStage.statusText)
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(AppTheme.textPrimary)
 
@@ -201,37 +193,21 @@ public struct OnboardingView: View {
             )
         case .failed:
             VStack(alignment: .leading, spacing: 12) {
-                AnimatedProgressBar(progress: modelDownloader.downloadProgress)
+                AnimatedProgressBar(progress: appSetup.downloadProgress)
 
                 SetupStatusRow(
                     systemImage: hasModelPreparationError ? "bolt.slash.fill" : "arrow.clockwise",
                     title: hasModelPreparationError
                         ? "Retry local preparation"
-                        : (modelDownloader.canResumeDownload ? "Resume from saved progress" : "Start setup again"),
+                        : (appSetup.canResumeDownload ? "Resume from saved progress" : "Start setup again"),
                     trailing: hasModelPreparationError ? "100%" : progressPercentLabel
                 )
             }
         }
     }
 
-    private var setupState: SetupState {
-        if !supportsLocalModelRuntime {
-            return .simulator
-        }
-
-        if hasModelPreparationError || modelDownloader.error != nil {
-            return .failed
-        }
-
-        if modelDownloader.isDownloaded {
-            return llmService.isTextModelReady ? .ready : .preparing
-        }
-
-        if modelDownloader.isDownloading || isStartingDownload || modelDownloader.canResumeDownload {
-            return .downloading
-        }
-
-        return .intro
+    private var setupState: AppSetupSnapshot.OnboardingPhase {
+        appSetup.onboardingPhase(isStartingDownload: isStartingDownload)
     }
 
     private var headerSubtitle: String {
@@ -271,6 +247,15 @@ public struct OnboardingView: View {
                 actionTitle: "Resume setup",
                 actionSubtitle: "Continue from saved progress"
             )
+        case .paused:
+            return SetupCopy(
+                badgeText: "Setup paused",
+                title: "Setup paused",
+                message: "Yemma kept your saved progress. Resume instead of starting over.",
+                note: "Valid files stay in place so setup can continue.",
+                actionTitle: "Resume setup",
+                actionSubtitle: "Continue from saved progress"
+            )
         case .preparing:
             return SetupCopy(
                 badgeText: "Almost ready",
@@ -290,35 +275,24 @@ public struct OnboardingView: View {
                 actionSubtitle: "Everything is ready on this iPhone"
             )
         case .failed:
-            let message: String
-            let note: String?
-            let actionTitle: String
-            let actionSubtitle: String
-
             if hasModelPreparationError {
-                message = "The download finished, but local preparation paused. Retry to finish setup."
-                note = "Your downloaded model is still on this iPhone."
-                actionTitle = "Retry setup"
-                actionSubtitle = "Finish local preparation"
-            } else if modelDownloader.canResumeDownload {
-                message = "Yemma kept your saved progress. Resume instead of starting over."
-                note = "Valid files stay in place so setup can continue."
-                actionTitle = "Resume setup"
-                actionSubtitle = "Continue from saved progress"
-            } else {
-                message = "The download stopped before Yemma was ready. Start setup again to continue."
-                note = nil
-                actionTitle = "Try setup again"
-                actionSubtitle = "Restart the one-time setup"
+                return SetupCopy(
+                    badgeText: "Setup paused",
+                    title: "Setup paused",
+                    message: "The download finished, but local preparation paused. Retry to finish setup.",
+                    note: "Your downloaded model is still on this iPhone.",
+                    actionTitle: "Retry setup",
+                    actionSubtitle: "Finish local preparation"
+                )
             }
 
             return SetupCopy(
                 badgeText: "Setup paused",
                 title: "Setup paused",
-                message: message,
-                note: note,
-                actionTitle: actionTitle,
-                actionSubtitle: actionSubtitle
+                message: "The download stopped before Yemma was ready. Start setup again to continue.",
+                note: nil,
+                actionTitle: "Try setup again",
+                actionSubtitle: "Restart the one-time setup"
             )
         }
     }
@@ -342,48 +316,55 @@ public struct OnboardingView: View {
             ]
         case .intro:
             return [
-                SetupStat(title: "Download size", value: Self.formatBytes(modelDownloader.estimatedDownloadBytes)),
+                SetupStat(title: "Download size", value: Self.formatBytes(appSetup.estimatedDownloadBytes)),
                 SetupStat(title: "Storage", value: "This iPhone"),
                 SetupStat(title: "Privacy", value: "No cloud"),
                 SetupStat(title: "After setup", value: "Offline chat")
             ]
         case .downloading:
             return [
-                SetupStat(title: "Downloaded", value: Self.formatBytes(modelDownloader.downloadedBytes)),
-                SetupStat(title: "Remaining", value: Self.formatBytes(modelDownloader.remainingDownloadBytes)),
+                SetupStat(title: "Downloaded", value: Self.formatBytes(appSetup.downloadedBytes)),
+                SetupStat(title: "Remaining", value: Self.formatBytes(appSetup.remainingDownloadBytes)),
                 SetupStat(
                     title: "Time left",
-                    value: modelDownloader.estimatedSecondsRemaining.map(Self.formatETA) ?? "Calculating"
+                    value: appSetup.estimatedSecondsRemaining.map(Self.formatETA) ?? "Calculating"
                 ),
                 SetupStat(
                     title: "Speed",
-                    value: modelDownloader.currentDownloadSpeedBytesPerSecond.map(Self.formatSpeed) ?? "Calculating"
+                    value: appSetup.currentDownloadSpeedBytesPerSecond.map(Self.formatSpeed) ?? "Calculating"
                 )
+            ]
+        case .paused:
+            return [
+                SetupStat(title: "Downloaded", value: Self.formatBytes(appSetup.downloadedBytes)),
+                SetupStat(title: "Remaining", value: Self.formatBytes(appSetup.remainingDownloadBytes)),
+                SetupStat(title: "Saved progress", value: "Yes"),
+                SetupStat(title: "Next step", value: "Resume setup")
             ]
         case .preparing:
             return [
                 SetupStat(title: "Download", value: "Complete"),
-                SetupStat(title: "Current step", value: llmService.modelLoadStage.statusText),
+                SetupStat(title: "Current step", value: appSetup.modelLoadStage.statusText),
                 SetupStat(title: "Internet", value: "Not needed"),
                 SetupStat(title: "Chat shell", value: "Ready now")
             ]
         case .ready:
             return [
                 SetupStat(title: "Status", value: "Ready"),
-                SetupStat(title: "Stored locally", value: Self.formatBytes(modelDownloader.estimatedDownloadBytes)),
+                SetupStat(title: "Stored locally", value: Self.formatBytes(appSetup.estimatedDownloadBytes)),
                 SetupStat(title: "Privacy", value: "On-device"),
                 SetupStat(title: "Offline", value: "Available")
             ]
         case .failed:
             return [
-                SetupStat(title: "Downloaded", value: Self.formatBytes(modelDownloader.downloadedBytes)),
-                SetupStat(title: "Remaining", value: Self.formatBytes(modelDownloader.remainingDownloadBytes)),
-                SetupStat(title: "Saved progress", value: modelDownloader.canResumeDownload ? "Yes" : "No"),
+                SetupStat(title: "Downloaded", value: Self.formatBytes(appSetup.downloadedBytes)),
+                SetupStat(title: "Remaining", value: Self.formatBytes(appSetup.remainingDownloadBytes)),
+                SetupStat(title: "Saved progress", value: appSetup.canResumeDownload ? "Yes" : "No"),
                 SetupStat(
                     title: "Next step",
                     value: hasModelPreparationError
                         ? "Retry setup"
-                        : (modelDownloader.canResumeDownload ? "Resume setup" : "Start again")
+                        : (appSetup.canResumeDownload ? "Resume setup" : "Start again")
                 )
             ]
         }
@@ -410,8 +391,8 @@ public struct OnboardingView: View {
         case .simulator, .preparing, .ready:
             return onContinue != nil
         case .downloading:
-            return !modelDownloader.isDownloading && !isStartingDownload && modelDownloader.canResumeDownload
-        case .intro, .failed:
+            return false
+        case .intro, .paused, .failed:
             return true
         }
     }
@@ -421,30 +402,24 @@ public struct OnboardingView: View {
         case .simulator, .preparing, .ready:
             return onContinue != nil
         case .downloading:
-            return modelDownloader.canResumeDownload && !modelDownloader.isDownloading && !isStartingDownload
+            return false
+        case .paused:
+            return !modelDownloader.isDownloading && !isStartingDownload
         case .intro, .failed:
             return true
         }
     }
 
     private var hasModelPreparationError: Bool {
-        supportsLocalModelRuntime
-            && modelDownloader.isDownloaded
-            && !llmService.isTextModelReady
-            && !llmService.isModelLoading
-            && llmService.lastError != nil
+        appSetup.hasModelPreparationError
     }
 
     private var visibleErrorMessage: String? {
-        if hasModelPreparationError {
-            return llmService.lastError
-        }
-
-        return modelDownloader.error
+        appSetup.visibleErrorMessage
     }
 
     private var progressPercentLabel: String {
-        "\(Int((modelDownloader.downloadProgress * 100).rounded()))%"
+        "\(Int((appSetup.downloadProgress * 100).rounded()))%"
     }
 
     private func handlePrimaryAction() {
@@ -462,7 +437,7 @@ public struct OnboardingView: View {
             onContinue?()
         case .failed where hasModelPreparationError:
             onRetryModelLoad?()
-        case .intro, .downloading, .failed:
+        case .intro, .downloading, .paused, .failed:
             Task { await startDownload() }
         }
     }
@@ -471,7 +446,7 @@ public struct OnboardingView: View {
     private func startDownload() async {
         guard !isStartingDownload else { return }
         guard supportsLocalModelRuntime else { return }
-        guard !hasModelPreparationError else { return }
+        guard !appSetup.hasModelPreparationError else { return }
         guard !modelDownloader.isDownloading else { return }
 
         isStartingDownload = true

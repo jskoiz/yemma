@@ -89,6 +89,14 @@ public struct ContentView: View {
 
     public init() {}
 
+    private var appSetup: AppSetupSnapshot {
+        AppSetupSnapshot(
+            supportsLocalModelRuntime: supportsLocalModelRuntime,
+            modelDownloader: modelDownloader,
+            llmService: llmService
+        )
+    }
+
     public var body: some View {
         currentRootScreen
         .onAppear {
@@ -155,7 +163,7 @@ public struct ContentView: View {
                 onShowOnboarding: {
                     isShowingOnboardingPreview = true
                 },
-                onRetryModelLoad: modelDownloader.isDownloaded ? {
+                onRetryModelLoad: appSetup.isDownloaded ? {
                     Task { await loadModelIfNeeded(force: true) }
                 } : nil
             )
@@ -165,7 +173,7 @@ public struct ContentView: View {
                 onContinue: canContinueFromOnboarding ? {
                     isShowingOnboardingPreview = false
                 } : nil,
-                onRetryModelLoad: modelDownloader.isDownloaded ? {
+                onRetryModelLoad: appSetup.isDownloaded ? {
                     Task { await loadModelIfNeeded(force: true) }
                 } : nil
             )
@@ -174,25 +182,16 @@ public struct ContentView: View {
 
     private var shouldShowChat: Bool {
         guard !forceOnboardingOnSimulator else { return false }
-        return !isShowingOnboardingPreview && (canOpenChatShell || !supportsLocalModelRuntime)
+        return !isShowingOnboardingPreview && (appSetup.canOpenChatShell || !supportsLocalModelRuntime)
     }
 
     private var canContinueFromOnboarding: Bool {
         guard !forceOnboardingOnSimulator else { return false }
-        return canOpenChatShell || !supportsLocalModelRuntime
+        return appSetup.canOpenChatShell || !supportsLocalModelRuntime
     }
 
     private var supportsLocalSetupExperience: Bool {
         supportsLocalModelRuntime || forceOnboardingOnSimulator
-    }
-
-    private var canOpenChatShell: Bool {
-        supportsLocalModelRuntime
-            && (
-                modelDownloader.isDownloaded
-                    || llmService.isModelLoading
-                    || llmService.isTextModelReady
-            )
     }
 
     @MainActor

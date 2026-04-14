@@ -510,6 +510,7 @@ final class LLMService: @unchecked Sendable {
 
     @ObservationIgnored private var modelContainer: ModelContainer?
     @ObservationIgnored private var loadedModelPath: String?
+    @ObservationIgnored private var loadingModelPath: String?
     @ObservationIgnored private var generationTask: Task<Void, Never>?
     @ObservationIgnored private let stateLock = NSLock()
     @ObservationIgnored private let logger = Logger(
@@ -564,8 +565,27 @@ final class LLMService: @unchecked Sendable {
     func loadModel(from path: String) async throws {
         let resolvedPath = (path as NSString).expandingTildeInPath
 
-        if withLock({ loadedModelPath == resolvedPath && modelContainer != nil && isModelLoaded }) {
+        let shouldSkipLoad = withLock {
+            if loadedModelPath == resolvedPath && modelContainer != nil {
+                return true
+            }
+
+            if loadingModelPath != nil {
+                return true
+            }
+
+            loadingModelPath = resolvedPath
+            return false
+        }
+        if shouldSkipLoad {
             return
+        }
+        defer {
+            withLock {
+                if loadingModelPath == resolvedPath {
+                    loadingModelPath = nil
+                }
+            }
         }
 
         await stopGeneration()
@@ -593,6 +613,7 @@ final class LLMService: @unchecked Sendable {
             withLock {
                 modelContainer = loaded
                 loadedModelPath = resolvedPath
+                loadingModelPath = nil
             }
 
             await MainActor.run {
