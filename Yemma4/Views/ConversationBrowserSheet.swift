@@ -1,10 +1,50 @@
 import SwiftUI
 
+enum ConversationBrowserScope {
+    case archive(recentLimit: Int)
+
+    var title: String {
+        switch self {
+        case .archive:
+            return "Archive"
+        }
+    }
+
+    var emptyTitle: String {
+        switch self {
+        case .archive:
+            return "No archived chats"
+        }
+    }
+
+    var emptyDetail: String {
+        switch self {
+        case .archive:
+            return "Older chats show up here once your recent list fills up."
+        }
+    }
+
+    var bulkDeleteTitle: String? {
+        switch self {
+        case .archive:
+            return "Delete archived chats"
+        }
+    }
+
+    @MainActor
+    func conversations(in store: ConversationStore) -> [ConversationMetadata] {
+        switch self {
+        case let .archive(recentLimit):
+            return store.archivedConversations(limit: recentLimit)
+        }
+    }
+}
+
 struct ConversationBrowserSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(ConversationStore.self) private var conversationStore
 
-    let title: String
+    let scope: ConversationBrowserScope
     let currentConversationID: UUID?
     let onSelectConversation: (UUID) -> Void
     let onStartFresh: () -> Void
@@ -12,6 +52,7 @@ struct ConversationBrowserSheet: View {
     @State private var renameConversation: ConversationMetadata?
     @State private var renameTitle = ""
     @State private var deleteConversation: ConversationMetadata?
+    @State private var showDeleteArchivedConfirmation = false
 
     var body: some View {
         ZStack {
@@ -21,7 +62,7 @@ struct ConversationBrowserSheet: View {
                 VStack(spacing: AppTheme.Layout.sectionSpacing) {
                     header
 
-                    UtilitySection("Chats") {
+                    UtilitySection(scope.title) {
                         Button {
                             AppDiagnostics.shared.record("New conversation requested", category: "ui")
                             AppHaptics.selection()
@@ -36,45 +77,33 @@ struct ConversationBrowserSheet: View {
                         }
                         .buttonStyle(.plain)
 
-                        if !conversationStore.conversations.isEmpty {
+                        if !displayedConversations.isEmpty {
                             UtilitySectionSeparator(leadingInset: AppTheme.Layout.rowHorizontalPadding)
                         }
 
-                        ForEach(Array(conversationStore.conversations.enumerated()), id: \.element.id) { index, metadata in
+                        if displayedConversations.isEmpty {
+                            emptyStateRow
+                        } else {
+                            ForEach(Array(displayedConversations.enumerated()), id: \.element.id) { index, metadata in
+                                conversationListRow(metadata)
+
+                                if index != displayedConversations.count - 1 || scope.bulkDeleteTitle != nil {
+                                    UtilitySectionSeparator(leadingInset: AppTheme.Layout.rowHorizontalPadding)
+                                }
+                            }
+                        }
+
+                        if let bulkDeleteTitle = scope.bulkDeleteTitle, !displayedConversations.isEmpty {
                             Button {
-                                AppDiagnostics.shared.record(
-                                    "Conversation selected",
-                                    category: "ui",
-                                    metadata: [
-                                        "conversationID": metadata.id.uuidString,
-                                        "messageCount": metadata.messageCount
-                                    ]
-                                )
-                                AppHaptics.selection()
-                                onSelectConversation(metadata.id)
-                                dismiss()
+                                showDeleteArchivedConfirmation = true
                             } label: {
-                                conversationRow(metadata)
+                                destructiveActionRow(
+                                    icon: "archivebox.fill",
+                                    title: bulkDeleteTitle,
+                                    subtitle: "Remove older local chats and keep your recent threads."
+                                )
                             }
                             .buttonStyle(.plain)
-                            .contextMenu {
-                                Button {
-                                    renameConversation = metadata
-                                    renameTitle = metadata.title
-                                } label: {
-                                    Label("Rename", systemImage: "pencil")
-                                }
-
-                                Button(role: .destructive) {
-                                    deleteConversation = metadata
-                                } label: {
-                                    Label("Delete", systemImage: "trash")
-                                }
-                            }
-
-                            if index != conversationStore.conversations.count - 1 {
-                                UtilitySectionSeparator(leadingInset: AppTheme.Layout.rowHorizontalPadding)
-                            }
                         }
                     }
                 }
@@ -132,20 +161,108 @@ struct ConversationBrowserSheet: View {
         } message: {
             Text("This removes the chat from local history on this iPhone.")
         }
+        .confirmationDialog(
+            "Delete archived chats?",
+            isPresented: $showDeleteArchivedConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete Archived Chats", role: .destructive) {
+                guard case let .archive(recentLimit) = scope else { return }
+                let removedCount = conversationStore.deleteArchivedConversations(keepingRecentLimit: recentLimit)
+                AppDiagnostics.shared.record(
+                    "Archived conversations deleted",
+                    category: "ui",
+                    metadata: ["conversations": removedCount]
+                )
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This keeps your recent chats and removes older local threads on this iPhone.")
+        }
+    }
+
+    private var displayedConversations: [ConversationMetadata] {
+        scope.conversations(in: conversationStore)
     }
 
     private var header: some View {
         HStack {
             Spacer()
-            Text(title)
+            Text(scope.title)
                 .font(AppTheme.Typography.utilityTitle)
                 .foregroundStyle(AppTheme.textPrimary)
             Spacer()
             CircleIconButton(systemName: "xmark", action: { dismiss() })
-                .accessibilityLabel("Close saved chats")
+                .accessibilityLabel("Close archive")
         }
         .padding(.horizontal, AppTheme.Layout.screenHeaderHorizontalPadding)
         .padding(.top, 18)
+    }
+
+    private var emptyStateRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(scope.emptyTitle)
+                .font(AppTheme.Typography.utilityRowTitle.weight(.semibold))
+                .foregroundStyle(AppTheme.textPrimary)
+
+            Text(scope.emptyDetail)
+                .font(AppTheme.Typography.utilityRowDetail)
+                .foregroundStyle(AppTheme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .utilityRowPadding()
+    }
+
+    private func conversationListRow(_ metadata: ConversationMetadata) -> some View {
+        HStack(alignment: .top, spacing: 0) {
+            Button {
+                AppDiagnostics.shared.record(
+                    "Conversation selected",
+                    category: "ui",
+                    metadata: [
+                        "conversationID": metadata.id.uuidString,
+                        "messageCount": metadata.messageCount
+                    ]
+                )
+                AppHaptics.selection()
+                onSelectConversation(metadata.id)
+                dismiss()
+            } label: {
+                conversationRow(metadata)
+            }
+            .buttonStyle(.plain)
+
+            conversationActionsMenu(for: metadata)
+                .padding(.trailing, AppTheme.Layout.rowHorizontalPadding)
+                .padding(.top, 10)
+        }
+    }
+
+    private func conversationActionsMenu(for metadata: ConversationMetadata) -> some View {
+        Menu {
+            Button {
+                renameConversation = metadata
+                renameTitle = metadata.title
+            } label: {
+                Label("Rename", systemImage: "pencil")
+            }
+
+            Button(role: .destructive) {
+                deleteConversation = metadata
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(AppTheme.textSecondary)
+                .frame(width: 32, height: 32)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Chat actions")
+        .accessibilityHint("Rename or delete this chat.")
     }
 
     private func conversationRow(_ metadata: ConversationMetadata) -> some View {
@@ -200,6 +317,28 @@ struct ConversationBrowserSheet: View {
                 Text(title)
                     .font(AppTheme.Typography.utilityRowTitle.weight(.semibold))
                     .foregroundStyle(AppTheme.textPrimary)
+
+                Text(subtitle)
+                    .font(AppTheme.Typography.utilityRowDetail)
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+
+            Spacer()
+        }
+        .utilityRowPadding()
+        .contentShape(Rectangle())
+    }
+
+    private func destructiveActionRow(icon: String, title: String, subtitle: String) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: icon)
+                .frame(width: AppTheme.Layout.rowIconSize)
+                .foregroundStyle(AppTheme.destructive)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text(title)
+                    .font(AppTheme.Typography.utilityRowTitle.weight(.semibold))
+                    .foregroundStyle(AppTheme.destructive)
 
                 Text(subtitle)
                     .font(AppTheme.Typography.utilityRowDetail)
@@ -282,9 +421,9 @@ private func previewBrowserStore() -> ConversationStore {
     )
 }
 
-#Preview("Saved Chats") {
+#Preview("Archive") {
     ConversationBrowserSheet(
-        title: "Saved Chats",
+        scope: .archive(recentLimit: 1),
         currentConversationID: browserPreviewCurrentID,
         onSelectConversation: { _ in },
         onStartFresh: {}
@@ -292,9 +431,9 @@ private func previewBrowserStore() -> ConversationStore {
     .environment(previewBrowserStore())
 }
 
-#Preview("Saved Chats Dark Compact") {
+#Preview("Archive Dark Compact") {
     ConversationBrowserSheet(
-        title: "Saved Chats",
+        scope: .archive(recentLimit: 1),
         currentConversationID: browserPreviewCurrentID,
         onSelectConversation: { _ in },
         onStartFresh: {}
