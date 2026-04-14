@@ -35,6 +35,7 @@ public struct OnboardingView: View {
         case simulator
         case intro
         case downloading
+        case paused
         case preparing
         case ready
         case failed
@@ -47,6 +48,8 @@ public struct OnboardingView: View {
                 return "arrow.down.circle"
             case .downloading:
                 return "arrow.down.circle.fill"
+            case .paused:
+                return "pause.circle.fill"
             case .preparing:
                 return "bolt.circle.fill"
             case .ready:
@@ -176,6 +179,16 @@ public struct OnboardingView: View {
 
                 AnimatedProgressBar(progress: modelDownloader.downloadProgress)
             }
+        case .paused:
+            VStack(alignment: .leading, spacing: 12) {
+                AnimatedProgressBar(progress: modelDownloader.downloadProgress)
+
+                SetupStatusRow(
+                    systemImage: "pause.circle.fill",
+                    title: "Resume from saved progress",
+                    trailing: progressPercentLabel
+                )
+            }
         case .preparing:
             HStack(alignment: .top, spacing: 12) {
                 ProgressView()
@@ -227,7 +240,11 @@ public struct OnboardingView: View {
             return llmService.isTextModelReady ? .ready : .preparing
         }
 
-        if modelDownloader.isDownloading || isStartingDownload || modelDownloader.canResumeDownload {
+        if modelDownloader.canResumeDownload {
+            return .paused
+        }
+
+        if modelDownloader.isDownloading || isStartingDownload {
             return .downloading
         }
 
@@ -271,6 +288,15 @@ public struct OnboardingView: View {
                 actionTitle: "Resume setup",
                 actionSubtitle: "Continue from saved progress"
             )
+        case .paused:
+            return SetupCopy(
+                badgeText: "Setup paused",
+                title: "Setup paused",
+                message: "Yemma kept your saved progress. Resume instead of starting over.",
+                note: "Valid files stay in place so setup can continue.",
+                actionTitle: "Resume setup",
+                actionSubtitle: "Continue from saved progress"
+            )
         case .preparing:
             return SetupCopy(
                 badgeText: "Almost ready",
@@ -290,35 +316,24 @@ public struct OnboardingView: View {
                 actionSubtitle: "Everything is ready on this iPhone"
             )
         case .failed:
-            let message: String
-            let note: String?
-            let actionTitle: String
-            let actionSubtitle: String
-
             if hasModelPreparationError {
-                message = "The download finished, but local preparation paused. Retry to finish setup."
-                note = "Your downloaded model is still on this iPhone."
-                actionTitle = "Retry setup"
-                actionSubtitle = "Finish local preparation"
-            } else if modelDownloader.canResumeDownload {
-                message = "Yemma kept your saved progress. Resume instead of starting over."
-                note = "Valid files stay in place so setup can continue."
-                actionTitle = "Resume setup"
-                actionSubtitle = "Continue from saved progress"
-            } else {
-                message = "The download stopped before Yemma was ready. Start setup again to continue."
-                note = nil
-                actionTitle = "Try setup again"
-                actionSubtitle = "Restart the one-time setup"
+                return SetupCopy(
+                    badgeText: "Setup paused",
+                    title: "Setup paused",
+                    message: "The download finished, but local preparation paused. Retry to finish setup.",
+                    note: "Your downloaded model is still on this iPhone.",
+                    actionTitle: "Retry setup",
+                    actionSubtitle: "Finish local preparation"
+                )
             }
 
             return SetupCopy(
                 badgeText: "Setup paused",
                 title: "Setup paused",
-                message: message,
-                note: note,
-                actionTitle: actionTitle,
-                actionSubtitle: actionSubtitle
+                message: "The download stopped before Yemma was ready. Start setup again to continue.",
+                note: nil,
+                actionTitle: "Try setup again",
+                actionSubtitle: "Restart the one-time setup"
             )
         }
     }
@@ -359,6 +374,13 @@ public struct OnboardingView: View {
                     title: "Speed",
                     value: modelDownloader.currentDownloadSpeedBytesPerSecond.map(Self.formatSpeed) ?? "Calculating"
                 )
+            ]
+        case .paused:
+            return [
+                SetupStat(title: "Downloaded", value: Self.formatBytes(modelDownloader.downloadedBytes)),
+                SetupStat(title: "Remaining", value: Self.formatBytes(modelDownloader.remainingDownloadBytes)),
+                SetupStat(title: "Saved progress", value: "Yes"),
+                SetupStat(title: "Next step", value: "Resume setup")
             ]
         case .preparing:
             return [
@@ -410,8 +432,8 @@ public struct OnboardingView: View {
         case .simulator, .preparing, .ready:
             return onContinue != nil
         case .downloading:
-            return !modelDownloader.isDownloading && !isStartingDownload && modelDownloader.canResumeDownload
-        case .intro, .failed:
+            return false
+        case .intro, .paused, .failed:
             return true
         }
     }
@@ -421,7 +443,9 @@ public struct OnboardingView: View {
         case .simulator, .preparing, .ready:
             return onContinue != nil
         case .downloading:
-            return modelDownloader.canResumeDownload && !modelDownloader.isDownloading && !isStartingDownload
+            return false
+        case .paused:
+            return !modelDownloader.isDownloading && !isStartingDownload
         case .intro, .failed:
             return true
         }
@@ -462,7 +486,7 @@ public struct OnboardingView: View {
             onContinue?()
         case .failed where hasModelPreparationError:
             onRetryModelLoad?()
-        case .intro, .downloading, .failed:
+        case .intro, .downloading, .paused, .failed:
             Task { await startDownload() }
         }
     }
