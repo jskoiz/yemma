@@ -54,6 +54,18 @@ struct ChatStarter: Identifiable, Hashable {
                 "Tell me one random fact that would make someone say \"wait, really?\" and explain it briefly."
             ],
             sendsImmediately: true
+        ),
+        ChatStarter(
+            title: "How is Yemma different?",
+            subtitle: "Compare it with ChatGPT or Claude and explain the tradeoffs",
+            prompt: "Explain how Yemma is different from ChatGPT, Claude, and other cloud AI assistants. Be honest about what Yemma is great at, what it is more private or convenient for, and what it may be worse at or not good at yet. Mention limitations like weaker performance on some hard tasks, less up-to-date knowledge, or missing cloud features if relevant. Keep it clear and easy to scan.",
+            systemImage: "lock.shield",
+            promptVariants: [
+                "What makes Yemma different from ChatGPT or Claude? Explain the on-device privacy benefits, what Yemma is best for, and where it may fall short compared with larger cloud models. Keep it honest and easy to scan.",
+                "Compare Yemma with ChatGPT, Claude, and similar AI apps. Cover privacy, speed, offline use, and the tradeoffs or limitations someone should know before relying on it. Keep it clear and balanced.",
+                "Give me a simple comparison of Yemma versus ChatGPT or Claude. Explain what Yemma does well, what it is not as strong at, and the kinds of tasks where a cloud assistant might still do better."
+            ],
+            sendsImmediately: true
         )
     ]
 }

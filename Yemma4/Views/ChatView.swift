@@ -694,7 +694,7 @@ public struct ChatView: View {
         }
         .padding(.horizontal, 16)
         .padding(.top, 10)
-        .padding(.bottom, 14)
+        .padding(.bottom, 8)
         .background(
             LinearGradient(
                 colors: [Color.clear, AppTheme.composerFadeMiddle, AppTheme.composerFadeBottom],
