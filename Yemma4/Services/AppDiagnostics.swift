@@ -28,6 +28,10 @@ struct DiagnosticEvent: Codable, Identifiable, Sendable {
     }
 }
 
+enum DebugPreferences {
+    static let showsAssistantResponseStatsKey = "com.avmillabs.yemma4.debug.showsAssistantResponseStats"
+}
+
 @Observable
 final class AppDiagnostics: @unchecked Sendable {
     static let shared = AppDiagnostics()
