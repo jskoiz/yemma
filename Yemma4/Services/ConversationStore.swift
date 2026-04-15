@@ -490,6 +490,7 @@ final class ConversationStore {
     private func loadIndexAsync() async {
         let decoded = await Task.detached(priority: .utility) { [indexURL] in
             let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
             guard let data = try? Data(contentsOf: indexURL) else {
                 return [ConversationMetadata]()
             }
@@ -647,6 +648,7 @@ private enum ConversationSnapshotLoader {
         }
 
         let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
         guard let conversation = try? decoder.decode(PersistedConversation.self, from: data) else {
             return nil
         }
