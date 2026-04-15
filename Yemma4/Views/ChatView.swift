@@ -12,9 +12,11 @@ public struct ChatView: View {
     @Environment(ModelDownloader.self) private var modelDownloader
     @Environment(LLMService.self) private var llmService
     @Environment(ConversationStore.self) private var conversationStore
+    @AppStorage(DebugPreferences.showsAssistantResponseStatsKey) private var showsAssistantResponseStats = false
 
     private let supportsLocalModelRuntime = Yemma4AppConfiguration.supportsLocalModelRuntime
     @State private var messages: [ChatMessage] = []
+    @State private var assistantResponseStats: [String: GenerationDebugStats] = [:]
     @State private var draft = ""
     @State private var selectedPhotoItems: [PhotosPickerItem] = []
     @State private var pendingAttachments: [Attachment] = []
@@ -1044,8 +1046,14 @@ public struct ChatView: View {
 
     private func messageActionStrip(for message: ChatMessage, index: Int) -> some View {
         let trimmedText = message.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let responseStats = showsAssistantResponseStats ? assistantResponseStats[message.id] : nil
 
         return HStack(spacing: 14) {
+            if let responseStats {
+                responseStatsLabel(responseStats)
+                Spacer(minLength: 0)
+            }
+
             if !trimmedText.isEmpty {
                 messageActionIconButton(
                     title: "Copy",
@@ -1082,6 +1090,19 @@ public struct ChatView: View {
         }
         .padding(.horizontal, 2)
         .padding(.top, 6)
+    }
+
+    private func responseStatsLabel(_ stats: GenerationDebugStats) -> some View {
+        ViewThatFits(in: .horizontal) {
+            Text(responseStatsFullText(stats))
+            Text(responseStatsCompactText(stats))
+            Text(responseStatsMinimalText(stats) ?? "\(tokenLabel(stats.generationTokenCount)) tok")
+        }
+        .font(.system(size: 11, weight: .medium, design: .monospaced))
+        .foregroundStyle(AppTheme.textTertiary)
+        .lineLimit(1)
+        .minimumScaleFactor(0.82)
+        .accessibilityLabel(responseStatsAccessibilityText(stats))
     }
 
     private func messageActionIconButton(
@@ -1245,6 +1266,7 @@ public struct ChatView: View {
 
         await stopGeneration()
         updateMessageText(id: message.id, text: "")
+        assistantResponseStats.removeValue(forKey: message.id)
         completedAssistantMessageIDs.remove(message.id)
         streamingMessageID = message.id
         generationError = nil
@@ -1302,6 +1324,7 @@ public struct ChatView: View {
     private func applyConversationSnapshot(_ snapshot: ConversationSnapshot) {
         loadedConversationID = snapshot.id
         messages = snapshot.messages
+        assistantResponseStats = [:]
         completedAssistantMessageIDs = Set(
             snapshot.messages
                 .filter { !$0.user.isCurrentUser && !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
@@ -1716,6 +1739,7 @@ public struct ChatView: View {
             )
         )
 
+        assistantResponseStats.removeValue(forKey: assistantID)
         completedAssistantMessageIDs.remove(assistantID)
         streamingMessageID = assistantID
         isPinnedToBottom = true
@@ -1739,6 +1763,7 @@ public struct ChatView: View {
         assistantID: String
     ) async {
         var streamingPolicy = StreamingUpdatePolicy()
+        let previousGenerationID = llmService.lastGenerationStats?.generationID
 
         defer {
             Task { @MainActor in
@@ -1764,8 +1789,15 @@ public struct ChatView: View {
 
         // Final flush — applies full sanitization and switches to markdown rendering
         let finalText = streamingPolicy.finalize()
+        let responseStats = llmService.lastGenerationStats?.generationID == previousGenerationID
+            ? nil
+            : llmService.lastGenerationStats
         await MainActor.run {
-            finalizeAssistantMessage(id: assistantID, text: finalText)
+            finalizeAssistantMessage(
+                id: assistantID,
+                text: finalText,
+                responseStats: responseStats
+            )
             persistConversationNow()
         }
 
@@ -1787,17 +1819,27 @@ public struct ChatView: View {
     }
 
     @MainActor
-    private func finalizeAssistantMessage(id: String, text: String) {
+    private func finalizeAssistantMessage(
+        id: String,
+        text: String,
+        responseStats: GenerationDebugStats?
+    ) {
         guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
 
         if text.isEmpty {
             messages.remove(at: index)
             completedAssistantMessageIDs.remove(id)
+            assistantResponseStats.removeValue(forKey: id)
             return
         }
 
         messages[index].text = text
         completedAssistantMessageIDs.insert(id)
+        if let responseStats {
+            assistantResponseStats[id] = responseStats
+        } else {
+            assistantResponseStats.removeValue(forKey: id)
+        }
         persistConversationNow()
     }
 
@@ -1808,6 +1850,7 @@ public struct ChatView: View {
         AppDiagnostics.shared.record("Conversation cleared", category: "ui", metadata: ["previousMessages": messages.count])
         await stopGeneration()
         messages.removeAll()
+        assistantResponseStats.removeAll()
         completedAssistantMessageIDs.removeAll()
         draft = ""
         pendingAttachments.removeAll()
@@ -1895,6 +1938,97 @@ public struct ChatView: View {
     private func isLowMemoryError(_ message: String) -> Bool {
         let lowercased = message.lowercased()
         return lowercased.contains("memory") || lowercased.contains("oom") || lowercased.contains("out of memory")
+    }
+
+    private func tokenLabel(_ count: Int) -> String {
+        if count >= 1024 {
+            return String(format: "%.1fK", Double(count) / 1024.0)
+        }
+        return "\(count)"
+    }
+
+    private func responseStatsFullText(_ stats: GenerationDebugStats) -> String {
+        let parts: [String] = [
+            "\(tokenLabel(stats.generationTokenCount)) tok",
+            responseStatsMinimalText(stats),
+            responseMemoryText(stats)
+        ]
+        .compactMap { value in
+            guard let value, !value.isEmpty else { return nil }
+            return value
+        }
+
+        return parts.joined(separator: " • ")
+    }
+
+    private func responseStatsCompactText(_ stats: GenerationDebugStats) -> String {
+        let parts: [String] = [
+            responseStatsMinimalText(stats),
+            responseMemoryText(stats)
+        ]
+        .compactMap { value in
+            guard let value, !value.isEmpty else { return nil }
+            return value
+        }
+
+        if parts.isEmpty {
+            return "\(tokenLabel(stats.generationTokenCount)) tok"
+        }
+
+        return parts.joined(separator: " • ")
+    }
+
+    private func responseStatsMinimalText(_ stats: GenerationDebugStats) -> String? {
+        let parts = [
+            stats.tokensPerSecond.map { String(format: "%.1f tok/s", $0) },
+            responseElapsedText(stats.elapsedSeconds)
+        ]
+        .compactMap { $0 }
+
+        guard !parts.isEmpty else { return nil }
+        return parts.joined(separator: " • ")
+    }
+
+    private func responseMemoryText(_ stats: GenerationDebugStats) -> String? {
+        guard let memoryFootprintBytes = stats.memoryFootprintBytes else { return nil }
+        return "RAM \(ByteCountFormatter.string(fromByteCount: Int64(memoryFootprintBytes), countStyle: .memory))"
+    }
+
+    private func responseElapsedText(_ elapsedSeconds: TimeInterval) -> String? {
+        guard elapsedSeconds > 0 else { return nil }
+
+        if elapsedSeconds < 10 {
+            return String(format: "%.1fs", elapsedSeconds)
+        }
+
+        return String(format: "%.0fs", elapsedSeconds.rounded())
+    }
+
+    private func responseStatsAccessibilityText(_ stats: GenerationDebugStats) -> String {
+        var parts = ["\(tokenLabel(stats.generationTokenCount)) generated tokens"]
+
+        if let tokensPerSecond = stats.tokensPerSecond {
+            parts.append(String(format: "%.1f tokens per second", tokensPerSecond))
+        }
+
+        if let elapsedText = responseElapsedText(stats.elapsedSeconds) {
+            parts.append("Elapsed \(elapsedText)")
+        }
+
+        if let memoryText = responseMemoryText(stats) {
+            parts.append(memoryText)
+        }
+
+        if let memoryDeltaBytes = stats.memoryFootprintDeltaBytes {
+            let sign = memoryDeltaBytes >= 0 ? "up" : "down"
+            let delta = ByteCountFormatter.string(
+                fromByteCount: Int64(abs(memoryDeltaBytes)),
+                countStyle: .memory
+            )
+            parts.append("Memory \(sign) \(delta)")
+        }
+
+        return parts.joined(separator: ", ")
     }
 
     @MainActor
