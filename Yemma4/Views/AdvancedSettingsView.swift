@@ -50,8 +50,8 @@ struct AdvancedSettingsView: View {
             } header: {
                 header
                     .padding(.horizontal, AppTheme.Layout.screenPadding)
-                    .padding(.top, 0)
-                    .padding(.bottom, 8)
+                    .padding(.top, 12)
+                    .padding(.bottom, 12)
             }
         }
         .task {
@@ -69,39 +69,33 @@ struct AdvancedSettingsView: View {
         } message: {
             Text("The recent diagnostics log is on the pasteboard.")
         }
-        .toolbar(.hidden, for: .navigationBar)
     }
 
     private var header: some View {
-        HStack(spacing: 16) {
+        HStack {
             Button {
                 dismiss()
             } label: {
-                ZStack {
-                    Circle()
-                        .fill(AppTheme.controlFill)
-
-                    Circle()
-                        .stroke(AppTheme.controlBorder, lineWidth: 1)
-
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(AppTheme.textPrimary)
-                }
-                .frame(width: 48, height: 48)
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(AppTheme.textPrimary)
             }
             .accessibilityLabel("Back")
             .accessibilityHint("Returns to the previous settings screen.")
 
+            Spacer()
+
             Text("Advanced")
                 .font(AppTheme.Typography.utilityTitle)
                 .foregroundStyle(AppTheme.textPrimary)
-                .frame(maxWidth: .infinity)
 
-            Color.clear
-                .frame(width: 48, height: 48)
+            Spacer()
+
+            Image(systemName: "chevron.left")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(.clear)
         }
-        .frame(height: 48)
+        .padding(.horizontal, 4)
     }
 
     private var overviewSection: some View {
@@ -280,7 +274,7 @@ struct AdvancedSettingsView: View {
                 disclosureRow(
                     icon: "waveform.path.ecg",
                     title: "Diagnostics",
-                    detail: diagnosticsDetailText,
+                    detail: "Inspect recent events, copy the local log, or run debug checks.",
                     isExpanded: showDiagnostics
                 )
             }
@@ -291,10 +285,6 @@ struct AdvancedSettingsView: View {
                 diagnosticsContent
             }
         }
-    }
-
-    private var diagnosticsDetailText: String {
-        return "Inspect recent events and copy the local log."
     }
 
     private var diagnosticsContent: some View {
@@ -374,8 +364,8 @@ struct AdvancedSettingsView: View {
                 } label: {
                     utilityActionRow(
                         icon: "shippingbox.circle",
-                        title: "Model source",
-                        detail: "Paste a Hugging Face URL, switch back to the app default, and inspect download progress."
+                        title: "Debug model variants",
+                        detail: "Open debug-only model switching, download progress, and unsupported Hugging Face source controls."
                     )
                 }
                 .buttonStyle(.plain)
@@ -461,10 +451,10 @@ struct AdvancedSettingsView: View {
 
     private var activeModelSourceDetailText: String {
         if modelDownloader.isUsingDefaultModelSource {
-            return "App default"
+            return "Shipped default: \(Gemma4MLXSupport.defaultModelSource.repositoryID)"
         }
 
-        return "Custom Hugging Face model"
+        return "\(modelDownloader.activeModelSourceBoundaryLabel): \(modelDownloader.activeModelSource.repositoryID)"
     }
 
     private func infoRow(icon: String, title: String, detail: String) -> some View {
