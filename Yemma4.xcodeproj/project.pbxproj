@@ -241,7 +241,7 @@
 			packageReferences = (
 				759333B69AA7F2876F0CFA95 /* XCRemoteSwiftPackageReference "Chat" */,
 				A1000004 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */,
-				E1000201 /* XCLocalSwiftPackageReference "../Dependencies/mlx-swift-lm" */,
+				E1000201 /* XCLocalSwiftPackageReference "Dependencies/mlx-swift-lm" */,
 				E1000202 /* XCRemoteSwiftPackageReference "mlx-swift" */,
 				E1000203 /* XCRemoteSwiftPackageReference "swift-transformers" */,
 			);
@@ -576,9 +576,9 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		E1000201 /* XCLocalSwiftPackageReference "../Dependencies/mlx-swift-lm" */ = {
+		E1000201 /* XCLocalSwiftPackageReference "Dependencies/mlx-swift-lm" */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = "../Dependencies/mlx-swift-lm";
+			relativePath = "Dependencies/mlx-swift-lm";
 		};
 /* End XCLocalSwiftPackageReference section */
 
@@ -595,12 +595,12 @@
 		};
 		E1000101 /* MLXLMCommon */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = E1000201 /* XCLocalSwiftPackageReference "../Dependencies/mlx-swift-lm" */;
+			package = E1000201 /* XCLocalSwiftPackageReference "Dependencies/mlx-swift-lm" */;
 			productName = MLXLMCommon;
 		};
 		E1000102 /* MLXVLM */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = E1000201 /* XCLocalSwiftPackageReference "../Dependencies/mlx-swift-lm" */;
+			package = E1000201 /* XCLocalSwiftPackageReference "Dependencies/mlx-swift-lm" */;
 			productName = MLXVLM;
 		};
 		E1000103 /* MLX */ = {
