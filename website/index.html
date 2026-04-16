@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Yemma 4 — Private AI on Your iPhone</title>
-  <meta name="description" content="Run Google's Gemma 4 entirely on your iPhone. No cloud, no account, no data leaves your device.">
+  <title>Yemma 4 — AI That Lives on Your iPhone</title>
+  <meta name="description" content="An AI assistant that runs entirely on your iPhone. Good for notes, writing, questions, and image help. Private by design, offline after setup.">
   <meta name="theme-color" content="#FAF8F5">
 
   <!-- Favicon -->
@@ -15,16 +15,16 @@
   <!-- Open Graph -->
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://yemma.chat">
-  <meta property="og:title" content="Yemma 4 — Private AI on Your iPhone">
-  <meta property="og:description" content="Chat with Google's Gemma 4 entirely on your device. No cloud, no account, no data leaves your phone.">
+  <meta property="og:title" content="Yemma 4 — AI That Lives on Your iPhone">
+  <meta property="og:description" content="An AI assistant that runs entirely on your iPhone. Good for notes, writing, questions, and image help. Private by design, offline after setup.">
   <meta property="og:image" content="https://yemma.chat/og-image.png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
 
   <!-- Twitter Card -->
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Yemma 4 — Private AI on Your iPhone">
-  <meta name="twitter:description" content="Chat with Google's Gemma 4 entirely on your device. No cloud, no account, no data leaves your phone.">
+  <meta name="twitter:title" content="Yemma 4 — AI That Lives on Your iPhone">
+  <meta name="twitter:description" content="An AI assistant that runs entirely on your iPhone. Good for notes, writing, questions, and image help. Private by design, offline after setup.">
   <meta name="twitter:image" content="https://yemma.chat/og-image.png">
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -143,67 +143,12 @@
     @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
 
     .hero h1 {
-      font-family: var(--serif); font-size: clamp(36px, 4.5vw, 58px);
+      font-family: var(--serif); font-size: clamp(36px, 4vw, 52px);
       font-weight: 700; line-height: 1.08; letter-spacing: -1px;
-      margin-bottom: 24px;
+      margin-bottom: 24px; white-space: nowrap;
     }
     .hero h1 em {
       font-style: italic; color: var(--accent);
-    }
-
-    /* ── Word cycler ── */
-    .cycle-wrap {
-      display: inline-grid;
-      vertical-align: baseline;
-      text-align: left;
-      transition: width 0.35s cubic-bezier(0.22, 1, 0.36, 1);
-    }
-
-    .cycle-words {
-      display: contents;
-    }
-
-    .cycle-words > span {
-      grid-row: 1;
-      grid-column: 1;
-      white-space: nowrap;
-      min-width: 0;
-    }
-
-    /* Each letter is wrapped in a .cl (cycle-letter) */
-    .cl {
-      display: inline-block;
-      opacity: 0;
-      transform: translateY(14px);
-      transition: opacity 0.3s ease, transform 0.4s cubic-bezier(0.22, 1, 0.36, 1);
-    }
-
-    .active .cl {
-      opacity: 1;
-      transform: translateY(0);
-    }
-
-    .exiting .cl {
-      opacity: 0;
-      transform: translateY(-10px);
-    }
-
-    /* "Just chat." — appears after final word */
-    .just-chat {
-      display: none;
-      color: var(--ink);
-      font-weight: 400;
-      font-family: var(--serif);
-    }
-
-    .just-chat.visible {
-      display: inline;
-      animation: just-chat-in 0.6s ease forwards;
-    }
-
-    @keyframes just-chat-in {
-      from { opacity: 0; }
-      to { opacity: 1; }
     }
 
     .hero-body {
@@ -243,252 +188,11 @@
       filter: blur(120px); opacity: 0.06; pointer-events: none;
     }
 
-    /* iPhone 15 Pro frame — layered titanium + inner bezel */
-    .iphone {
-      --frame-w: 280px;
-      --screen-r: calc(var(--frame-w) * 0.15);
-      width: var(--frame-w);
+    .hero-mockup-img {
+      width: 280px;
+      height: auto;
       position: relative;
-    }
-
-    /* Outer titanium shell */
-    .iphone-outer {
-      background: linear-gradient(170deg, #48484A 0%, #3A3A3C 20%, #2C2C2E 60%, #1C1C1E 100%);
-      border-radius: calc(var(--frame-w) * 0.179);
-      padding: calc(var(--frame-w) * 0.011);
-      box-shadow:
-        0 0 0 0.5px rgba(255,255,255,0.15) inset,
-        0 1px 2px rgba(255,255,255,0.06) inset,
-        0 0 0 1px rgba(0,0,0,0.5),
-        0 20px 40px rgba(0,0,0,0.15),
-        0 50px 80px rgba(0,0,0,0.1);
-    }
-
-    /* Inner dark bezel (screen gasket) */
-    .iphone-inner {
-      background: #111111;
-      border-radius: calc(var(--frame-w) * 0.168);
-      padding: calc(var(--frame-w) * 0.029);
-    }
-
-    /* Side buttons — right: power */
-    .iphone::after {
-      content: ''; position: absolute;
-      right: -2px; top: 140px;
-      width: 3px; height: 52px;
-      background: linear-gradient(180deg, #48484A 0%, #3A3A3C 50%, #2C2C2E 100%);
-      border-radius: 0 2px 2px 0;
-      box-shadow: 1px 0 2px rgba(0,0,0,0.2);
-    }
-
-    /* Side buttons — left: volume up */
-    .iphone-vol-up {
-      position: absolute; left: -2px; top: 115px;
-      width: 3px; height: 28px;
-      background: linear-gradient(180deg, #48484A 0%, #3A3A3C 50%, #2C2C2E 100%);
-      border-radius: 2px 0 0 2px;
-      box-shadow: -1px 0 2px rgba(0,0,0,0.2);
-    }
-
-    /* Side buttons — left: volume down */
-    .iphone-vol-dn {
-      position: absolute; left: -2px; top: 152px;
-      width: 3px; height: 28px;
-      background: linear-gradient(180deg, #48484A 0%, #3A3A3C 50%, #2C2C2E 100%);
-      border-radius: 2px 0 0 2px;
-      box-shadow: -1px 0 2px rgba(0,0,0,0.2);
-    }
-
-    /* Side buttons — left: action button */
-    .iphone-action {
-      position: absolute; left: -2px; top: 88px;
-      width: 3px; height: 18px;
-      background: linear-gradient(180deg, #48484A 0%, #3A3A3C 50%, #2C2C2E 100%);
-      border-radius: 2px 0 0 2px;
-      box-shadow: -1px 0 2px rgba(0,0,0,0.2);
-    }
-
-    /* Dynamic Island — inside screen */
-    .dynamic-island {
-      position: absolute; top: calc(var(--frame-w) * 0.029);
-      left: 50%; transform: translateX(-50%);
-      width: calc(var(--frame-w) * 0.321); height: calc(var(--frame-w) * 0.089);
-      background: #000000; border-radius: calc(var(--frame-w) * 0.064);
-      z-index: 20;
-    }
-
-    .iphone-screen {
-      border-radius: var(--screen-r);
-      overflow: hidden;
-      aspect-ratio: 393 / 852;
-      position: relative;
-      background:
-        radial-gradient(ellipse 70% 50% at 30% 25%, rgba(247, 215, 185, 0.45) 0%, transparent 70%),
-        radial-gradient(ellipse 60% 40% at 75% 70%, rgba(226, 218, 240, 0.35) 0%, transparent 70%),
-        linear-gradient(180deg, #FAF8F5 0%, #F5F1EC 40%, #F2EDE6 70%, #F0EEF2 100%);
-    }
-
-    /* ── iOS App UI ── */
-    .app {
-      height: 100%; display: flex; flex-direction: column;
-      font-family: -apple-system, 'SF Pro Text', 'SF Pro Display', 'Helvetica Neue', sans-serif;
-      -webkit-font-smoothing: antialiased;
-    }
-
-    /* Status bar — iOS 17 style */
-    .ios-status {
-      display: flex; justify-content: space-between; align-items: center;
-      padding: 14px 24px 0;
-      height: 44px;
-      position: relative; z-index: 15;
-    }
-
-    .ios-time {
-      font-size: 14px; font-weight: 600;
-      letter-spacing: 0.2px; color: #1C1C1E;
-      font-variant-numeric: tabular-nums;
-    }
-
-    .ios-indicators {
-      display: flex; align-items: center; gap: 4px;
-    }
-
-    .ios-indicators svg { display: block; }
-
-    /* ── App Nav Bar ── */
-    .app-bar {
-      display: flex; align-items: center; justify-content: space-between;
-      padding: 6px 14px 8px;
-    }
-
-    .app-bar-left {
-      display: flex; align-items: center; gap: 5px;
-    }
-
-    .app-bar-btn {
-      width: 32px; height: 32px;
-      border-radius: 50%; /* iOS 26 uses circles for toolbar items */
-      background: rgba(255,255,255,0.72);
-      backdrop-filter: blur(8px);
-      display: flex; align-items: center; justify-content: center;
-      box-shadow: 0 0.5px 1px rgba(0,0,0,0.04);
-    }
-
-    .app-bar-btn svg {
-      width: 15px; height: 15px; color: #3C3C43;
-      stroke-width: 1.6;
-    }
-
-    .app-bar-title {
-      font-size: 14px; font-weight: 600; color: #1C1C1E;
-      letter-spacing: -0.2px;
-      display: flex; align-items: center; gap: 2px;
-      margin-left: 2px;
-    }
-
-    .app-bar-chevron {
-      width: 7px; height: 7px; border-right: 1.5px solid #8E8E93;
-      border-bottom: 1.5px solid #8E8E93;
-      transform: rotate(-45deg); margin-top: 1px; margin-left: 1px;
-    }
-
-    /* ── App content ── */
-    .app-content {
-      flex: 1; display: flex; flex-direction: column;
-      align-items: center; justify-content: center;
-      text-align: center; padding: 0 24px;
-    }
-
-    .app-content h2 {
-      font-size: 26px; font-weight: 700;
-      letter-spacing: -0.6px; line-height: 1.12;
-      color: #1C1C1E; margin-bottom: 12px;
-      font-family: -apple-system, 'SF Pro Display', sans-serif;
-    }
-
-    .app-content p {
-      font-size: 13px; font-weight: 400;
-      line-height: 1.45; color: #8E8E93;
-      letter-spacing: -0.1px;
-      max-width: 250px;
-    }
-
-    /* ── Quick prompts — grouped table style ── */
-    .app-prompts {
-      padding: 0 14px;
-    }
-
-    .app-prompt-group {
-      background: rgba(255,255,255,0.55);
-      backdrop-filter: blur(12px);
-      border-radius: 13px;
-      overflow: hidden;
-      box-shadow: 0 0.5px 1px rgba(0,0,0,0.03);
-    }
-
-    .app-prompt-row {
-      display: flex; align-items: baseline; gap: 0;
-      padding: 11px 14px;
-    }
-
-    .app-prompt-row + .app-prompt-row {
-      border-top: 0.5px solid rgba(60,60,67,0.08);
-    }
-
-    .app-prompt-bold {
-      font-size: 13px; font-weight: 600; color: #1C1C1E;
-      letter-spacing: -0.1px;
-    }
-
-    .app-prompt-light {
-      font-size: 13px; font-weight: 400; color: #8E8E93;
-      margin-left: 4px; letter-spacing: -0.1px;
-    }
-
-    /* ── Compose bar ── */
-    .app-compose {
-      padding: 8px 14px 16px;
-    }
-
-    .app-compose-bar {
-      display: flex; align-items: center;
-      background: rgba(255,255,255,0.65);
-      backdrop-filter: blur(12px);
-      border-radius: 22px;
-      padding: 7px 7px 7px 10px;
-      box-shadow: 0 0.5px 1px rgba(0,0,0,0.03);
-    }
-
-    .compose-plus {
-      width: 24px; height: 24px; display: flex;
-      align-items: center; justify-content: center;
-      color: #007AFF; font-size: 18px; font-weight: 300;
-    }
-
-    .compose-text {
-      flex: 1; font-size: 14px; color: #C7C7CC;
-      letter-spacing: -0.1px; padding: 0 6px;
-    }
-
-    .compose-send {
-      width: 28px; height: 28px; border-radius: 50%;
-      background: #C7C7CC;
-      display: flex; align-items: center; justify-content: center;
-    }
-
-    .compose-send svg {
-      width: 14px; height: 14px; color: white;
-      stroke-width: 2.5;
-    }
-
-    /* Home indicator */
-    .app-home {
-      display: flex; justify-content: center; padding: 6px 0 4px;
-    }
-
-    .home-pill {
-      width: 120px; height: 4px; border-radius: 2px;
-      background: rgba(0,0,0,0.18);
+      filter: drop-shadow(0 20px 40px rgba(0,0,0,0.12)) drop-shadow(0 50px 80px rgba(0,0,0,0.08));
     }
 
     /* ─── DIVIDER ─── */
@@ -706,8 +410,8 @@
     @media (max-width: 900px) {
       .hero { padding: 140px 0 80px; }
       .hero-grid { gap: 40px; }
-      .hero h1 { font-size: clamp(36px, 5vw, 52px); }
-      .iphone { --frame-w: 230px; }
+      .hero h1 { font-size: clamp(36px, 5vw, 52px); white-space: normal; }
+      .hero-mockup-img { width: 230px; }
       .bento { grid-template-columns: 1fr 1fr; }
       .bento-wide { grid-column: 1 / -1; grid-row: auto; }
       .pitch-header h2 { font-size: 30px; }
@@ -732,9 +436,7 @@
       .hero-eyebrow { justify-content: center; }
       .hero-body { margin-left: auto; margin-right: auto; font-size: 15px; }
       .hero-actions { justify-content: center; }
-      .hero h1 { font-size: 36px; letter-spacing: -0.8px; }
-      .hero .no-prefix { display: none; }
-      .hero .just-chat { display: none !important; }
+      .hero h1 { font-size: 36px; letter-spacing: -0.8px; white-space: normal; }
 
       /* Pitch / Bento */
       .pitch { padding: 56px 0; }
@@ -800,11 +502,9 @@
       <div class="hero-grid">
         <div>
           <div class="hero-eyebrow">Available now on iOS</div>
-          <h1><span class="no-prefix">No </span><span class="cycle-wrap"><span class="cycle-words" id="cycle-words"><span>sign-up.</span><span>tracking.</span><span class="cycle-final"><em>catch.</em></span></span></span> <span class="just-chat" id="just-chat">Just chat.</span></h1>
+          <h1>AI that <em>lives</em> on your iPhone.</h1>
           <p class="hero-body">
-            Yemma 4 is an AI chat app that runs entirely on your iPhone.
-            Your conversations never leave your phone — not even for a moment.
-            And it's completely free.
+            Good for notes, writing, questions, and image help — private by design and offline after setup.
           </p>
           <div class="hero-actions">
             <a href="https://apps.apple.com/us/app/yemma-4/id6761586324" class="app-store-badge" style="height:40px;" target="_blank" rel="noopener">
@@ -817,74 +517,7 @@
         </div>
         <div class="hero-visual">
           <div class="mockup-glow"></div>
-          <div class="iphone">
-            <div class="iphone-action"></div>
-            <div class="iphone-vol-up"></div>
-            <div class="iphone-vol-dn"></div>
-            <div class="iphone-outer">
-            <div class="iphone-inner">
-            <div class="iphone-screen">
-            <div class="dynamic-island"></div>
-              <div class="app">
-                <!-- iOS Status Bar -->
-                <div class="ios-status">
-                  <span class="ios-time">5:39</span>
-                  <div class="ios-indicators">
-                    <!-- Cellular: 4 bars -->
-                    <svg width="14" height="10" viewBox="0 0 14 10" fill="#1C1C1E"><rect x="0" y="7" width="2.5" height="3" rx="0.5"/><rect x="3.5" y="5" width="2.5" height="5" rx="0.5"/><rect x="7" y="2.5" width="2.5" height="7.5" rx="0.5"/><rect x="10.5" y="0" width="2.5" height="10" rx="0.5"/></svg>
-                    <!-- WiFi -->
-                    <svg width="13" height="10" viewBox="0 0 16 12" fill="#1C1C1E"><path d="M8 9.6a1.2 1.2 0 110 2.4 1.2 1.2 0 010-2.4zM8 6.4c1.6 0 3.04.68 4.08 1.76a.6.6 0 01-.86.84A4.36 4.36 0 008 7.6a4.36 4.36 0 00-3.22 1.4.6.6 0 01-.86-.84A5.56 5.56 0 018 6.4zm0-3.4a8.8 8.8 0 016.2 2.56.6.6 0 01-.85.85A7.6 7.6 0 008 4.2a7.6 7.6 0 00-5.35 2.21.6.6 0 01-.85-.85A8.8 8.8 0 018 3zm0-3c2.96 0 5.64 1.2 7.58 3.14a.6.6 0 01-.85.85A9.47 9.47 0 008 1.2 9.47 9.47 0 001.27 3.99a.6.6 0 01-.85-.85A10.67 10.67 0 018 0z"/></svg>
-                    <!-- Battery -->
-                    <svg width="22" height="10" viewBox="0 0 25 12" fill="#1C1C1E"><rect x="0" y="0.5" width="21" height="11" rx="2" stroke="#1C1C1E" stroke-width="1" fill="none" opacity="0.35"/><rect x="1.5" y="2" width="18" height="8" rx="1" fill="#1C1C1E"/><path d="M23 4v4a2 2 0 000-4z" fill="#1C1C1E" opacity="0.4"/></svg>
-                  </div>
-                </div>
-
-                <!-- App Nav -->
-                <div class="app-bar">
-                  <div class="app-bar-left">
-                    <div class="app-bar-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9"/></svg></div>
-                    <div class="app-bar-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg></div>
-                    <div class="app-bar-title">Yemma 4 <div class="app-bar-chevron"></div></div>
-                  </div>
-                  <div class="app-bar-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg></div>
-                </div>
-
-                <!-- App Content -->
-                <div class="app-content">
-                  <h2>Meet Yemma 4</h2>
-                  <p>Chat with Google's latest Gemma 4 model entirely on your device. No provider connection, no cloud relay, and no account required.</p>
-                </div>
-
-                <!-- Quick Prompts -->
-                <div class="app-prompts">
-                  <div class="app-prompt-group">
-                    <div class="app-prompt-row">
-                      <span class="app-prompt-bold">Design</span>
-                      <span class="app-prompt-light">a workout routine</span>
-                    </div>
-                    <div class="app-prompt-row">
-                      <span class="app-prompt-bold">Begin</span>
-                      <span class="app-prompt-light">meditating</span>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- Compose Bar -->
-                <div class="app-compose">
-                  <div class="app-compose-bar">
-                    <div class="compose-plus">+</div>
-                    <div class="compose-text">Ask anything</div>
-                    <div class="compose-send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg></div>
-                  </div>
-                </div>
-
-                <!-- Home Indicator -->
-                <div class="app-home"><div class="home-pill"></div></div>
-              </div>
-            </div>
-            </div>
-            </div>
-          </div>
+          <img src="/hero-mockup.png" alt="Yemma 4 running on iPhone — task picker screen" class="hero-mockup-img">
         </div>
       </div>
     </div>
@@ -919,32 +552,32 @@
   <section class="pitch" id="pitch">
     <div class="container">
       <div class="pitch-header reveal">
-        <h2>Why not just use ChatGPT?</h2>
-        <p>You can. It's great. But every message you send passes through someone else's servers, gets stored, and can be used to train future models. Yemma 4 works differently.</p>
+        <h2>Where local AI fits best</h2>
+        <p>Yemma is the assistant that's already with you. It works anywhere, keeps your stuff on your phone, and doesn't need an account or subscription to be useful.</p>
       </div>
 
       <div class="bento">
-        <!-- Wide card: privacy + comparison -->
+        <!-- Wide card: what it's good for -->
         <div class="bento-card bento-wide reveal">
-          <div class="card-num">Privacy</div>
-          <h3>Your conversations stay yours</h3>
-          <p>You shouldn't need to wonder who's reading your chats. With Yemma 4, there's nowhere for your data to go — everything runs on your phone, period.</p>
+          <div class="card-num">Everyday use</div>
+          <h3>The things you actually reach for AI for</h3>
+          <p>Yemma handles the small, frequent tasks that don't need a cloud supercomputer — the stuff you'd want an assistant for a dozen times a day.</p>
           <div class="compare-grid">
             <div class="compare-col col-yemma">
-              <div class="col-head">Yemma 4</div>
-              <div class="compare-row"><span>Chats shared</span><span class="cval">Never</span></div>
-              <div class="compare-row"><span>Account needed</span><span class="cval">No</span></div>
-              <div class="compare-row"><span>Works offline</span><span class="cval">Yes</span></div>
-              <div class="compare-row"><span>Monthly cost</span><span class="cval">Free</span></div>
-              <div class="compare-row"><span>Code is open</span><span class="cval">Yes</span></div>
+              <div class="col-head">Yemma is good for</div>
+              <div class="compare-row"><span>Quick rewrites</span><span class="cval">&#10003;</span></div>
+              <div class="compare-row"><span>Personal notes</span><span class="cval">&#10003;</span></div>
+              <div class="compare-row"><span>Everyday questions</span><span class="cval">&#10003;</span></div>
+              <div class="compare-row"><span>Image explanations</span><span class="cval">&#10003;</span></div>
+              <div class="compare-row"><span>Offline use</span><span class="cval">&#10003;</span></div>
             </div>
             <div class="compare-col col-cloud">
-              <div class="col-head">ChatGPT, etc.</div>
-              <div class="compare-row"><span>Chats shared</span><span class="cval">Always</span></div>
-              <div class="compare-row"><span>Account needed</span><span class="cval">Yes</span></div>
-              <div class="compare-row"><span>Works offline</span><span class="cval">No</span></div>
-              <div class="compare-row"><span>Monthly cost</span><span class="cval">$20+</span></div>
-              <div class="compare-row"><span>Code is open</span><span class="cval">No</span></div>
+              <div class="col-head">Cloud AI still wins at</div>
+              <div class="compare-row"><span>Deep reasoning</span><span class="cval">&#10003;</span></div>
+              <div class="compare-row"><span>Broad knowledge</span><span class="cval">&#10003;</span></div>
+              <div class="compare-row"><span>Giant workflows</span><span class="cval">&#10003;</span></div>
+              <div class="compare-row"><span>Faster updates</span><span class="cval">&#10003;</span></div>
+              <div class="compare-row"><span>Cutting-edge models</span><span class="cval">&#10003;</span></div>
             </div>
           </div>
         </div>
@@ -956,9 +589,9 @@
           <p>Download the AI model once, then use it anywhere — on a plane, in the middle of nowhere, or just with Wi-Fi turned off. It's always ready.</p>
         </div>
         <div class="bento-card bento-sm reveal">
-          <div class="card-num">Speed</div>
-          <h3>No waiting in line</h3>
-          <p>Cloud AI services slow down when everyone's using them. Yemma 4 runs on your phone's hardware, so responses start immediately — every time.</p>
+          <div class="card-num">Private</div>
+          <h3>Private by design</h3>
+          <p>No cloud relay, no account, no telemetry. Your conversations stay on your phone because there's nowhere else for them to go.</p>
         </div>
 
         <!-- Bottom row: 3 equal -->
@@ -975,7 +608,7 @@
           </div>
           <div class="bento-card reveal">
             <div class="card-num">Open</div>
-            <h3>Nothing to hide</h3>
+            <h3>Fully open source</h3>
             <p>App and model are both open source. Read every line on GitHub.</p>
           </div>
         </div>
@@ -988,10 +621,9 @@
     <div class="container">
       <div class="reveal">
         <div class="cta-accent-line"></div>
-        <h2>Try it. It's <em>free.</em></h2>
+        <h2>Always there. <em>Always yours.</em></h2>
         <p class="cta-sub">
-          No account, no subscription, no strings attached.
-          Download the app, grab the model, and see for yourself.
+          Free, no account required, and offline after a one-time setup. Download the app and see what local AI feels like.
         </p>
         <div class="cta-actions">
           <a href="https://apps.apple.com/us/app/yemma-4/id6761586324" class="app-store-badge" target="_blank" rel="noopener">
@@ -1033,123 +665,6 @@
     document.querySelectorAll('.reveal').forEach(el => obs.observe(el));
 
 
-    /* ── Word cycler ── */
-    (function() {
-      const wrapper = document.querySelector('.cycle-wrap');
-      const words = document.querySelectorAll('#cycle-words > span');
-      const count = words.length;
-      let current = 0;
-      const STAGGER_IN = 30;  // ms between each letter appearing
-      const STAGGER_OUT = 18; // ms between each letter disappearing (faster)
-      const isMobile = window.matchMedia('(max-width: 680px)').matches;
-
-      function makeLetters(text) {
-        let h = '';
-        for (let i = 0; i < text.length; i++) {
-          h += '<span class="cl">' + (text[i] === ' ' ? '&nbsp;' : text[i]) + '</span>';
-        }
-        return h;
-      }
-
-      // Split each word's text into individual letter spans
-      function splitLetters() {
-        const prefix = isMobile ? 'No ' : '';
-        words.forEach((word, idx) => {
-          const temp = document.createElement('div');
-          temp.innerHTML = word.innerHTML;
-          const text = temp.textContent;
-          const isEm = word.querySelector('em');
-          const isFinal = idx === count - 1;
-
-          if (isMobile && isFinal) {
-            // "No catch. Just chat." — mixed styles
-            word.innerHTML =
-              makeLetters('No ') +
-              '<em style="font-style:italic;color:var(--accent)">' + makeLetters('catch.') + '</em>' +
-              makeLetters(' Just chat.');
-          } else if (isEm) {
-            word.innerHTML = '<em style="font-style:italic;color:var(--accent)">' + makeLetters(prefix + text) + '</em>';
-          } else {
-            word.innerHTML = makeLetters(prefix + text);
-          }
-        });
-      }
-
-      function setSize() {
-        // Use Range to measure actual text width (grid items fill the column,
-        // so scrollWidth returns column width, not content width)
-        const range = document.createRange();
-        range.selectNodeContents(words[current]);
-        wrapper.style.width = range.getBoundingClientRect().width + 'px';
-      }
-
-      function setStagger(word, delayMs, className) {
-        const letters = word.querySelectorAll('.cl');
-        letters.forEach((l, i) => {
-          l.style.transitionDelay = (i * delayMs) + 'ms';
-        });
-      }
-
-      function clearStagger(word) {
-        word.querySelectorAll('.cl').forEach(l => {
-          l.style.transitionDelay = '0ms';
-        });
-      }
-
-      function next() {
-        if (current >= count - 1) return;
-
-        const exiting = words[current];
-        const isFinal = current === count - 2; // next word is the last
-
-        // Stagger out: first letter exits first
-        setStagger(exiting, STAGGER_OUT);
-        exiting.classList.remove('active');
-        exiting.classList.add('exiting');
-
-        current++;
-        const entering = words[current];
-
-        // Slight delay before new word starts entering
-        const exitDuration = exiting.querySelectorAll('.cl').length * STAGGER_OUT + 150;
-
-        setTimeout(() => {
-          // Stagger in
-          setStagger(entering, isFinal ? 45 : STAGGER_IN);
-          entering.classList.add('active');
-          setSize();
-        }, exitDuration);
-
-        // Clean up
-        setTimeout(() => {
-          clearStagger(exiting);
-          exiting.classList.remove('exiting');
-        }, exitDuration + 300);
-
-        // Queue next or show "Just chat."
-        if (!isFinal) {
-          const totalTime = exitDuration + entering.querySelectorAll('.cl').length * STAGGER_IN + 600;
-          const delay = Math.max(totalTime, 900);
-          setTimeout(next, delay);
-        } else if (!isMobile) {
-          // After "catch." fully lands, pause then reveal "Just chat." (desktop only)
-          const landTime = exitDuration + entering.querySelectorAll('.cl').length * 45 + 400;
-          setTimeout(() => {
-            document.getElementById('just-chat').classList.add('visible');
-          }, landTime + 800);
-        }
-      }
-
-      document.fonts.ready.then(() => {
-        splitLetters();
-        // Activate first word with stagger
-        setStagger(words[0], STAGGER_IN);
-        words[0].classList.add('active');
-        setSize();
-        window.addEventListener('resize', setSize);
-        setTimeout(next, 1800);
-      });
-    })();
 
     /* Strip — marquee when overflowing, right-justified when not */
     (function() {

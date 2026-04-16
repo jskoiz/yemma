@@ -21,11 +21,12 @@
 </p>
 
 <p align="center">
-  <strong>Private, on-device AI chat for iPhone.</strong><br>
-  Runs Gemma 4 locally through a Swift-native MLX multimodal runtime. No cloud, no accounts, no telemetry.
+  <strong>AI that lives on your iPhone.</strong><br>
+  Good for notes, writing, questions, and image help. Private by design, offline after setup, and honest about what local AI does best.
 </p>
 
 <p align="center">
+  <a href="#what-its-good-for">What it's good for</a> ·
   <a href="#screenshots">Screenshots</a> ·
   <a href="#structure">Structure</a> ·
   <a href="#gemma-4-mlx-port">Gemma 4 MLX Port</a> ·
@@ -35,7 +36,18 @@
 
 This repo contains the iOS app, landing page, and brand assets.
 
-Yemma now ships on a single-bundle MLX Gemma 4 runtime. The app downloads one Hugging Face repository, validates the bundle locally, and lets MLX handle both text and image preprocessing in Swift.
+Yemma runs Gemma 4 E2B locally through a Swift-native MLX multimodal runtime. One model bundle handles both text and image flows. After a one-time download (~4.2 GB), the app works entirely offline — no cloud inference, no accounts, no telemetry.
+
+## What it's good for
+
+- Quick rewrites and everyday writing help
+- Personal notes and thinking out loud
+- Everyday questions answered on-device
+- Image explanations and visual help
+- Offline use — planes, commutes, anywhere without signal
+- Low-friction, no-account AI when you just need a hand
+
+Yemma is not trying to replace frontier cloud models. Where you need deep reasoning, broad world knowledge, or giant workflows, cloud AI is still better. Where you want something local, private, and always available, Yemma is a good fit.
 
 ## Features
 
@@ -48,8 +60,6 @@ Yemma now ships on a single-bundle MLX Gemma 4 runtime. The app downloads one Hu
 - Built-in diagnostics, debug probes, and simulator mock mode
 
 ## Screenshots
-
-Runtime controls, debug probes, and diagnostics.
 
 <table>
   <tr>
