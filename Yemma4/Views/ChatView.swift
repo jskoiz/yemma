@@ -1599,6 +1599,10 @@ struct ChatSidebarView: View {
         llmService.activeResponseStylePreset?.summary ?? "Custom mix of reply length and detail."
     }
 
+    private var advancedSubtitle: String {
+        return "Model controls, setup, and diagnostics."
+    }
+
     private var advancedRow: some View {
         NavigationLink {
             AdvancedSettingsView(
@@ -1609,11 +1613,11 @@ struct ChatSidebarView: View {
             actionRow(
                 icon: "gearshape.2",
                 title: "Advanced",
-                subtitle: "Model controls, setup, diagnostics, and debug tools."
+                subtitle: advancedSubtitle
             )
         }
         .buttonStyle(.plain)
-        .accessibilityHint("Opens advanced model controls, setup, diagnostics, and debug tools.")
+        .accessibilityHint("Opens \(advancedSubtitle.lowercased())")
     }
 
     private var trustRow: some View {

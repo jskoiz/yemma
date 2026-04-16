@@ -69,6 +69,7 @@ struct AdvancedSettingsView: View {
         } message: {
             Text("The recent diagnostics log is on the pasteboard.")
         }
+        .toolbar(.hidden, for: .navigationBar)
     }
 
     private var header: some View {
@@ -279,7 +280,7 @@ struct AdvancedSettingsView: View {
                 disclosureRow(
                     icon: "waveform.path.ecg",
                     title: "Diagnostics",
-                    detail: "Inspect recent events, copy the local log, or run debug checks.",
+                    detail: diagnosticsDetailText,
                     isExpanded: showDiagnostics
                 )
             }
@@ -290,6 +291,10 @@ struct AdvancedSettingsView: View {
                 diagnosticsContent
             }
         }
+    }
+
+    private var diagnosticsDetailText: String {
+        return "Inspect recent events and copy the local log."
     }
 
     private var diagnosticsContent: some View {
