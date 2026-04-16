@@ -20,50 +20,59 @@ struct ChatStarter: Identifiable, Hashable {
     static let defaults: [ChatStarter] = [
         ChatStarter(
             title: "Describe a photo",
-            subtitle: "Upload an image and break down what stands out",
+            subtitle: "Upload an image and tell me what stands out",
             prompt: "Describe this image clearly. Summarize what is happening, point out the key details, and mention anything easy to miss at a glance.",
             systemImage: "photo.on.rectangle.angled",
             behavior: .promptAndPickImage
         ),
         ChatStarter(
             title: "Teach me something",
-            subtitle: "Share a short history or science fact I probably do not know",
-            prompt: "Teach me one short surprising fact from history or science that most people do not know. Keep it clear and under three short paragraphs.",
+            subtitle: "Get a short fact or explanation",
+            prompt: "Teach me one useful fact or simple explanation. Keep it clear and under three short paragraphs.",
             systemImage: "sparkles",
             promptVariants: [
-                "Teach me one little-known history fact that sounds made up but is true. Explain it clearly in under three short paragraphs.",
-                "Teach me one surprising science fact about the natural world that most people do not know. Keep it clear and under three short paragraphs.",
-                "Teach me something unexpected about the human body or brain. Make it easy to understand and keep it under three short paragraphs.",
-                "Teach me one fascinating fact from archaeology or ancient history that most people miss. Explain why it matters in under three short paragraphs.",
+                "Teach me one history fact that is easy to remember and explain why it matters in under three short paragraphs.",
+                "Teach me one science fact that most people do not know and keep it clear in under three short paragraphs.",
+                "Teach me something useful about the human body or brain. Make it easy to understand and keep it under three short paragraphs.",
+                "Teach me one interesting fact from archaeology or ancient history and explain why it matters in under three short paragraphs.",
                 "Teach me one weird but true fact about animals, plants, or evolution. Keep it clear and under three short paragraphs.",
                 "Teach me one clever invention or engineering fact that changed everyday life in a surprising way. Keep it concise and under three short paragraphs."
             ],
             sendsImmediately: true
         ),
         ChatStarter(
-            title: "Tell me a random fact",
-            subtitle: "Give me one interesting fact with a quick explanation",
-            prompt: "Tell me one interesting random fact and explain why it is surprising in a few sentences. Keep it concise.",
-            systemImage: "lightbulb",
+            title: "Ask a simple question",
+            subtitle: "Get a clear answer in a few sentences",
+            prompt: "Answer this question clearly and briefly. If there are important caveats or tradeoffs, mention them.",
+            systemImage: "questionmark.circle",
             promptVariants: [
-                "Tell me one unexpected fact about space, the ocean, or Earth and explain why it is surprising in a few concise sentences.",
-                "Give me one strange but true fact about human behavior or biology and explain why it catches people off guard. Keep it concise.",
-                "Share one random fact about animals or nature that sounds fake but is true, then explain why it is surprising. Keep it concise.",
-                "Tell me one interesting fact from technology or math and give a quick explanation for why it matters. Keep it concise.",
-                "Give me one fun fact from language, culture, or history and explain the surprising part in a few sentences.",
-                "Tell me one random fact that would make someone say \"wait, really?\" and explain it briefly."
+                "Answer this simple question in plain language and keep it short.",
+                "Explain this like I am new to the topic and keep it to a few sentences.",
+                "Give me the most useful answer first, then add one sentence of context if needed."
+            ],
+            sendsImmediately: true
+        ),
+        ChatStarter(
+            title: "Rewrite or summarize",
+            subtitle: "Tighten text or turn it into a summary",
+            prompt: "Rewrite or summarize the text I share. Keep the meaning, tighten the wording, and make it easier to read.",
+            systemImage: "text.alignleft",
+            promptVariants: [
+                "Rewrite this to sound clearer and more natural while keeping the same meaning.",
+                "Summarize this into a few concise sentences without losing the key points.",
+                "Turn this into a shorter, cleaner version that is easier to read."
             ],
             sendsImmediately: true
         ),
         ChatStarter(
             title: "How is Yemma different?",
-            subtitle: "Compare it with ChatGPT or Claude and explain the tradeoffs",
-            prompt: "Explain how Yemma is different from ChatGPT, Claude, and other cloud AI assistants. Be honest about what Yemma is great at, what it is more private or convenient for, and what it may be worse at or not good at yet. Mention limitations like weaker performance on some hard tasks, less up-to-date knowledge, or missing cloud features if relevant. Keep it clear and easy to scan.",
+            subtitle: "See where Yemma fits best and where cloud AI may still do better",
+            prompt: "Explain what Yemma is best for as a local assistant on this iPhone, what it does well for everyday notes, rewrites, questions, and image help, and where cloud assistants may still be stronger on harder or more current tasks. Keep it calm, honest, and easy to scan.",
             systemImage: "lock.shield",
             promptVariants: [
-                "What makes Yemma different from ChatGPT or Claude? Explain the on-device privacy benefits, what Yemma is best for, and where it may fall short compared with larger cloud models. Keep it honest and easy to scan.",
-                "Compare Yemma with ChatGPT, Claude, and similar AI apps. Cover privacy, speed, offline use, and the tradeoffs or limitations someone should know before relying on it. Keep it clear and balanced.",
-                "Give me a simple comparison of Yemma versus ChatGPT or Claude. Explain what Yemma does well, what it is not as strong at, and the kinds of tasks where a cloud assistant might still do better."
+                "What is Yemma best for as a local assistant on iPhone? Explain what it does well, where it is most convenient, and where a cloud assistant may still do better on harder or newer questions. Keep it balanced and easy to scan.",
+                "Compare Yemma with ChatGPT or Claude in a calm, honest way. Focus on local use, everyday tasks, and the tradeoffs someone should know before relying on it.",
+                "Give me a simple overview of where Yemma fits best, what it is good at, and when a cloud model may still be the better choice."
             ],
             sendsImmediately: true
         )
@@ -93,7 +102,7 @@ struct EmptyStateView: View {
                         .font(AppTheme.Typography.brandSection)
                         .foregroundStyle(AppTheme.textPrimary)
 
-                    Text("Pick a starting point, or ask in your own words below.")
+                    Text("A local assistant for everyday notes, rewrites, questions, and image help. Cloud models may still do better on harder or more current tasks.")
                         .font(.system(size: 15, weight: .medium))
                         .foregroundStyle(AppTheme.textSecondary)
                 }
