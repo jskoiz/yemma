@@ -215,7 +215,7 @@ public struct OnboardingView: View {
             return "Use the simulator for UI testing. A real iPhone is required for on-device AI."
         }
 
-        return "One-time setup downloads the model locally. After that, chats stay on this device and work offline."
+        return "One-time setup saves the model on this iPhone. After that, Yemma works offline for everyday tasks."
     }
 
     private var setupCopy: SetupCopy {
@@ -224,7 +224,7 @@ public struct OnboardingView: View {
             return SetupCopy(
                 badgeText: "Simulator",
                 title: "UI preview mode",
-                message: "Use mocked replies here. Run Yemma on a physical iPhone for real on-device AI.",
+                message: "Use mocked replies here. Run Yemma on a physical iPhone for the real local assistant.",
                 note: nil,
                 actionTitle: "Continue in simulator",
                 actionSubtitle: "Mock replies for UI testing"
@@ -233,8 +233,8 @@ public struct OnboardingView: View {
             return SetupCopy(
                 badgeText: "One-time setup",
                 title: "Get Yemma ready",
-                message: "First launch downloads the model to this iPhone. Setup only happens once.",
-                note: nil,
+                message: "First launch saves the model on this iPhone. After setup, Yemma is ready for notes, rewrites, questions, and image help.",
+                note: "Best for everyday personal tasks. For hard or very current questions, a cloud model may still do better.",
                 actionTitle: "Start setup",
                 actionSubtitle: "Saved locally on this iPhone"
             )
@@ -242,7 +242,7 @@ public struct OnboardingView: View {
             return SetupCopy(
                 badgeText: progressPercentLabel,
                 title: "Setting up Yemma",
-                message: "Downloading the on-device model.",
+                message: "Downloading the model to this iPhone.",
                 note: "Setup keeps running in the background. You can leave this screen and come back later.",
                 actionTitle: "Resume setup",
                 actionSubtitle: "Continue from saved progress"
@@ -318,7 +318,7 @@ public struct OnboardingView: View {
             return [
                 SetupStat(title: "Download size", value: Self.formatBytes(appSetup.estimatedDownloadBytes)),
                 SetupStat(title: "Storage", value: "This iPhone"),
-                SetupStat(title: "Privacy", value: "No cloud"),
+                SetupStat(title: "Privacy", value: "On-device"),
                 SetupStat(title: "After setup", value: "Offline chat")
             ]
         case .downloading:
@@ -381,8 +381,8 @@ public struct OnboardingView: View {
 
         return [
             SetupBenefit(title: "Runs locally", systemImage: "iphone"),
-            SetupBenefit(title: "No cloud", systemImage: "icloud.slash"),
-            SetupBenefit(title: "Works offline, even in airplane mode", systemImage: "airplane")
+            SetupBenefit(title: "Best for everyday tasks", systemImage: "sparkles"),
+            SetupBenefit(title: "Works offline after setup", systemImage: "airplane")
         ]
     }
 
@@ -509,7 +509,7 @@ private struct OnboardingHeader: View {
                     .accessibilityLabel("Yemma 4")
             }
 
-            Text("Private AI chat on your iPhone")
+            Text("Local AI chat on your iPhone")
                 .font(.system(size: 32, weight: .bold))
                 .foregroundStyle(AppTheme.textPrimary)
                 .fixedSize(horizontal: false, vertical: true)

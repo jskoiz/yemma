@@ -2,9 +2,11 @@ import SwiftUI
 
 struct AdvancedSettingsView: View {
     @Environment(LLMService.self) private var llmService
+    @Environment(ModelDownloader.self) private var modelDownloader
     @Environment(AppDiagnostics.self) private var diagnostics
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @AppStorage(DebugPreferences.showsAssistantResponseStatsKey) private var showsAssistantResponseStats = false
 
     @State private var diagnosticsCopied = false
     @State private var showDiagnostics = false
@@ -48,45 +50,58 @@ struct AdvancedSettingsView: View {
             } header: {
                 header
                     .padding(.horizontal, AppTheme.Layout.screenPadding)
-                    .padding(.top, 12)
-                    .padding(.bottom, 12)
+                    .padding(.top, 0)
+                    .padding(.bottom, 8)
             }
         }
         .task {
             await diagnostics.loadPersistedEventsIfNeeded()
+        }
+        .onChange(of: showsAssistantResponseStats) { _, isEnabled in
+            diagnostics.record(
+                "Assistant response stats toggled",
+                category: "settings",
+                metadata: ["enabled": isEnabled]
+            )
         }
         .alert("Diagnostics copied", isPresented: $diagnosticsCopied) {
             Button("OK", role: .cancel) {}
         } message: {
             Text("The recent diagnostics log is on the pasteboard.")
         }
+        .toolbar(.hidden, for: .navigationBar)
     }
 
     private var header: some View {
-        HStack {
+        HStack(spacing: 16) {
             Button {
                 dismiss()
             } label: {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(AppTheme.textPrimary)
+                ZStack {
+                    Circle()
+                        .fill(AppTheme.controlFill)
+
+                    Circle()
+                        .stroke(AppTheme.controlBorder, lineWidth: 1)
+
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(AppTheme.textPrimary)
+                }
+                .frame(width: 48, height: 48)
             }
             .accessibilityLabel("Back")
             .accessibilityHint("Returns to the previous settings screen.")
 
-            Spacer()
-
             Text("Advanced")
                 .font(AppTheme.Typography.utilityTitle)
                 .foregroundStyle(AppTheme.textPrimary)
+                .frame(maxWidth: .infinity)
 
-            Spacer()
-
-            Image(systemName: "chevron.left")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(.clear)
+            Color.clear
+                .frame(width: 48, height: 48)
         }
-        .padding(.horizontal, 4)
+        .frame(height: 48)
     }
 
     private var overviewSection: some View {
@@ -101,6 +116,12 @@ struct AdvancedSettingsView: View {
                 icon: "cube.transparent",
                 title: "Runtime",
                 detail: "Gemma 4 MLX"
+            )
+            UtilitySectionSeparator()
+            infoRow(
+                icon: "shippingbox.circle",
+                title: "Model source",
+                detail: activeModelSourceDetailText
             )
             UtilitySectionSeparator()
             infoRow(
@@ -259,7 +280,7 @@ struct AdvancedSettingsView: View {
                 disclosureRow(
                     icon: "waveform.path.ecg",
                     title: "Diagnostics",
-                    detail: "Inspect recent events, copy the local log, or run debug checks.",
+                    detail: diagnosticsDetailText,
                     isExpanded: showDiagnostics
                 )
             }
@@ -270,6 +291,10 @@ struct AdvancedSettingsView: View {
                 diagnosticsContent
             }
         }
+    }
+
+    private var diagnosticsDetailText: String {
+        return "Inspect recent events and copy the local log."
     }
 
     private var diagnosticsContent: some View {
@@ -333,6 +358,28 @@ struct AdvancedSettingsView: View {
             }
 
 #if DEBUG
+            UtilitySectionSeparator()
+
+            toggleRow(
+                icon: "speedometer",
+                title: "Show response stats",
+                detail: "Print output tokens, tok/s, elapsed time, and RAM under new assistant replies.",
+                isOn: $showsAssistantResponseStats
+            )
+
+            UtilitySectionSeparator()
+
+                NavigationLink {
+                    DebugModelVariantsView()
+                } label: {
+                    utilityActionRow(
+                        icon: "shippingbox.circle",
+                        title: "Model source",
+                        detail: "Paste a Hugging Face URL, switch back to the app default, and inspect download progress."
+                    )
+                }
+                .buttonStyle(.plain)
+
             if let onRunDebugScenario {
                 UtilitySectionSeparator()
 
@@ -410,6 +457,14 @@ struct AdvancedSettingsView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, AppTheme.Layout.rowHorizontalPadding)
         .padding(.vertical, 14)
+    }
+
+    private var activeModelSourceDetailText: String {
+        if modelDownloader.isUsingDefaultModelSource {
+            return "App default"
+        }
+
+        return "Custom Hugging Face model"
     }
 
     private func infoRow(icon: String, title: String, detail: String) -> some View {
@@ -569,6 +624,34 @@ struct AdvancedSettingsView: View {
         .accessibilityElement(children: .combine)
     }
 
+    private func toggleRow(
+        icon: String,
+        title: String,
+        detail: String,
+        isOn: Binding<Bool>
+    ) -> some View {
+        Toggle(isOn: isOn) {
+            HStack(alignment: .top, spacing: 14) {
+                Image(systemName: icon)
+                    .frame(width: AppTheme.Layout.rowIconSize)
+                    .foregroundStyle(AppTheme.textPrimary)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(AppTheme.Typography.utilityRowTitle)
+                        .foregroundStyle(AppTheme.textPrimary)
+
+                    Text(detail)
+                        .font(AppTheme.Typography.utilityCaption)
+                        .foregroundStyle(AppTheme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .tint(AppTheme.accent)
+        .utilityRowPadding()
+    }
+
     private func tokenLabel(_ count: Int) -> String {
         if count >= 1024 {
             return String(format: "%.1fK", Double(count) / 1024.0)
@@ -580,12 +663,14 @@ struct AdvancedSettingsView: View {
 #if DEBUG
 #Preview("Advanced Settings") {
     AdvancedSettingsView()
+        .environment(ModelDownloader())
         .environment(LLMService())
         .environment(AppDiagnostics.shared)
 }
 
 #Preview("Advanced Settings Accessibility") {
     AdvancedSettingsView()
+        .environment(ModelDownloader())
         .environment(LLMService())
         .environment(AppDiagnostics.shared)
         .dynamicTypeSize(.accessibility3)

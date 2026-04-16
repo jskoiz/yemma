@@ -19,6 +19,7 @@
 		B10000005 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B10000006 /* Assets.xcassets */; };
 		B10000016 /* Appearance.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000017 /* Appearance.swift */; };
 		A2000001 /* AdvancedSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000002 /* AdvancedSettingsView.swift */; };
+		A2000003 /* DebugModelVariantsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000004 /* DebugModelVariantsView.swift */; };
 		B3034772627DBF9FD8624142 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92A43CA0C38A9D38EFA94487 /* SettingsView.swift */; };
 		C18F96B6430B9FFB84F7095B /* ChatMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F1B5296369F631217B7F995 /* ChatMessage.swift */; };
 		DF571A73493F2913161C6971 /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE484C3E95FF6F044B7B7BC4 /* ChatView.swift */; };
@@ -26,6 +27,11 @@
 		D3000005 /* StreamingRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3000006 /* StreamingRenderer.swift */; };
 		D3000007 /* ConversationBrowserSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3000008 /* ConversationBrowserSheet.swift */; };
 		D3000009 /* EmptyStateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D300000A /* EmptyStateView.swift */; };
+		D4000001 /* ChatComposerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4000002 /* ChatComposerView.swift */; };
+		D4000003 /* ChatIndicators.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4000004 /* ChatIndicators.swift */; };
+		D4000005 /* ChatMessageActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4000006 /* ChatMessageActions.swift */; };
+		D4000007 /* ChatShareSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4000008 /* ChatShareSheet.swift */; };
+		D4000009 /* ChatTranscriptView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D400000A /* ChatTranscriptView.swift */; };
 		CB7B05E97139FE38BFE49578 /* ConversationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60BF02FF587F6CBD41EDD4C6 /* ConversationStore.swift */; };
 		E1000001 /* MLXLMCommon in Frameworks */ = {isa = PBXBuildFile; productRef = E1000101 /* MLXLMCommon */; };
 		E1000002 /* MLXVLM in Frameworks */ = {isa = PBXBuildFile; productRef = E1000102 /* MLXVLM */; };
@@ -51,6 +57,7 @@
 		9F1B5296369F631217B7F995 /* ChatMessage.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ChatMessage.swift; sourceTree = "<group>"; };
 		A1000002 /* RichMessageText.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RichMessageText.swift; sourceTree = "<group>"; };
 		A2000002 /* AdvancedSettingsView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AdvancedSettingsView.swift; sourceTree = "<group>"; };
+		A2000004 /* DebugModelVariantsView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DebugModelVariantsView.swift; sourceTree = "<group>"; };
 		B10000002 /* Yemma4App.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Yemma4App.swift; sourceTree = "<group>"; };
 		B10000004 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		B10000006 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -60,6 +67,11 @@
 		D3000006 /* StreamingRenderer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StreamingRenderer.swift; sourceTree = "<group>"; };
 		D3000008 /* ConversationBrowserSheet.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ConversationBrowserSheet.swift; sourceTree = "<group>"; };
 		D300000A /* EmptyStateView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = EmptyStateView.swift; sourceTree = "<group>"; };
+		D4000002 /* ChatComposerView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ChatComposerView.swift; sourceTree = "<group>"; };
+		D4000004 /* ChatIndicators.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ChatIndicators.swift; sourceTree = "<group>"; };
+		D4000006 /* ChatMessageActions.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ChatMessageActions.swift; sourceTree = "<group>"; };
+		D4000008 /* ChatShareSheet.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ChatShareSheet.swift; sourceTree = "<group>"; };
+		D400000A /* ChatTranscriptView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ChatTranscriptView.swift; sourceTree = "<group>"; };
 		60BF02FF587F6CBD41EDD4C6 /* ConversationStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ConversationStore.swift; sourceTree = "<group>"; };
 		E1000007 /* MLXModelSupport.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MLXModelSupport.swift; sourceTree = "<group>"; };
 		E1000011 /* YemmaPromptPlanner.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = YemmaPromptPlanner.swift; sourceTree = "<group>"; };
@@ -87,11 +99,25 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		D400000B /* Chat */ = {
+			isa = PBXGroup;
+			children = (
+				D4000002 /* ChatComposerView.swift */,
+				D4000004 /* ChatIndicators.swift */,
+				D4000006 /* ChatMessageActions.swift */,
+				D4000008 /* ChatShareSheet.swift */,
+				D400000A /* ChatTranscriptView.swift */,
+			);
+			path = Chat;
+			sourceTree = "<group>";
+		};
 		54934DF62416A306B1C5304E /* Views */ = {
 			isa = PBXGroup;
 			children = (
 				A2000002 /* AdvancedSettingsView.swift */,
+				A2000004 /* DebugModelVariantsView.swift */,
 				FE484C3E95FF6F044B7B7BC4 /* ChatView.swift */,
+				D400000B /* Chat */,
 				D3000008 /* ConversationBrowserSheet.swift */,
 				D300000A /* EmptyStateView.swift */,
 				A1000002 /* RichMessageText.swift */,
@@ -215,7 +241,7 @@
 			packageReferences = (
 				759333B69AA7F2876F0CFA95 /* XCRemoteSwiftPackageReference "Chat" */,
 				A1000004 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */,
-				E1000201 /* XCLocalSwiftPackageReference "../mlx-vlm-swift/mlx-swift-lm" */,
+				E1000201 /* XCLocalSwiftPackageReference "../Dependencies/mlx-swift-lm" */,
 				E1000202 /* XCRemoteSwiftPackageReference "mlx-swift" */,
 				E1000203 /* XCRemoteSwiftPackageReference "swift-transformers" */,
 			);
@@ -258,6 +284,7 @@
 				F6A19338069476EC14B97082 /* ModelDownloader.swift in Sources */,
 				DF571A73493F2913161C6971 /* ChatView.swift in Sources */,
 				A1000001 /* RichMessageText.swift in Sources */,
+				A2000003 /* DebugModelVariantsView.swift in Sources */,
 				2174B7FC2EE2C3471527756A /* OnboardingView.swift in Sources */,
 				A2000001 /* AdvancedSettingsView.swift in Sources */,
 				B3034772627DBF9FD8624142 /* SettingsView.swift in Sources */,
@@ -266,6 +293,11 @@
 				E1000010 /* YemmaPromptPlanner.swift in Sources */,
 				D3000007 /* ConversationBrowserSheet.swift in Sources */,
 				D3000009 /* EmptyStateView.swift in Sources */,
+				D4000001 /* ChatComposerView.swift in Sources */,
+				D4000003 /* ChatIndicators.swift in Sources */,
+				D4000005 /* ChatMessageActions.swift in Sources */,
+				D4000007 /* ChatShareSheet.swift in Sources */,
+				D4000009 /* ChatTranscriptView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -544,9 +576,9 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		E1000201 /* XCLocalSwiftPackageReference "../mlx-vlm-swift/mlx-swift-lm" */ = {
+		E1000201 /* XCLocalSwiftPackageReference "../Dependencies/mlx-swift-lm" */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = "../mlx-vlm-swift/mlx-swift-lm";
+			relativePath = "../Dependencies/mlx-swift-lm";
 		};
 /* End XCLocalSwiftPackageReference section */
 
@@ -563,12 +595,12 @@
 		};
 		E1000101 /* MLXLMCommon */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = E1000201 /* XCLocalSwiftPackageReference "../mlx-vlm-swift/mlx-swift-lm" */;
+			package = E1000201 /* XCLocalSwiftPackageReference "../Dependencies/mlx-swift-lm" */;
 			productName = MLXLMCommon;
 		};
 		E1000102 /* MLXVLM */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = E1000201 /* XCLocalSwiftPackageReference "../mlx-vlm-swift/mlx-swift-lm" */;
+			package = E1000201 /* XCLocalSwiftPackageReference "../Dependencies/mlx-swift-lm" */;
 			productName = MLXVLM;
 		};
 		E1000103 /* MLX */ = {
