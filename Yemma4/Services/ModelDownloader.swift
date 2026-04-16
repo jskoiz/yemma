@@ -275,14 +275,14 @@ public final class ModelDownloader {
 
     var activeModelSourceBoundaryLabel: String {
         if isUsingDefaultModelSource {
-            return "Shipped default"
+            return "Default model"
         }
 
         if activeModelSource.isCustom {
-            return "Custom debug source"
+            return "Custom Hugging Face model"
         }
 
-        return "Experimental preset"
+        return "Hugging Face model"
     }
 
     private var lastSpeedSampleDate: Date?
@@ -331,42 +331,34 @@ public final class ModelDownloader {
 
     public var activeDownloadLabel: String {
         if isDownloaded {
-            return isUsingDefaultModelSource ? "Shipped model bundle is ready" : "Experimental model bundle is ready"
+            return "Model is ready"
         }
 
         if isDownloading {
-            return "Downloading \(activeModelSourceBoundaryLabel.lowercased())"
+            return "Downloading model"
         }
 
         if canResumeDownload {
-            return isUsingDefaultModelSource ? "Ready to resume setup" : "Ready to resume debug setup"
+            return "Ready to resume setup"
         }
 
-        return isUsingDefaultModelSource ? "Waiting to download" : "Waiting to download experimental source"
+        return "Waiting to download"
     }
 
     public var activeDownloadDetail: String {
         if isDownloaded {
-            return isUsingDefaultModelSource
-                ? "Everything is saved on this iPhone for the shipped default source."
-                : "Everything is saved on this iPhone for this debug-only source."
+            return "Everything is saved on this iPhone."
         }
 
         if isDownloading {
-            return isUsingDefaultModelSource
-                ? "Downloading the shipped default source from Hugging Face."
-                : "Downloading a debug-only source from Hugging Face."
+            return "Downloading from Hugging Face."
         }
 
         if canResumeDownload {
-            return isUsingDefaultModelSource
-                ? "Resume the saved setup progress."
-                : "Resume the saved debug setup progress."
+            return "Resume the saved setup progress."
         }
 
-        return isUsingDefaultModelSource
-            ? "Yemma needs a one-time local model download before chat is ready."
-            : "Yemma needs a one-time local download before this experimental source is ready."
+        return "Yemma needs a one-time local model download before chat is ready."
     }
 
     func selectModelSource(_ source: Gemma4ModelSource) async {
@@ -784,7 +776,7 @@ public final class ModelDownloader {
     private func describe(_ error: Error) -> String {
         if case Hub.HubClientError.authorizationRequired = error {
             return """
-                Yemma could not download the configured Hugging Face model source (\(activeModelSource.repositoryID)) because authentication was required. Provide a valid Hugging Face token or switch back to the shipped default source for first-launch setup.
+                Yemma could not download the selected Hugging Face model (\(activeModelSource.repositoryID)) because authentication was required. Provide a valid Hugging Face token or switch back to the app default model for first-launch setup.
                 """
         }
 
