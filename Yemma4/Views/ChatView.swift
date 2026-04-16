@@ -1189,7 +1189,6 @@ public struct ChatView: View {
         persistConversationNow()
     }
 }
-
 struct ChatSidebarView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
