@@ -40,6 +40,11 @@ let package = Package(
             exclude: [
                 "Yemma4.entitlements",
             ]
+        ),
+        .testTarget(
+            name: "Yemma4Tests",
+            dependencies: ["Yemma4"],
+            path: "Tests/Yemma4Tests"
         )
     ]
 )
