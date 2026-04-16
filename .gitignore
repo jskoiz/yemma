@@ -2,6 +2,7 @@
 DerivedData/
 .build/
 .swiftpm/
+Dependencies/
 .asc/
 .codex-builds/
 .codex-derived-data-device/
