@@ -2,9 +2,11 @@ import SwiftUI
 
 struct AdvancedSettingsView: View {
     @Environment(LLMService.self) private var llmService
+    @Environment(ModelDownloader.self) private var modelDownloader
     @Environment(AppDiagnostics.self) private var diagnostics
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @AppStorage(DebugPreferences.showsAssistantResponseStatsKey) private var showsAssistantResponseStats = false
 
     @State private var diagnosticsCopied = false
     @State private var showDiagnostics = false
@@ -55,6 +57,13 @@ struct AdvancedSettingsView: View {
         .task {
             await diagnostics.loadPersistedEventsIfNeeded()
         }
+        .onChange(of: showsAssistantResponseStats) { _, isEnabled in
+            diagnostics.record(
+                "Assistant response stats toggled",
+                category: "settings",
+                metadata: ["enabled": isEnabled]
+            )
+        }
         .alert("Diagnostics copied", isPresented: $diagnosticsCopied) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -101,6 +110,12 @@ struct AdvancedSettingsView: View {
                 icon: "cube.transparent",
                 title: "Runtime",
                 detail: "Gemma 4 MLX"
+            )
+            UtilitySectionSeparator()
+            infoRow(
+                icon: "shippingbox.circle",
+                title: "Model source",
+                detail: activeModelSourceDetailText
             )
             UtilitySectionSeparator()
             infoRow(
@@ -333,6 +348,28 @@ struct AdvancedSettingsView: View {
             }
 
 #if DEBUG
+            UtilitySectionSeparator()
+
+            toggleRow(
+                icon: "speedometer",
+                title: "Show response stats",
+                detail: "Print output tokens, tok/s, elapsed time, and RAM under new assistant replies.",
+                isOn: $showsAssistantResponseStats
+            )
+
+            UtilitySectionSeparator()
+
+                NavigationLink {
+                    DebugModelVariantsView()
+                } label: {
+                    utilityActionRow(
+                        icon: "shippingbox.circle",
+                        title: "Debug model variants",
+                        detail: "Open debug-only model switching, download progress, and unsupported Hugging Face source controls."
+                    )
+                }
+                .buttonStyle(.plain)
+
             if let onRunDebugScenario {
                 UtilitySectionSeparator()
 
@@ -410,6 +447,14 @@ struct AdvancedSettingsView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, AppTheme.Layout.rowHorizontalPadding)
         .padding(.vertical, 14)
+    }
+
+    private var activeModelSourceDetailText: String {
+        if modelDownloader.isUsingDefaultModelSource {
+            return "Shipped default: \(Gemma4MLXSupport.defaultModelSource.repositoryID)"
+        }
+
+        return "\(modelDownloader.activeModelSourceBoundaryLabel): \(modelDownloader.activeModelSource.repositoryID)"
     }
 
     private func infoRow(icon: String, title: String, detail: String) -> some View {
@@ -569,6 +614,34 @@ struct AdvancedSettingsView: View {
         .accessibilityElement(children: .combine)
     }
 
+    private func toggleRow(
+        icon: String,
+        title: String,
+        detail: String,
+        isOn: Binding<Bool>
+    ) -> some View {
+        Toggle(isOn: isOn) {
+            HStack(alignment: .top, spacing: 14) {
+                Image(systemName: icon)
+                    .frame(width: AppTheme.Layout.rowIconSize)
+                    .foregroundStyle(AppTheme.textPrimary)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(AppTheme.Typography.utilityRowTitle)
+                        .foregroundStyle(AppTheme.textPrimary)
+
+                    Text(detail)
+                        .font(AppTheme.Typography.utilityCaption)
+                        .foregroundStyle(AppTheme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .tint(AppTheme.accent)
+        .utilityRowPadding()
+    }
+
     private func tokenLabel(_ count: Int) -> String {
         if count >= 1024 {
             return String(format: "%.1fK", Double(count) / 1024.0)
@@ -580,12 +653,14 @@ struct AdvancedSettingsView: View {
 #if DEBUG
 #Preview("Advanced Settings") {
     AdvancedSettingsView()
+        .environment(ModelDownloader())
         .environment(LLMService())
         .environment(AppDiagnostics.shared)
 }
 
 #Preview("Advanced Settings Accessibility") {
     AdvancedSettingsView()
+        .environment(ModelDownloader())
         .environment(LLMService())
         .environment(AppDiagnostics.shared)
         .dynamicTypeSize(.accessibility3)
