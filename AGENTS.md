@@ -79,6 +79,12 @@ Services are `@Observable` and injected through SwiftUI environment:
 
 ## Build And Run
 
+### Bootstrap
+
+Run `./scripts/bootstrap_mlx_swift_lm.sh` after a fresh clone and any time you want to reset the local MLX dependency checkout. The script seeds from a validated local `mlx-swift-lm` checkout at `8b5eef7c9c1a698deb00f2699cb847988491163b` (default path `../mlx-vlm-swift/mlx-swift-lm`, override with `MLX_SWIFT_LM_SOURCE_DIR`), clones that into `Dependencies/mlx-swift-lm`, and applies `ci_scripts/patches/001-mlx-swift-lm-yemma-gemma4-port.patch`.
+
+Both `Package.swift` and `Yemma4.xcodeproj` point at that repo-relative checkout. Xcode Cloud uses the same bootstrap flow through `ci_scripts/ci_post_clone.sh`, so it needs the same validated seed checkout available in the workspace.
+
 ### Device
 
 Open `Yemma4.xcodeproj` in Xcode, target a physical iPhone, and run. The app downloads the MLX bundle on first launch.
