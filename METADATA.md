@@ -4,17 +4,19 @@
 Yemma 4
 
 ## Subtitle
-Private AI on Your iPhone
+AI That Lives on Your iPhone
 
 ## Description
-Yemma 4 is a fully private, on-device AI chat app for iPhone.
+Yemma 4 is an AI assistant that lives on your iPhone. It's good for everyday writing, quick questions, personal notes, and image help — and it works offline after a one-time setup.
 
-It runs Gemma 4 E2B locally through a Swift-native MLX multimodal runtime, so your prompts, images, and responses stay on your device. There is no account to create, no telemetry pipeline, and no cloud inference service in the middle of your conversations.
+The app runs Gemma 4 E2B locally through a Swift-native MLX multimodal runtime. One local model bundle handles both text chat and image understanding. There's no account to create, no cloud inference, and no telemetry.
 
-After the initial model bundle download, Yemma 4 works offline. The app no longer depends on separate text and vision GGUF files; it uses one local MLX bundle for both text chat and image understanding, and that bundle can be downloaded, stored, loaded, and deleted entirely on device.
+Yemma is not trying to replace the biggest cloud models. It's trying to be the assistant that's already with you, works anywhere, and keeps your stuff on your phone. Where cloud AI is better — deeper reasoning, broader world knowledge, giant workflows — use cloud AI. Where you want something local, private, and always available, Yemma is a good fit.
+
+After the initial model download (~4.2 GB), the app works entirely offline.
 
 ## Keywords
-AI, private, offline, LLM, chat, on-device, Gemma, local, no cloud
+AI, local, offline, chat, writing, notes, on-device, Gemma, private, assistant
 
 ## Privacy
 Yemma 4 does not collect any data. All inference runs locally on your device.
