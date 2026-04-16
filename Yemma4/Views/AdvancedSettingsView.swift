@@ -364,8 +364,8 @@ struct AdvancedSettingsView: View {
                 } label: {
                     utilityActionRow(
                         icon: "shippingbox.circle",
-                        title: "Debug model variants",
-                        detail: "Open debug-only model switching, download progress, and unsupported Hugging Face source controls."
+                        title: "Model source",
+                        detail: "Paste a Hugging Face URL, switch back to the app default, and inspect download progress."
                     )
                 }
                 .buttonStyle(.plain)
@@ -451,10 +451,10 @@ struct AdvancedSettingsView: View {
 
     private var activeModelSourceDetailText: String {
         if modelDownloader.isUsingDefaultModelSource {
-            return "Shipped default: \(Gemma4MLXSupport.defaultModelSource.repositoryID)"
+            return "App default"
         }
 
-        return "\(modelDownloader.activeModelSourceBoundaryLabel): \(modelDownloader.activeModelSource.repositoryID)"
+        return "Custom Hugging Face model"
     }
 
     private func infoRow(icon: String, title: String, detail: String) -> some View {
