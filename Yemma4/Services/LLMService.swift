@@ -97,11 +97,11 @@ enum ResponseStylePreset: String, CaseIterable, Identifiable, Sendable {
     var summary: String {
         switch self {
         case .focused:
-            return "Brief, direct answers with minimal filler."
+            return "Brief, direct answers."
         case .balanced:
-            return "Clear answers with a little context when it helps."
+            return "Clear answers, light context."
         case .detailed:
-            return "More depth, tradeoffs, and explanation when useful."
+            return "More depth when useful."
         }
     }
 
