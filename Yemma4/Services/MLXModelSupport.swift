@@ -2,17 +2,213 @@ import Foundation
 import MLXLMCommon
 import MLXVLM
 
+enum Gemma4ModelPreset: String, CaseIterable, Identifiable, Codable, Sendable {
+    case defaultE2B = "mlx-community/gemma-4-e2b-it-4bit"
+    case hereticUncensored = "deadbydawn101/gemma-4-E2B-Heretic-Uncensored-mlx-4bit"
+    case unslothE4B = "unsloth/gemma-4-E4B-it-UD-MLX-4bit"
+
+    var id: String { rawValue }
+
+    var repositoryID: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .defaultE2B:
+            return "Gemma 4 E2B"
+        case .hereticUncensored:
+            return "Heretic Uncensored"
+        case .unslothE4B:
+            return "Unsloth E4B"
+        }
+    }
+
+    var shortTitle: String {
+        switch self {
+        case .defaultE2B:
+            return "Default"
+        case .hereticUncensored:
+            return "Heretic"
+        case .unslothE4B:
+            return "Unsloth"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .defaultE2B:
+            return repositoryID
+        case .hereticUncensored:
+            return repositoryID
+        case .unslothE4B:
+            return repositoryID
+        }
+    }
+
+    var approximateDownloadBytes: Int64 {
+        Gemma4MLXSupport.defaultApproximateDownloadBytes
+    }
+
+    var sourceURL: URL {
+        URL(string: "https://huggingface.co/\(repositoryID)")!
+    }
+}
+
+struct Gemma4ModelSource: Codable, Equatable, Identifiable, Sendable {
+    enum Kind: String, Codable, Sendable {
+        case preset
+        case custom
+    }
+
+    let kind: Kind
+    let repositoryID: String
+    let sourceURLString: String?
+
+    var id: String { repositoryID }
+
+    var preset: Gemma4ModelPreset? {
+        Gemma4ModelPreset(rawValue: repositoryID)
+    }
+
+    var isCustom: Bool {
+        kind == .custom && preset == nil
+    }
+
+    var title: String {
+        preset?.title ?? "Custom model"
+    }
+
+    var shortTitle: String {
+        preset?.shortTitle ?? repositoryID
+    }
+
+    var detail: String {
+        preset?.detail ?? repositoryID
+    }
+
+    var approximateDownloadBytes: Int64 {
+        preset?.approximateDownloadBytes ?? Gemma4MLXSupport.defaultApproximateDownloadBytes
+    }
+
+    var sourceURL: URL {
+        if let sourceURLString, let url = URL(string: sourceURLString) {
+            return url
+        }
+
+        return URL(string: "https://huggingface.co/\(repositoryID)")!
+    }
+
+    static let defaultSource = preset(.defaultE2B)
+    static let debugPresetSources = Gemma4ModelPreset.allCases.map(Self.preset)
+
+    static func preset(_ preset: Gemma4ModelPreset) -> Self {
+        Self(
+            kind: .preset,
+            repositoryID: preset.repositoryID,
+            sourceURLString: preset.sourceURL.absoluteString
+        )
+    }
+
+    static func custom(repositoryID: String, sourceURLString: String? = nil) -> Self {
+        if let preset = Gemma4ModelPreset(rawValue: repositoryID) {
+            return .preset(preset)
+        }
+
+        return Self(
+            kind: .custom,
+            repositoryID: repositoryID,
+            sourceURLString: sourceURLString ?? "https://huggingface.co/\(repositoryID)"
+        )
+    }
+
+    static func fromUserInput(_ input: String) throws -> Self {
+        let repositoryID = try parseRepositoryID(from: input)
+        return custom(repositoryID: repositoryID, sourceURLString: "https://huggingface.co/\(repositoryID)")
+    }
+
+    private static func parseRepositoryID(from input: String) throws -> String {
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            throw Gemma4ModelSourceInputError.emptyInput
+        }
+
+        if let url = URL(string: trimmed), let scheme = url.scheme, !scheme.isEmpty {
+            let supportedHosts = ["huggingface.co", "www.huggingface.co"]
+            guard let host = url.host?.lowercased(), supportedHosts.contains(host) else {
+                throw Gemma4ModelSourceInputError.unsupportedHost(trimmed)
+            }
+
+            let pathComponents = url.pathComponents
+                .filter { $0 != "/" }
+                .filter { !$0.isEmpty }
+            guard pathComponents.count >= 2 else {
+                throw Gemma4ModelSourceInputError.missingRepository(trimmed)
+            }
+
+            return try normalizeRepositoryID("\(pathComponents[0])/\(pathComponents[1])")
+        }
+
+        return try normalizeRepositoryID(trimmed)
+    }
+
+    private static func normalizeRepositoryID(_ input: String) throws -> String {
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        let components = trimmed
+            .split(separator: "/", omittingEmptySubsequences: true)
+            .map(String.init)
+
+        guard components.count == 2 else {
+            throw Gemma4ModelSourceInputError.invalidRepositoryID(trimmed)
+        }
+
+        guard components.allSatisfy({ !$0.contains(where: { $0.isWhitespace }) }) else {
+            throw Gemma4ModelSourceInputError.invalidRepositoryID(trimmed)
+        }
+
+        return components.joined(separator: "/")
+    }
+}
+
+private enum Gemma4ModelSourceInputError: LocalizedError {
+    case emptyInput
+    case unsupportedHost(String)
+    case missingRepository(String)
+    case invalidRepositoryID(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .emptyInput:
+            return "Enter a Hugging Face repository URL or an owner/repository id."
+        case let .unsupportedHost(input):
+            return "Only Hugging Face repository URLs are supported: \(input)"
+        case let .missingRepository(input):
+            return "That Hugging Face URL does not include an owner and repository: \(input)"
+        case let .invalidRepositoryID(input):
+            return "Use a repository id like owner/repository or a full Hugging Face URL: \(input)"
+        }
+    }
+}
+
 enum Gemma4MLXSupport {
-    static let repositoryID = "mlx-community/gemma-4-e2b-it-4bit"
-    static let legacyRepositoryIDs = [
-        "EZCon/gemma-4-E2B-it-4bit-mlx"
+    static let defaultApproximateDownloadBytes: Int64 = 4_200_000_000
+    static let defaultModelSource = Gemma4ModelSource.defaultSource
+    static let repositoryID = defaultModelSource.repositoryID
+    static let legacyRepositoryIDsByPrimaryRepository = [
+        Gemma4ModelPreset.defaultE2B.repositoryID: ["EZCon/gemma-4-E2B-it-4bit-mlx"]
     ]
     static let repositoryRevision = "main"
-    static let approximateDownloadBytes: Int64 = 4_200_000_000
+    static let approximateDownloadBytes: Int64 = defaultApproximateDownloadBytes
     static let defaultImagePrompt = "Describe the scene in this image in one short paragraph."
     static let automatedSmokeImageAssetName = "Gemma4SmokeImage"
     static let templateContext: [String: any Sendable] = ["enable_thinking": false]
     static let downloadPatterns = ["*.safetensors", "*.json", "*.jinja"]
+
+    static func knownRepositoryIDs(for source: Gemma4ModelSource) -> [String] {
+        [source.repositoryID] + legacyRepositoryIDs(for: source)
+    }
+
+    static func legacyRepositoryIDs(for source: Gemma4ModelSource) -> [String] {
+        legacyRepositoryIDsByPrimaryRepository[source.repositoryID] ?? []
+    }
 
     @discardableResult
     static func normalizeAssetContractIfNeeded(_ validatedDirectory: ValidatedModelDirectory) throws -> Bool {
