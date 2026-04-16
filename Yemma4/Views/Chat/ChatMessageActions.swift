@@ -32,122 +32,12 @@ enum AssistantRefinement: String {
     }
 }
 
-struct ChatResponseStatsLabel: View {
-    let stats: GenerationDebugStats
-
-    var body: some View {
-        ViewThatFits(in: .horizontal) {
-            Text(fullText)
-            Text(compactText)
-            Text(minimalText ?? "\(tokenLabel(stats.generationTokenCount)) tok")
-        }
-        .font(.system(size: 11, weight: .medium, design: .monospaced))
-        .foregroundStyle(AppTheme.textTertiary)
-        .lineLimit(1)
-        .minimumScaleFactor(0.82)
-        .accessibilityLabel(accessibilityText)
-    }
-
-    private var fullText: String {
-        let parts: [String] = [
-            "\(tokenLabel(stats.generationTokenCount)) tok",
-            minimalText,
-            memoryText
-        ]
-        .compactMap { value in
-            guard let value, !value.isEmpty else { return nil }
-            return value
-        }
-
-        return parts.joined(separator: " • ")
-    }
-
-    private var compactText: String {
-        let parts: [String] = [
-            minimalText,
-            memoryText
-        ]
-        .compactMap { value in
-            guard let value, !value.isEmpty else { return nil }
-            return value
-        }
-
-        if parts.isEmpty {
-            return "\(tokenLabel(stats.generationTokenCount)) tok"
-        }
-
-        return parts.joined(separator: " • ")
-    }
-
-    private var minimalText: String? {
-        let parts = [
-            stats.tokensPerSecond.map { String(format: "%.1f tok/s", $0) },
-            elapsedText(stats.elapsedSeconds)
-        ]
-        .compactMap { $0 }
-
-        guard !parts.isEmpty else { return nil }
-        return parts.joined(separator: " • ")
-    }
-
-    private var memoryText: String? {
-        guard let memoryFootprintBytes = stats.memoryFootprintBytes else { return nil }
-        return "RAM \(ByteCountFormatter.string(fromByteCount: Int64(memoryFootprintBytes), countStyle: .memory))"
-    }
-
-    private var accessibilityText: String {
-        var parts = ["\(tokenLabel(stats.generationTokenCount)) generated tokens"]
-
-        if let tokensPerSecond = stats.tokensPerSecond {
-            parts.append(String(format: "%.1f tokens per second", tokensPerSecond))
-        }
-
-        if let elapsedText = elapsedText(stats.elapsedSeconds) {
-            parts.append("Elapsed \(elapsedText)")
-        }
-
-        if let memoryText {
-            parts.append(memoryText)
-        }
-
-        if let memoryDeltaBytes = stats.memoryFootprintDeltaBytes {
-            let sign = memoryDeltaBytes >= 0 ? "up" : "down"
-            let delta = ByteCountFormatter.string(
-                fromByteCount: Int64(abs(memoryDeltaBytes)),
-                countStyle: .memory
-            )
-            parts.append("Memory \(sign) \(delta)")
-        }
-
-        return parts.joined(separator: ", ")
-    }
-
-    private func tokenLabel(_ count: Int) -> String {
-        if count >= 1024 {
-            return String(format: "%.1fK", Double(count) / 1024.0)
-        }
-        return "\(count)"
-    }
-
-    private func elapsedText(_ elapsedSeconds: TimeInterval) -> String? {
-        guard elapsedSeconds > 0 else { return nil }
-
-        if elapsedSeconds < 10 {
-            return String(format: "%.1fs", elapsedSeconds)
-        }
-
-        return String(format: "%.0fs", elapsedSeconds.rounded())
-    }
-}
-
 struct ChatMessageActionStrip: View {
     let messageID: String
     let messageText: String
     let index: Int
     let isGenerating: Bool
     let canRetry: Bool
-    let showsResponseStats: Bool
-    let responseStats: GenerationDebugStats?
     let onCopy: () -> Void
     let onShare: () -> Void
     let onRetry: () -> Void
@@ -157,11 +47,6 @@ struct ChatMessageActionStrip: View {
         let trimmedText = messageText.trimmingCharacters(in: .whitespacesAndNewlines)
 
         HStack(spacing: 14) {
-            if let responseStats, showsResponseStats {
-                ChatResponseStatsLabel(stats: responseStats)
-                Spacer(minLength: 0)
-            }
-
             if !trimmedText.isEmpty {
                 actionButton(
                     title: "Copy",
