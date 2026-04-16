@@ -351,6 +351,7 @@ struct DebugModelVariantsView: View {
         } message: {
             Text("Yemma will unload the current model before switching. Unsupported repositories may fail validation or load incorrectly.")
         }
+        .toolbar(.hidden, for: .navigationBar)
     }
 
     private var header: some View {
