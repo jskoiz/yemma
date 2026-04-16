@@ -12,9 +12,11 @@ public struct ChatView: View {
     @Environment(ModelDownloader.self) private var modelDownloader
     @Environment(LLMService.self) private var llmService
     @Environment(ConversationStore.self) private var conversationStore
+    @AppStorage(DebugPreferences.showsAssistantResponseStatsKey) private var showsAssistantResponseStats = false
 
     private let supportsLocalModelRuntime = Yemma4AppConfiguration.supportsLocalModelRuntime
     @State private var messages: [ChatMessage] = []
+    @State private var assistantResponseStats: [String: GenerationDebugStats] = [:]
     @State private var draft = ""
     @State private var selectedPhotoItems: [PhotosPickerItem] = []
     @State private var pendingAttachments: [Attachment] = []
@@ -304,6 +306,8 @@ public struct ChatView: View {
             streamingMessageID: streamingMessageID,
             isGenerating: llmService.isGenerating,
             completedAssistantMessageIDs: completedAssistantMessageIDs,
+            assistantResponseStats: assistantResponseStats,
+            showsAssistantResponseStats: showsAssistantResponseStats,
             topInset: topInset,
             isPinnedToBottom: $isPinnedToBottom,
             scrollViewportHeight: $scrollViewportHeight,
@@ -589,6 +593,7 @@ public struct ChatView: View {
 
         await stopGeneration()
         updateMessageText(id: message.id, text: "")
+        assistantResponseStats.removeValue(forKey: message.id)
         completedAssistantMessageIDs.remove(message.id)
         streamingMessageID = message.id
         generationError = nil
@@ -646,6 +651,7 @@ public struct ChatView: View {
     private func applyConversationSnapshot(_ snapshot: ConversationSnapshot) {
         loadedConversationID = snapshot.id
         messages = snapshot.messages
+        assistantResponseStats = [:]
         completedAssistantMessageIDs = Set(
             snapshot.messages
                 .filter { !$0.user.isCurrentUser && !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
@@ -973,6 +979,7 @@ public struct ChatView: View {
             )
         )
 
+        assistantResponseStats.removeValue(forKey: assistantID)
         completedAssistantMessageIDs.remove(assistantID)
         streamingMessageID = assistantID
         isPinnedToBottom = true
@@ -996,6 +1003,7 @@ public struct ChatView: View {
         assistantID: String
     ) async {
         var streamingPolicy = StreamingUpdatePolicy()
+        let previousGenerationID = llmService.lastGenerationStats?.generationID
 
         defer {
             Task { @MainActor in
@@ -1021,8 +1029,15 @@ public struct ChatView: View {
 
         // Final flush — applies full sanitization and switches to markdown rendering
         let finalText = streamingPolicy.finalize()
+        let responseStats = llmService.lastGenerationStats?.generationID == previousGenerationID
+            ? nil
+            : llmService.lastGenerationStats
         await MainActor.run {
-            finalizeAssistantMessage(id: assistantID, text: finalText)
+            finalizeAssistantMessage(
+                id: assistantID,
+                text: finalText,
+                responseStats: responseStats
+            )
             persistConversationNow()
         }
 
@@ -1044,17 +1059,27 @@ public struct ChatView: View {
     }
 
     @MainActor
-    private func finalizeAssistantMessage(id: String, text: String) {
+    private func finalizeAssistantMessage(
+        id: String,
+        text: String,
+        responseStats: GenerationDebugStats?
+    ) {
         guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
 
         if text.isEmpty {
             messages.remove(at: index)
             completedAssistantMessageIDs.remove(id)
+            assistantResponseStats.removeValue(forKey: id)
             return
         }
 
         messages[index].text = text
         completedAssistantMessageIDs.insert(id)
+        if let responseStats {
+            assistantResponseStats[id] = responseStats
+        } else {
+            assistantResponseStats.removeValue(forKey: id)
+        }
         persistConversationNow()
     }
 
@@ -1065,6 +1090,7 @@ public struct ChatView: View {
         AppDiagnostics.shared.record("Conversation cleared", category: "ui", metadata: ["previousMessages": messages.count])
         await stopGeneration()
         messages.removeAll()
+        assistantResponseStats.removeAll()
         completedAssistantMessageIDs.removeAll()
         draft = ""
         pendingAttachments.removeAll()
