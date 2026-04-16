@@ -102,11 +102,11 @@ final class BackgroundModelDownloadCoordinator: NSObject, @unchecked Sendable {
         )
 
         try await enqueueMissingTasks(using: manifest, hub: hub)
-        return await snapshot(using: hub)
+        return await snapshot(using: hub, repositoryID: repositoryID)
     }
 
-    func snapshot(using hub: HubApi) async -> BackgroundModelDownloadSnapshot {
-        guard let persistedState = loadState(using: hub) else {
+    func snapshot(using hub: HubApi, repositoryID: String) async -> BackgroundModelDownloadSnapshot {
+        guard let persistedState = loadState(using: hub, repositoryID: repositoryID) else {
             return BackgroundModelDownloadSnapshot(
                 totalBytes: 0,
                 completedBytes: 0,
@@ -118,12 +118,21 @@ final class BackgroundModelDownloadCoordinator: NSObject, @unchecked Sendable {
 
         let manifest = persistedState.manifest
         let tasks = await currentTasks()
-        let runningTasks = tasks.filter { $0.state == .running || $0.state == .suspended }
+        let scopedTasks = tasks.filter { task in
+            guard let descriptor = Self.parseTaskDescription(task.taskDescription) else {
+                return false
+            }
+            return descriptor.repositoryID == repositoryID
+        }
+        let runningTasks = scopedTasks.filter { $0.state == .running || $0.state == .suspended }
         let taskMap: [String: URLSessionTask] = tasks.reduce(into: [:]) { partialResult, task in
-            guard let relativePath = task.taskDescription else {
+            guard let descriptor = Self.parseTaskDescription(task.taskDescription) else {
                 return
             }
-            partialResult[relativePath] = task
+            guard descriptor.repositoryID == repositoryID else {
+                return
+            }
+            partialResult[descriptor.relativePath] = task
         }
 
         let repoLocation = hub.localRepoLocation(Hub.Repo(id: manifest.repositoryID))
@@ -168,8 +177,8 @@ final class BackgroundModelDownloadCoordinator: NSObject, @unchecked Sendable {
         )
     }
 
-    func clearState(using hub: HubApi) async {
-        let repoLocation = hub.localRepoLocation(Hub.Repo(id: Gemma4MLXSupport.repositoryID))
+    func clearState(using hub: HubApi, repositoryID: String) async {
+        let repoLocation = hub.localRepoLocation(Hub.Repo(id: repositoryID))
         try? await cancelAllTasks()
         try? fileManager.removeItem(at: cacheDirectory(for: repoLocation))
     }
@@ -183,7 +192,7 @@ final class BackgroundModelDownloadCoordinator: NSObject, @unchecked Sendable {
         let repo = Hub.Repo(id: repositoryID)
         let repoLocation = hub.localRepoLocation(repo)
 
-        if let persistedState = loadState(using: hub),
+        if let persistedState = loadState(using: hub, repositoryID: repositoryID),
             persistedState.manifest.repositoryID == repositoryID,
             persistedState.manifest.revision == revision
         {
@@ -263,7 +272,9 @@ final class BackgroundModelDownloadCoordinator: NSObject, @unchecked Sendable {
                 continue
             }
 
-            if existingTaskDescriptions.contains(file.relativePath) {
+            if existingTaskDescriptions.contains(
+                Self.taskDescription(repositoryID: manifest.repositoryID, relativePath: file.relativePath)
+            ) {
                 continue
             }
 
@@ -280,7 +291,10 @@ final class BackgroundModelDownloadCoordinator: NSObject, @unchecked Sendable {
                 task = session.downloadTask(with: request)
             }
 
-            task.taskDescription = file.relativePath
+            task.taskDescription = Self.taskDescription(
+                repositoryID: manifest.repositoryID,
+                relativePath: file.relativePath
+            )
             task.resume()
         }
     }
@@ -300,8 +314,8 @@ final class BackgroundModelDownloadCoordinator: NSObject, @unchecked Sendable {
         return fileSize.int64Value == file.expectedBytes
     }
 
-    private func loadState(using hub: HubApi) -> PersistedState? {
-        let repoLocation = hub.localRepoLocation(Hub.Repo(id: Gemma4MLXSupport.repositoryID))
+    private func loadState(using hub: HubApi, repositoryID: String) -> PersistedState? {
+        let repoLocation = hub.localRepoLocation(Hub.Repo(id: repositoryID))
         let stateURL = stateURL(for: repoLocation)
         guard let data = try? Data(contentsOf: stateURL) else {
             return nil
@@ -330,13 +344,31 @@ final class BackgroundModelDownloadCoordinator: NSObject, @unchecked Sendable {
         }
     }
 
-    private func updateLastError(_ message: String?) {
+    private func updateLastError(_ message: String?, repositoryID: String) {
         let hub = HubApi.shared
-        guard var state = loadState(using: hub) else {
+        guard var state = loadState(using: hub, repositoryID: repositoryID) else {
             return
         }
         state.lastError = message
         saveState(state, using: hub)
+    }
+
+    private static func taskDescription(repositoryID: String, relativePath: String) -> String {
+        "\(repositoryID)|\(relativePath)"
+    }
+
+    private static func parseTaskDescription(_ rawValue: String?) -> (repositoryID: String, relativePath: String)? {
+        guard let rawValue, let separatorIndex = rawValue.firstIndex(of: "|") else {
+            return nil
+        }
+
+        let repositoryID = String(rawValue[..<separatorIndex])
+        let relativePath = String(rawValue[rawValue.index(after: separatorIndex)...])
+        guard !repositoryID.isEmpty, !relativePath.isEmpty else {
+            return nil
+        }
+
+        return (repositoryID, relativePath)
     }
 
     private func cacheDirectory(for repoLocation: URL) -> URL {
@@ -421,17 +453,17 @@ extension BackgroundModelDownloadCoordinator: URLSessionDownloadDelegate, URLSes
         downloadTask: URLSessionDownloadTask,
         didFinishDownloadingTo location: URL
     ) {
-        guard let relativePath = downloadTask.taskDescription else {
+        guard let descriptor = Self.parseTaskDescription(downloadTask.taskDescription) else {
             return
         }
 
         let hub = HubApi.shared
-        guard let state = loadState(using: hub) else {
+        guard let state = loadState(using: hub, repositoryID: descriptor.repositoryID) else {
             return
         }
 
         let repoLocation = hub.localRepoLocation(Hub.Repo(id: state.manifest.repositoryID))
-        let destination = repoLocation.appending(path: relativePath)
+        let destination = repoLocation.appending(path: descriptor.relativePath)
 
         do {
             if fileManager.fileExists(atPath: destination.path) {
@@ -442,18 +474,20 @@ extension BackgroundModelDownloadCoordinator: URLSessionDownloadDelegate, URLSes
             try fileManager.moveItem(at: location, to: destination)
 
             if
-                let file = state.manifest.files.first(where: { $0.relativePath == relativePath }),
+                let file = state.manifest.files.first(where: { $0.relativePath == descriptor.relativePath }),
                 let attributes = try? fileManager.attributesOfItem(atPath: destination.path),
                 let fileSize = attributes[.size] as? NSNumber,
                 fileSize.int64Value != file.expectedBytes
             {
-                throw Hub.HubClientError.downloadError("Downloaded file size did not match \(relativePath).")
+                throw Hub.HubClientError.downloadError(
+                    "Downloaded file size did not match \(descriptor.relativePath)."
+                )
             }
 
-            removeResumeData(for: relativePath, in: repoLocation)
-            updateLastError(nil)
+            removeResumeData(for: descriptor.relativePath, in: repoLocation)
+            updateLastError(nil, repositoryID: descriptor.repositoryID)
         } catch {
-            updateLastError(error.localizedDescription)
+            updateLastError(error.localizedDescription, repositoryID: descriptor.repositoryID)
         }
     }
 
@@ -466,22 +500,24 @@ extension BackgroundModelDownloadCoordinator: URLSessionDownloadDelegate, URLSes
             return
         }
 
+        guard let descriptor = Self.parseTaskDescription(task.taskDescription) else {
+            return
+        }
+
         let hub = HubApi.shared
-        guard let state = loadState(using: hub) else {
+        guard let state = loadState(using: hub, repositoryID: descriptor.repositoryID) else {
             return
         }
 
         let repoLocation = hub.localRepoLocation(Hub.Repo(id: state.manifest.repositoryID))
-        let relativePath = task.taskDescription ?? "unknown"
+        let relativePath = descriptor.relativePath
 
         let nsError = error as NSError
-        if let resumeData = nsError.userInfo[NSURLSessionDownloadTaskResumeData] as? Data,
-            task.taskDescription != nil
-        {
+        if let resumeData = nsError.userInfo[NSURLSessionDownloadTaskResumeData] as? Data {
             persistResumeData(resumeData, for: relativePath, in: repoLocation)
         }
 
-        updateLastError(error.localizedDescription)
+        updateLastError(error.localizedDescription, repositoryID: descriptor.repositoryID)
     }
 
     func urlSessionDidFinishEvents(forBackgroundURLSession session: URLSession) {

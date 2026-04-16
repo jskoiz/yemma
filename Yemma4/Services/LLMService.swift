@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import Darwin
 import MLX
 import MLXLMCommon
 import MLXVLM
@@ -41,6 +42,18 @@ enum ModelLoadStage: Sendable {
             return "Yemma could not finish getting ready."
         }
     }
+}
+
+struct GenerationDebugStats: Sendable, Equatable {
+    let generationID: UUID
+    let promptTokenCount: Int
+    let generationTokenCount: Int
+    let tokensPerSecond: Double?
+    let elapsedSeconds: TimeInterval
+    let memoryFootprintBytes: UInt64?
+    let memoryFootprintDeltaBytes: Int64?
+    let stopReason: String
+    let isSimulated: Bool
 }
 
 enum LLMServiceError: LocalizedError {
@@ -497,6 +510,7 @@ final class LLMService: @unchecked Sendable {
     }
     var lastError: String?
     var modelLoadStage: ModelLoadStage = .idle
+    var lastGenerationStats: GenerationDebugStats?
 
     var isTextModelReady: Bool {
         isModelLoaded
@@ -780,6 +794,10 @@ final class LLMService: @unchecked Sendable {
             "UserInput route=\(promptRoute.rawValue, privacy: .public) mode=\(promptMode, privacy: .public) messages=\(conversation.count, privacy: .public)"
         )
 
+        let generationStartUptime = ProcessInfo.processInfo.systemUptime
+        let generationStartMemoryFootprint = Self.currentMemoryFootprintBytes()
+        let generationID = UUID()
+
         let stream = AsyncStream<String> { continuation in
             let task = Task {
                 do {
@@ -885,15 +903,47 @@ final class LLMService: @unchecked Sendable {
                             }
 
                         case let .info(info):
+                            let elapsedSeconds = max(ProcessInfo.processInfo.systemUptime - generationStartUptime, 0)
+                            let memoryFootprintBytes = Self.currentMemoryFootprintBytes()
+                            let memoryFootprintDeltaBytes: Int64? = {
+                                guard let start = generationStartMemoryFootprint,
+                                      let end = memoryFootprintBytes else {
+                                    return nil
+                                }
+                                return Int64(end) - Int64(start)
+                            }()
+                            let generationStats = GenerationDebugStats(
+                                generationID: generationID,
+                                promptTokenCount: info.promptTokenCount,
+                                generationTokenCount: info.generationTokenCount,
+                                tokensPerSecond: info.tokensPerSecond,
+                                elapsedSeconds: elapsedSeconds,
+                                memoryFootprintBytes: memoryFootprintBytes,
+                                memoryFootprintDeltaBytes: memoryFootprintDeltaBytes,
+                                stopReason: String(describing: info.stopReason),
+                                isSimulated: false
+                            )
+                            await MainActor.run {
+                                self.lastGenerationStats = generationStats
+                            }
+
+                            var completionMetadata: [String: CustomStringConvertible] = [
+                                "promptTokens": info.promptTokenCount,
+                                "generationTokens": info.generationTokenCount,
+                                "tokensPerSecond": String(format: "%.1f", info.tokensPerSecond),
+                                "elapsedSeconds": String(format: "%.2f", elapsedSeconds),
+                                "stopReason": String(describing: info.stopReason)
+                            ]
+                            if let memoryFootprintBytes {
+                                completionMetadata["memoryFootprint"] = Self.byteCountText(memoryFootprintBytes)
+                            }
+                            if let memoryFootprintDeltaBytes {
+                                completionMetadata["memoryDelta"] = Self.signedByteDeltaText(memoryFootprintDeltaBytes)
+                            }
                             AppDiagnostics.shared.record(
                                 "Generation finished",
                                 category: "generation",
-                                metadata: [
-                                    "promptTokens": info.promptTokenCount,
-                                    "generationTokens": info.generationTokenCount,
-                                    "tokensPerSecond": String(format: "%.1f", info.tokensPerSecond),
-                                    "stopReason": String(describing: info.stopReason)
-                                ]
+                                metadata: completionMetadata
                             )
                             if let parser {
                                 if Yemma4AutomationConfiguration.current.rawTokenLoggingEnabled {
@@ -931,6 +981,7 @@ final class LLMService: @unchecked Sendable {
             Task { @MainActor [weak self] in
                 self?.isGenerating = true
                 self?.lastError = nil
+                self?.lastGenerationStats = nil
             }
 
             continuation.onTermination = { @Sendable _ in
@@ -1391,12 +1442,46 @@ private extension LLMService {
             Task { @MainActor [weak self] in
                 self?.isGenerating = true
                 self?.lastError = nil
+                self?.lastGenerationStats = nil
             }
 
             continuation.onTermination = { @Sendable _ in
                 task.cancel()
             }
         }
+    }
+
+    private static func currentMemoryFootprintBytes() -> UInt64? {
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(
+            MemoryLayout<task_vm_info_data_t>.stride / MemoryLayout<integer_t>.stride
+        )
+
+        let result = withUnsafeMutablePointer(to: &info) { pointer in
+            pointer.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { reboundPointer in
+                task_info(
+                    mach_task_self_,
+                    task_flavor_t(TASK_VM_INFO),
+                    reboundPointer,
+                    &count
+                )
+            }
+        }
+
+        guard result == KERN_SUCCESS else {
+            return nil
+        }
+
+        return info.phys_footprint
+    }
+
+    private static func byteCountText(_ bytes: UInt64) -> String {
+        ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .memory)
+    }
+
+    private static func signedByteDeltaText(_ deltaBytes: Int64) -> String {
+        let prefix = deltaBytes >= 0 ? "+" : "-"
+        return "\(prefix)\(ByteCountFormatter.string(fromByteCount: abs(deltaBytes), countStyle: .memory))"
     }
 
     private static func simulatorResponse(
