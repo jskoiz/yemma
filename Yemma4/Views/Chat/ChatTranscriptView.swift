@@ -14,8 +14,6 @@ struct ChatTranscriptView: View {
     let streamingMessageID: String?
     let isGenerating: Bool
     let completedAssistantMessageIDs: Set<String>
-    let assistantResponseStats: [String: GenerationDebugStats]
-    let showsAssistantResponseStats: Bool
     let topInset: CGFloat
     @Binding var isPinnedToBottom: Bool
     @Binding var scrollViewportHeight: CGFloat
@@ -143,8 +141,6 @@ struct ChatTranscriptView: View {
                     streamingMessageID: streamingMessageID,
                     isGenerating: isGenerating,
                     completedAssistantMessageIDs: completedAssistantMessageIDs,
-                    assistantResponseStats: assistantResponseStats,
-                    showsAssistantResponseStats: showsAssistantResponseStats,
                     shouldShowMessageActionStrip: shouldShowActionStrip,
                     canRetryAssistantResponse: canRetry,
                     onCopyMessageText: onCopyMessageText,
@@ -320,8 +316,6 @@ private struct ChatAssistantMessageBody: View {
     let streamingMessageID: String?
     let isGenerating: Bool
     let completedAssistantMessageIDs: Set<String>
-    let assistantResponseStats: [String: GenerationDebugStats]
-    let showsAssistantResponseStats: Bool
     let shouldShowMessageActionStrip: Bool
     let canRetryAssistantResponse: Bool
     let onCopyMessageText: (String) -> Void
@@ -351,8 +345,6 @@ private struct ChatAssistantMessageBody: View {
                     index: index,
                     isGenerating: isGenerating,
                     canRetry: canRetryAssistantResponse,
-                    showsResponseStats: showsAssistantResponseStats,
-                    responseStats: assistantResponseStats[message.id],
                     onCopy: { onCopyMessageText(message.text.trimmingCharacters(in: .whitespacesAndNewlines)) },
                     onShare: { onShareMessageText(message.text.trimmingCharacters(in: .whitespacesAndNewlines)) },
                     onRetry: { onRetryAssistantResponse(message, index) },
