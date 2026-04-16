@@ -17,7 +17,7 @@ let package = Package(
     dependencies: [
         .package(url: "https://github.com/exyte/Chat.git", from: "2.7.8"),
         .package(url: "https://github.com/gonzalezreal/swift-markdown-ui.git", from: "2.4.1"),
-        .package(path: "../mlx-vlm-swift/mlx-swift-lm"),
+        .package(path: "Dependencies/mlx-swift-lm"),
         .package(url: "https://github.com/ml-explore/mlx-swift", .upToNextMinor(from: "0.31.3")),
         .package(
             url: "https://github.com/huggingface/swift-transformers",
