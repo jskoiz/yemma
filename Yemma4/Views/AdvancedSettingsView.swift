@@ -50,8 +50,8 @@ struct AdvancedSettingsView: View {
             } header: {
                 header
                     .padding(.horizontal, AppTheme.Layout.screenPadding)
-                    .padding(.top, 12)
-                    .padding(.bottom, 12)
+                    .padding(.top, 0)
+                    .padding(.bottom, 8)
             }
         }
         .task {
@@ -72,30 +72,35 @@ struct AdvancedSettingsView: View {
     }
 
     private var header: some View {
-        HStack {
+        HStack(spacing: 16) {
             Button {
                 dismiss()
             } label: {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(AppTheme.textPrimary)
+                ZStack {
+                    Circle()
+                        .fill(AppTheme.controlFill)
+
+                    Circle()
+                        .stroke(AppTheme.controlBorder, lineWidth: 1)
+
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(AppTheme.textPrimary)
+                }
+                .frame(width: 48, height: 48)
             }
             .accessibilityLabel("Back")
             .accessibilityHint("Returns to the previous settings screen.")
 
-            Spacer()
-
             Text("Advanced")
                 .font(AppTheme.Typography.utilityTitle)
                 .foregroundStyle(AppTheme.textPrimary)
+                .frame(maxWidth: .infinity)
 
-            Spacer()
-
-            Image(systemName: "chevron.left")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(.clear)
+            Color.clear
+                .frame(width: 48, height: 48)
         }
-        .padding(.horizontal, 4)
+        .frame(height: 48)
     }
 
     private var overviewSection: some View {

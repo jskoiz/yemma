@@ -1391,7 +1391,9 @@ struct ChatSidebarView: View {
                     Text(selectedResponseStyleSummary)
                         .font(AppTheme.Typography.utilityCaption)
                         .foregroundStyle(AppTheme.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.82)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
                 UtilitySectionSeparator(leadingInset: AppTheme.Layout.rowHorizontalPadding)
