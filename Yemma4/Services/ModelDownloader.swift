@@ -295,6 +295,7 @@ public final class ModelDownloader {
     private let makeHub: @Sendable () -> HubApi
     @ObservationIgnored private var cachedHub: HubApi?
     @ObservationIgnored private var progressMonitorTask: Task<Void, Never>?
+    @ObservationIgnored private var isValidatingDownloadedModel = false
 
     private static let persistedStateKey = "com.avmillabs.yemma4.modelDownloader.state"
 
@@ -408,6 +409,13 @@ public final class ModelDownloader {
     }
 
     public func validateDownloadedModel() async {
+        guard !isValidatingDownloadedModel else {
+            return
+        }
+
+        isValidatingDownloadedModel = true
+        defer { isValidatingDownloadedModel = false }
+
         guard Yemma4AppConfiguration.supportsLocalModelRuntime else {
             resetForUnsupportedRuntime()
             AppDiagnostics.shared.record(
@@ -825,8 +833,9 @@ public final class ModelDownloader {
         canResumeDownload = false
         downloadProgress = 1
         error = nil
-        let size = Gemma4MLXSupport.directorySize(at: URL(fileURLWithPath: persistedModelPath))
-        currentEstimatedBytes = max(size, activeModelSource.approximateDownloadBytes)
+
+        // Keep launch-time restore cheap. Exact directory sizing is recomputed
+        // asynchronously during validation once the first frame is already up.
         currentDownloadedBytes = currentEstimatedBytes
     }
 
