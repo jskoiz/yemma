@@ -241,17 +241,8 @@ enum Gemma4MLXSupport {
         processorConfiguration: Gemma4ProcessorConfiguration
     ) throws {
         let processorSoftTokens = processorConfiguration.imageSeqLength
-        let processorImageSoftTokens = processorConfiguration.imageProcessor.softTokenBudget
         let modelSoftTokens = modelConfiguration.visionSoftTokensPerImage
         let modelVisionDefault = modelConfiguration.visionConfiguration.defaultOutputLength
-
-        guard processorSoftTokens == processorImageSoftTokens else {
-            throw Gemma4AssetValidationError.mismatch(
-                key: "processor image soft tokens",
-                expected: String(processorSoftTokens),
-                actual: String(processorImageSoftTokens)
-            )
-        }
 
         guard processorSoftTokens == modelSoftTokens else {
             throw Gemma4AssetValidationError.mismatch(
@@ -270,24 +261,30 @@ enum Gemma4MLXSupport {
         }
 
         guard
-            processorConfiguration.imageProcessor.patchSize
-                == modelConfiguration.visionConfiguration.patchSize
+            processorConfiguration.imageTokenId == modelConfiguration.imageTokenId
         else {
             throw Gemma4AssetValidationError.mismatch(
-                key: "vision patch size",
-                expected: String(modelConfiguration.visionConfiguration.patchSize),
-                actual: String(processorConfiguration.imageProcessor.patchSize)
+                key: "image token id",
+                expected: String(modelConfiguration.imageTokenId),
+                actual: String(processorConfiguration.imageTokenId)
             )
         }
 
         guard
-            processorConfiguration.imageProcessor.poolingKernelSize
-                == modelConfiguration.visionConfiguration.poolingKernelSize
+            processorConfiguration.boiTokenId == modelConfiguration.boiTokenId
         else {
             throw Gemma4AssetValidationError.mismatch(
-                key: "vision pooling kernel size",
-                expected: String(modelConfiguration.visionConfiguration.poolingKernelSize),
-                actual: String(processorConfiguration.imageProcessor.poolingKernelSize)
+                key: "begin-image token id",
+                expected: String(modelConfiguration.boiTokenId),
+                actual: String(processorConfiguration.boiTokenId)
+            )
+        }
+
+        guard processorConfiguration.eoiTokenId == modelConfiguration.eoiTokenId else {
+            throw Gemma4AssetValidationError.mismatch(
+                key: "end-image token id",
+                expected: String(describing: modelConfiguration.eoiTokenId),
+                actual: String(describing: processorConfiguration.eoiTokenId)
             )
         }
     }
