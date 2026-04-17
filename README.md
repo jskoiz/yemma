@@ -101,7 +101,7 @@ The important distinction is that MLX Swift already provided the general model-l
 
 Validated upstream baseline:
 
-- `mlx-swift-lm` at `8b5eef7` for Gemma 4 model, processor, and parity fixes
+- `mlx-swift-lm` at `3.31.3` for Gemma 4 model, processor, and parity fixes
 - `mlx-swift-examples` at `31b6cf6` for app-side smoke validation and request-shaping patterns
 
 How the current Yemma integration works:
