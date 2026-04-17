@@ -43,10 +43,10 @@ struct DebugModelVariantsView: View {
 
     private var activeSourceCardTitle: String {
         if modelDownloader.isUsingDefaultModelSource {
-            return "App default model"
+            return "Shipped default source"
         }
 
-        return "Custom Hugging Face model"
+        return modelDownloader.activeModelSource.title
     }
 
     private var activeSourceCardSystemImage: String {
@@ -54,11 +54,13 @@ struct DebugModelVariantsView: View {
     }
 
     private var downloadActionTitle: String {
-        "Download model"
+        modelDownloader.isUsingDefaultModelSource ? "Download shipped default" : "Download experimental source"
     }
 
     private var downloadActionDetail: String {
-        "Start downloading the current model bundle."
+        modelDownloader.isUsingDefaultModelSource
+            ? "Start downloading the shipped default bundle."
+            : "Start downloading this debug-only repository."
     }
 
     private var setupState: AppSetupSnapshot.OnboardingPhase {
@@ -71,7 +73,7 @@ struct DebugModelVariantsView: View {
 
     private var statusBadgeText: String {
         if isSwitchingModelSource {
-            return "Switching model"
+            return "Switching debug source"
         }
 
         switch setupState {
@@ -94,47 +96,47 @@ struct DebugModelVariantsView: View {
 
     private var statusTitle: String {
         if isSwitchingModelSource {
-            return "Switching model"
+            return "Switching debug source"
         }
 
         switch setupState {
         case .simulator:
-            return "Simulator preview"
+            return "Simulator debug preview"
         case .intro:
-            return "Model needs setup"
+            return "\(activeSourceBoundaryLabel) needs setup"
         case .downloading:
-            return "Downloading model"
+            return "Downloading \(activeSourceBoundaryLabel.lowercased())"
         case .paused:
             return "Download paused"
         case .preparing:
-            return "Finishing setup"
+            return "Finishing local setup"
         case .ready:
-            return "Model is ready"
+            return "\(activeSourceBoundaryLabel) is ready"
         case .failed:
-            return "Model needs attention"
+            return "\(activeSourceBoundaryLabel) needs attention"
         }
     }
 
     private var statusMessageText: String {
         if isSwitchingModelSource {
-            return "Yemma is unloading the current bundle and preparing the new model."
+            return "Yemma is unloading the current bundle and preparing the newly selected debug source."
         }
 
         switch setupState {
         case .simulator:
-            return "Use this page to preview model switching in the simulator. Real downloads and inference still require a physical iPhone."
+            return "Use this page to preview debug source switching in the simulator. Real downloads and inference still require a physical iPhone."
         case .intro:
-            return "This model is not saved on the device yet."
+            return "This source is debug-only. Its local MLX bundle is not on the device yet."
         case .downloading:
-            return appSetup.chatStatusDetailText ?? "Yemma is downloading the model now."
+            return appSetup.chatStatusDetailText ?? "Yemma is downloading this debug source now."
         case .paused:
-            return appSetup.chatStatusDetailText ?? "Resume setup to finish preparing this model on the device."
+            return appSetup.chatStatusDetailText ?? "Resume setup to finish preparing this debug source on the device."
         case .preparing:
             return "The bundle is already on this iPhone. Yemma is validating files and waking up the runtime."
         case .ready:
-            return "This model has a valid local bundle and can load without downloading again."
+            return "This source has a valid local bundle and can load without downloading again."
         case .failed:
-            return appSetup.visibleErrorMessage ?? "This model needs attention before it can run."
+            return appSetup.visibleErrorMessage ?? "This source needs attention before it can run."
         }
     }
 
@@ -239,7 +241,7 @@ struct DebugModelVariantsView: View {
                 StatusMetric(title: "Remaining", value: Self.formatBytes(appSetup.remainingDownloadBytes)),
                 StatusMetric(
                     title: "Recovery",
-                    value: appSetup.chatRecoveryAction?.title ?? "Select model again"
+                    value: appSetup.chatRecoveryAction?.title ?? "Select source again"
                 )
             ]
         }
@@ -247,7 +249,7 @@ struct DebugModelVariantsView: View {
 
     private var variantsFooterText: String {
         if supportsLocalModelRuntime {
-            return "Paste a Hugging Face model URL when you want to try something other than the app default. Yemma reuses any valid cached bundle for that URL."
+            return "The shipped default source is the baseline. Experimental presets and custom Hugging Face sources are for debug use only, and Yemma reuses any valid cached bundle for the newly selected source."
         }
 
         return "The simulator only previews the picker flow. Real downloads and inference still require a physical iPhone."
@@ -292,7 +294,7 @@ struct DebugModelVariantsView: View {
             ) { headerHeight in
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: AppTheme.Layout.sectionSpacing) {
-                        ModelVariantNote(text: "Debug-only surface. Keep the app default model unless you are actively testing another Hugging Face URL.")
+                        ModelVariantNote(text: "Debug-only surface. Keep the shipped default source unless you are actively testing a variant.")
                         overviewCard
 
                         if hasVisibleActions {
@@ -311,8 +313,8 @@ struct DebugModelVariantsView: View {
             } header: {
                 header
                     .padding(.horizontal, AppTheme.Layout.screenPadding)
-                    .padding(.top, 0)
-                    .padding(.bottom, 8)
+                    .padding(.top, 12)
+                    .padding(.bottom, 12)
             }
         }
         .alert(
@@ -324,13 +326,13 @@ struct DebugModelVariantsView: View {
         ) {
             Button("OK", role: .cancel) {}
         } message: {
-            Text(modelSourceError ?? "Yemma could not switch to that model.")
+            Text(modelSourceError ?? "Yemma could not switch to that model source.")
         }
         .sheet(isPresented: $showCustomModelSheet) {
             customModelSheet
         }
         .confirmationDialog(
-            "Switch models?",
+            "Switch to an experimental source?",
             isPresented: Binding(
                 get: { pendingModelSourceSwitch != nil },
                 set: { if !$0 { pendingModelSourceSwitch = nil } }
@@ -349,41 +351,35 @@ struct DebugModelVariantsView: View {
                 pendingModelSourceSwitch = nil
             }
         } message: {
-            Text("Yemma will unload the current model before switching. Unsupported repositories may fail validation or load incorrectly.")
+            Text("This is a debug-only source. Yemma will unload the current model before switching and the new repository may be unsupported or unstable.")
         }
-        .toolbar(.hidden, for: .navigationBar)
     }
 
     private var header: some View {
-        HStack(spacing: 16) {
+        HStack {
             Button {
                 dismiss()
             } label: {
-                ZStack {
-                    Circle()
-                        .fill(AppTheme.controlFill)
-
-                    Circle()
-                        .stroke(AppTheme.controlBorder, lineWidth: 1)
-
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(AppTheme.textPrimary)
-                }
-                .frame(width: 48, height: 48)
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(AppTheme.textPrimary)
             }
             .accessibilityLabel("Back")
             .accessibilityHint("Returns to advanced settings.")
 
-            Text("Model Source")
+            Spacer()
+
+            Text("Experimental Models")
                 .font(AppTheme.Typography.utilityTitle)
                 .foregroundStyle(AppTheme.textPrimary)
-                .frame(maxWidth: .infinity)
 
-            Color.clear
-                .frame(width: 48, height: 48)
+            Spacer()
+
+            Image(systemName: "chevron.left")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(.clear)
         }
-        .frame(height: 48)
+        .padding(.horizontal, 4)
     }
 
     private var overviewCard: some View {
@@ -492,12 +488,12 @@ struct DebugModelVariantsView: View {
             }
 
         case .intro:
-                ModelVariantStatusLine(
-                    systemImage: "arrow.down.circle",
-                    title: "Model needs setup.",
-                    trailing: Self.formatBytes(appSetup.estimatedDownloadBytes),
-                    detail: "Use the actions section to start saving this model locally on the device."
-                )
+            ModelVariantStatusLine(
+                systemImage: "arrow.down.circle",
+                title: "\(activeSourceBoundaryLabel) needs setup.",
+                trailing: Self.formatBytes(appSetup.estimatedDownloadBytes),
+                detail: "Use the actions section to start saving this debug source locally on the device."
+            )
 
         case .downloading:
             VStack(alignment: .leading, spacing: 12) {
@@ -551,7 +547,7 @@ struct DebugModelVariantsView: View {
                     systemImage: "pause.circle.fill",
                     title: "Resume from the current download state",
                     trailing: Self.formatBytes(appSetup.remainingDownloadBytes),
-                    detail: "Yemma kept the verified partial files for this model."
+                    detail: "Yemma kept the verified partial files for this debug source."
                 )
             }
 
@@ -577,9 +573,9 @@ struct DebugModelVariantsView: View {
         case .ready:
             ModelVariantStatusLine(
                 systemImage: "checkmark.circle.fill",
-                title: "Model stored locally",
+                title: "\(activeSourceBoundaryLabel) stored locally",
                 trailing: storedModelSizeText,
-                detail: "This model can be loaded again without downloading."
+                detail: "This source can be loaded again without downloading."
             )
 
         case .failed:
@@ -602,7 +598,7 @@ struct DebugModelVariantsView: View {
 
                 ModelVariantStatusLine(
                     systemImage: appSetup.hasModelPreparationError ? "bolt.slash.fill" : "exclamationmark.triangle.fill",
-                    title: appSetup.chatRecoveryAction?.title ?? "Select a model again",
+                    title: appSetup.chatRecoveryAction?.title ?? "Select a debug source again",
                     trailing: appSetup.downloadProgress > 0 ? progressPercentLabel(appSetup.downloadProgress) : nil,
                     detail: appSetup.visibleErrorMessage
                 )
@@ -656,7 +652,23 @@ struct DebugModelVariantsView: View {
 
     private var variantsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            UtilitySection("Model source") {
+            UtilitySection("Experimental presets") {
+                ForEach(Array(Gemma4ModelSource.debugPresetSources.enumerated()), id: \.element.id) { _, source in
+                    Button {
+                        Task {
+                            await requestModelSwitch(to: source)
+                        }
+                    } label: {
+                        modelSourceRow(source)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isSwitchingModelSource)
+
+                    UtilitySectionSeparator(
+                        leadingInset: AppTheme.Layout.rowHorizontalPadding + AppTheme.Layout.rowIconSize + 14
+                    )
+                }
+
                 Button {
                     customModelInput = modelDownloader.activeModelSource.isCustom
                         ? modelDownloader.activeModelSource.sourceURL.absoluteString
@@ -667,22 +679,6 @@ struct DebugModelVariantsView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(isSwitchingModelSource)
-
-                if !modelDownloader.isUsingDefaultModelSource {
-                    UtilitySectionSeparator(
-                        leadingInset: AppTheme.Layout.rowHorizontalPadding + AppTheme.Layout.rowIconSize + 14
-                    )
-
-                    Button {
-                        Task {
-                            await requestModelSwitch(to: Gemma4MLXSupport.defaultModelSource)
-                        }
-                    } label: {
-                        useDefaultModelRow
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(isSwitchingModelSource)
-                }
             }
 
             ModelVariantNote(text: variantsFooterText)
@@ -704,7 +700,7 @@ struct DebugModelVariantsView: View {
             case .resumeDownload:
                 return ModelStatusAction(
                     title: recoveryAction.title,
-                    detail: "Continue downloading this model from saved progress.",
+                    detail: "Continue downloading this debug source from saved progress.",
                     icon: "play.circle",
                     role: nil,
                     action: { await modelDownloader.downloadModel() }
@@ -712,7 +708,7 @@ struct DebugModelVariantsView: View {
             case .retryDownload:
                 return ModelStatusAction(
                     title: recoveryAction.title,
-                    detail: "Try downloading this model again.",
+                    detail: "Try downloading this debug source again.",
                     icon: "arrow.clockwise",
                     role: nil,
                     action: { await modelDownloader.downloadModel() }
@@ -741,11 +737,49 @@ struct DebugModelVariantsView: View {
         return nil
     }
 
+    private func modelSourceRow(_ source: Gemma4ModelSource) -> some View {
+        let isSelected = modelDownloader.activeModelSource == source
+        let title = source == Gemma4MLXSupport.defaultModelSource
+            ? "Shipped default: \(source.title)"
+            : "Experimental preset: \(source.title)"
+
+        return HStack(spacing: 14) {
+            Image(systemName: isSelected ? "checkmark.circle.fill" : "shippingbox")
+                .frame(width: AppTheme.Layout.rowIconSize)
+                .foregroundStyle(isSelected ? AppTheme.accent : AppTheme.textPrimary)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(AppTheme.Typography.utilityRowTitle)
+                    .foregroundStyle(AppTheme.textPrimary)
+
+                Text(source.detail)
+                    .font(AppTheme.Typography.utilityCaption)
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer()
+
+            if isSelected {
+                Text(modelDownloader.isDownloaded ? "Ready" : "Selected")
+                    .font(AppTheme.Typography.utilityCaption.weight(.semibold))
+                    .foregroundStyle(AppTheme.accent)
+            } else {
+                Image(systemName: "arrow.down.circle")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+        }
+        .utilityRowPadding()
+        .accessibilityElement(children: .combine)
+    }
+
     private var customModelRow: some View {
         let isSelected = modelDownloader.activeModelSource.isCustom
         let detail = isSelected
-            ? modelDownloader.activeModelSource.sourceURL.absoluteString
-            : "Paste a Hugging Face model URL to try a different model."
+            ? modelDownloader.activeModelSource.repositoryID
+            : "Paste a Hugging Face model URL or owner/repository id for unsupported debug testing."
 
         return HStack(spacing: 14) {
             Image(systemName: isSelected ? "checkmark.circle.fill" : "link.badge.plus")
@@ -753,7 +787,7 @@ struct DebugModelVariantsView: View {
                 .foregroundStyle(isSelected ? AppTheme.accent : AppTheme.textPrimary)
 
             VStack(alignment: .leading, spacing: 4) {
-                Text("Paste Hugging Face URL")
+                Text("Custom debug source")
                     .font(AppTheme.Typography.utilityRowTitle)
                     .foregroundStyle(AppTheme.textPrimary)
 
@@ -766,7 +800,7 @@ struct DebugModelVariantsView: View {
             Spacer()
 
             if isSelected {
-                Text(modelDownloader.isDownloaded ? "Ready" : "Using")
+                Text(modelDownloader.isDownloaded ? "Ready" : "Selected")
                     .font(AppTheme.Typography.utilityCaption.weight(.semibold))
                     .foregroundStyle(AppTheme.accent)
             } else {
@@ -779,33 +813,6 @@ struct DebugModelVariantsView: View {
         .accessibilityElement(children: .combine)
     }
 
-    private var useDefaultModelRow: some View {
-        HStack(spacing: 14) {
-            Image(systemName: "shippingbox")
-                .frame(width: AppTheme.Layout.rowIconSize)
-                .foregroundStyle(AppTheme.textPrimary)
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Use app default model")
-                    .font(AppTheme.Typography.utilityRowTitle)
-                    .foregroundStyle(AppTheme.textPrimary)
-
-                Text("Switch back to the default bundled model choice.")
-                    .font(AppTheme.Typography.utilityCaption)
-                    .foregroundStyle(AppTheme.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Spacer()
-
-            Image(systemName: "arrow.uturn.backward")
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(AppTheme.textSecondary)
-        }
-        .utilityRowPadding()
-        .accessibilityElement(children: .combine)
-    }
-
     private var customModelSheet: some View {
         NavigationStack {
             ZStack {
@@ -813,7 +820,7 @@ struct DebugModelVariantsView: View {
 
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 18) {
-                        Text("Paste a Hugging Face model URL. Yemma validates the MLX files after download before trying to load the model.")
+                        Text("Paste a Hugging Face repo URL or `owner/repository` id for an unsupported debug source. Yemma validates the MLX files after download before trying to load the model.")
                             .font(AppTheme.Typography.utilityRowDetail)
                             .foregroundStyle(AppTheme.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -830,7 +837,7 @@ struct DebugModelVariantsView: View {
                         .padding(.vertical, 12)
                         .inputChrome()
 
-                        Text("Use a full URL like `https://huggingface.co/owner/repository`.")
+                        Text("The shipped default stays `mlx-community/gemma-4-e2b-it-4bit`. Experimental presets include `unsloth/gemma-4-E4B-it-UD-MLX-4bit`.")
                             .font(AppTheme.Typography.utilityCaption)
                             .foregroundStyle(AppTheme.textTertiary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -840,7 +847,7 @@ struct DebugModelVariantsView: View {
                     .padding(.bottom, 32)
                 }
             }
-            .navigationTitle("Hugging Face URL")
+            .navigationTitle("Custom debug source")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

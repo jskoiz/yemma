@@ -1192,11 +1192,9 @@ public struct ChatView: View {
 
 struct ChatSidebarView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(ModelDownloader.self) private var modelDownloader
     @Environment(LLMService.self) private var llmService
     @Environment(ConversationStore.self) private var conversationStore
-    @Environment(AppDiagnostics.self) private var diagnostics
     @AppStorage(AppearancePreference.storageKey) private var appearancePreferenceRaw = AppearancePreference.system.rawValue
 
     let currentConversationID: UUID?
@@ -1213,8 +1211,6 @@ struct ChatSidebarView: View {
     @State private var renameConversation: ConversationMetadata?
     @State private var renameTitle = ""
     @State private var deleteConversation: ConversationMetadata?
-    @State private var showEventLog = false
-    @State private var diagnosticsCopied = false
     @State private var showDeleteModelConfirmation = false
     @State private var showClearConversationConfirmation = false
 
@@ -1391,9 +1387,7 @@ struct ChatSidebarView: View {
                     Text(selectedResponseStyleSummary)
                         .font(AppTheme.Typography.utilityCaption)
                         .foregroundStyle(AppTheme.textSecondary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.82)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 UtilitySectionSeparator(leadingInset: AppTheme.Layout.rowHorizontalPadding)
@@ -1599,10 +1593,6 @@ struct ChatSidebarView: View {
         llmService.activeResponseStylePreset?.summary ?? "Custom mix of reply length and detail."
     }
 
-    private var advancedSubtitle: String {
-        return "Model controls, setup, and diagnostics."
-    }
-
     private var advancedRow: some View {
         NavigationLink {
             AdvancedSettingsView(
@@ -1613,11 +1603,11 @@ struct ChatSidebarView: View {
             actionRow(
                 icon: "gearshape.2",
                 title: "Advanced",
-                subtitle: advancedSubtitle
+                subtitle: "Model controls, setup, diagnostics, and debug tools."
             )
         }
         .buttonStyle(.plain)
-        .accessibilityHint("Opens \(advancedSubtitle.lowercased())")
+        .accessibilityHint("Opens advanced model controls, setup, diagnostics, and debug tools.")
     }
 
     private var trustRow: some View {
@@ -1817,369 +1807,6 @@ struct ChatSidebarView: View {
         }
         .utilityRowPadding()
         .contentShape(Rectangle())
-    }
-
-    private var advancedCard: some View {
-        VStack(spacing: 0) {
-            advancedSubsectionHeader(
-                title: "Model controls",
-                detail: "Fine-tune response length and creativity when you want something more custom than the preset."
-            )
-            advancedDivider()
-            advancedTemperatureRow
-            advancedDivider()
-            advancedMaxResponseRow
-            advancedDivider()
-            diagnosticsSection
-
-#if DEBUG
-            if onRunDebugScenario != nil {
-                advancedDivider()
-                debugScenariosRow
-            }
-#endif
-
-            advancedDivider()
-            resetDefaultsRow
-        }
-        .background(
-            RoundedRectangle(cornerRadius: AppTheme.Radius.medium, style: .continuous)
-                .fill(AppTheme.controlFill)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: AppTheme.Radius.medium, style: .continuous)
-                .stroke(AppTheme.controlBorder, lineWidth: 1)
-        )
-        .padding(.horizontal, AppTheme.Layout.rowHorizontalPadding)
-        .padding(.vertical, 14)
-    }
-
-    private func advancedSubsectionHeader(title: String, detail: String) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title)
-                .font(AppTheme.Typography.utilityRowTitle.weight(.semibold))
-                .foregroundStyle(AppTheme.textPrimary)
-
-            Text(detail)
-                .font(AppTheme.Typography.utilityCaption)
-                .foregroundStyle(AppTheme.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 16)
-        .padding(.top, 14)
-        .padding(.bottom, 12)
-    }
-
-    private func advancedDivider() -> some View {
-        Divider()
-            .padding(.leading, 16)
-            .overlay(AppTheme.separator)
-    }
-
-    private var advancedTemperatureRow: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                Label("Creativity", systemImage: "slider.horizontal.3")
-                    .font(AppTheme.Typography.utilityRowTitle)
-                    .foregroundStyle(AppTheme.textPrimary)
-
-                Spacer()
-
-                Text(String(format: "%.1f", llmService.temperature))
-                    .font(AppTheme.Typography.utilityRowDetail)
-                    .foregroundStyle(AppTheme.textSecondary)
-            }
-
-            Slider(
-                value: Binding(
-                    get: { llmService.temperature },
-                    set: { llmService.temperature = $0 }
-                ),
-                in: 0.1...2.0,
-                step: 0.1
-            )
-            .tint(AppTheme.accent)
-
-            Text("Lower stays tighter. Higher feels more open-ended.")
-                .font(AppTheme.Typography.utilityCaption)
-                .foregroundStyle(AppTheme.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
-    }
-
-    private var advancedMaxResponseRow: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                Label("Max response", systemImage: "text.word.spacing")
-                    .font(AppTheme.Typography.utilityRowTitle)
-                    .foregroundStyle(AppTheme.textPrimary)
-
-                Spacer()
-
-                Text(tokenLabel(llmService.maxResponseTokens))
-                    .font(AppTheme.Typography.utilityRowDetail)
-                    .foregroundStyle(AppTheme.textSecondary)
-            }
-
-            Menu {
-                ForEach(llmService.availableMaxResponseTokenOptions, id: \.self) { count in
-                    Button(tokenLabel(count)) {
-                        guard llmService.maxResponseTokens != count else { return }
-                        llmService.maxResponseTokens = count
-                        AppHaptics.selection()
-                        diagnostics.record(
-                            "Max response changed",
-                            category: "settings",
-                            metadata: ["maxResponseTokens": count]
-                        )
-                    }
-                }
-            } label: {
-                HStack {
-                    Text(tokenLabel(llmService.maxResponseTokens))
-                        .font(AppTheme.Typography.utilityRowTitle)
-                        .foregroundStyle(AppTheme.textPrimary)
-
-                    Spacer()
-
-                    Image(systemName: "chevron.up.chevron.down")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(AppTheme.textSecondary)
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
-                .background(AppTheme.inputFill)
-                .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.small, style: .continuous))
-            }
-            .buttonStyle(.plain)
-
-            Text("Maximum tokens the model can generate per reply.")
-                .font(AppTheme.Typography.utilityCaption)
-                .foregroundStyle(AppTheme.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            if let safetyNote = llmService.maxResponseTokenSafetyNote {
-                Text(safetyNote)
-                    .font(AppTheme.Typography.utilityCaption)
-                    .foregroundStyle(AppTheme.textTertiary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
-    }
-
-    private var diagnosticsSection: some View {
-        VStack(spacing: 0) {
-            advancedSubsectionHeader(
-                title: "Diagnostics",
-                detail: "Inspect recent events, copy the local log, or clear it."
-            )
-            advancedDivider()
-            advancedInfoRow(
-                icon: "waveform.path.ecg",
-                title: "Recent events",
-                detail: "\(diagnostics.recentEvents.count)"
-            )
-            advancedDivider()
-            Button {
-                diagnostics.copyToPasteboard()
-                diagnosticsCopied = true
-            } label: {
-                advancedActionRow(
-                    icon: "doc.on.doc",
-                    title: "Copy diagnostics log",
-                    detail: "Put the recent local event log on the pasteboard."
-                )
-            }
-            .buttonStyle(.plain)
-            advancedDivider()
-            Button {
-                diagnostics.clear()
-            } label: {
-                advancedActionRow(
-                    icon: "trash",
-                    title: "Clear diagnostics log",
-                    detail: "Remove recent local event history from the app.",
-                    titleColor: AppTheme.destructive,
-                    trailingColor: AppTheme.destructive
-                )
-            }
-            .buttonStyle(.plain)
-
-            if !diagnostics.recentEvents.isEmpty {
-                advancedDivider()
-
-                Button {
-                    if reduceMotion {
-                        showEventLog.toggle()
-                    } else {
-                        withAnimation(.easeInOut(duration: 0.22)) {
-                            showEventLog.toggle()
-                        }
-                    }
-                } label: {
-                    HStack(spacing: 14) {
-                        Image(systemName: "list.bullet.rectangle")
-                            .frame(width: AppTheme.Layout.rowIconSize)
-                            .foregroundStyle(AppTheme.textPrimary)
-
-                        Text("Event log")
-                            .font(AppTheme.Typography.utilityRowTitle)
-                            .foregroundStyle(AppTheme.textPrimary)
-
-                        Spacer()
-
-                        Text("\(diagnostics.recentEvents.suffix(6).count)")
-                            .font(AppTheme.Typography.utilityRowDetail)
-                            .foregroundStyle(AppTheme.textSecondary)
-
-                        Image(systemName: showEventLog ? "chevron.up" : "chevron.down")
-                            .font(.footnote.weight(.semibold))
-                            .foregroundStyle(AppTheme.textSecondary)
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 14)
-                }
-                .buttonStyle(.plain)
-
-                if showEventLog {
-                    ForEach(Array(diagnostics.recentEvents.suffix(6).reversed())) { event in
-                        advancedDivider()
-                        diagnosticEventRow(event)
-                    }
-                }
-            }
-        }
-    }
-
-#if DEBUG
-    private var debugScenariosRow: some View {
-        Menu {
-            ForEach(DebugInferenceScenario.allCases) { scenario in
-                Button {
-                    AppHaptics.selection()
-                    onRunDebugScenario?(scenario)
-                } label: {
-                    Label(scenario.title, systemImage: scenario.icon)
-                }
-            }
-        } label: {
-            advancedActionRow(
-                icon: "wrench.and.screwdriver",
-                title: "Debug scenarios",
-                detail: "Run canned prompts to check formatting and rendering."
-            )
-        }
-        .buttonStyle(.plain)
-    }
-#endif
-
-    private var resetDefaultsRow: some View {
-        Button {
-            llmService.resetAdvancedSettings()
-            AppHaptics.selection()
-            diagnostics.record("Advanced settings reset", category: "settings")
-        } label: {
-            advancedActionRow(
-                icon: "arrow.counterclockwise",
-                title: "Reset to defaults",
-                detail: "Restore the balanced default tuning.",
-                titleColor: AppTheme.accent,
-                trailingColor: AppTheme.accent
-            )
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func advancedInfoRow(icon: String, title: String, detail: String) -> some View {
-        HStack(spacing: 14) {
-            Image(systemName: icon)
-                .frame(width: AppTheme.Layout.rowIconSize)
-                .foregroundStyle(AppTheme.textPrimary)
-
-            Text(title)
-                .font(AppTheme.Typography.utilityRowTitle)
-                .foregroundStyle(AppTheme.textPrimary)
-
-            Spacer()
-
-            Text(detail)
-                .font(AppTheme.Typography.utilityRowDetail)
-                .foregroundStyle(AppTheme.textSecondary)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
-    }
-
-    private func advancedActionRow(
-        icon: String,
-        title: String,
-        detail: String,
-        titleColor: Color = AppTheme.textPrimary,
-        trailingColor: Color = AppTheme.textSecondary
-    ) -> some View {
-        HStack(spacing: 14) {
-            Image(systemName: icon)
-                .frame(width: AppTheme.Layout.rowIconSize)
-                .foregroundStyle(titleColor)
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(AppTheme.Typography.utilityRowTitle)
-                    .foregroundStyle(titleColor)
-
-                Text(detail)
-                    .font(AppTheme.Typography.utilityCaption)
-                    .foregroundStyle(AppTheme.textSecondary)
-                    .multilineTextAlignment(.leading)
-            }
-
-            Spacer()
-
-            Image(systemName: "chevron.right")
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(trailingColor)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
-    }
-
-    private func diagnosticEventRow(_ event: DiagnosticEvent) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(event.category.uppercased())
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(AppTheme.textSecondary)
-
-                Spacer()
-
-                Text(event.timestamp.formatted(date: .omitted, time: .standard))
-                    .font(AppTheme.Typography.utilityCaption)
-                    .foregroundStyle(AppTheme.textSecondary)
-            }
-
-            Text(event.message)
-                .font(AppTheme.Typography.utilityRowTitle.weight(.semibold))
-                .foregroundStyle(AppTheme.textPrimary)
-
-            if !event.metadata.isEmpty {
-                Text(
-                    event.metadata
-                        .sorted { $0.key < $1.key }
-                        .map { "\($0.key): \($0.value)" }
-                        .joined(separator: " • ")
-                )
-                .font(AppTheme.Typography.utilityCaption)
-                .foregroundStyle(AppTheme.textSecondary)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
     }
 
     private func infoRow(icon: String, title: String, detail: String) -> some View {
