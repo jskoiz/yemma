@@ -362,6 +362,52 @@ final class Gemma4HiddenChannelBudgetProcessor: LogitProcessor, @unchecked Senda
     }
 }
 
+private struct SpecialTokenSkippingDetokenizer {
+    private let tokenizer: any MLXLMCommon.Tokenizer
+    private var segmentTokens = [Int]()
+    private var segment = ""
+
+    init(tokenizer: any MLXLMCommon.Tokenizer) {
+        self.tokenizer = tokenizer
+    }
+
+    mutating func append(token: Int) {
+        segmentTokens.append(token)
+    }
+
+    mutating func next() -> String? {
+        let newSegment = tokenizer.decode(tokenIds: segmentTokens, skipSpecialTokens: true)
+        guard newSegment.count >= segment.count else {
+            segment = newSegment
+            return nil
+        }
+
+        let new = newSegment.suffix(newSegment.count - segment.count)
+        if new.last == "\u{fffd}" {
+            return nil
+        }
+
+        if new.hasSuffix("\n") {
+            startNewSegment()
+        } else {
+            segment = newSegment
+        }
+
+        return new.isEmpty ? nil : String(new)
+    }
+
+    private mutating func startNewSegment() {
+        let lastToken = segmentTokens.last
+        segmentTokens.removeAll()
+        if let lastToken {
+            segmentTokens.append(lastToken)
+            segment = tokenizer.decode(tokenIds: segmentTokens, skipSpecialTokens: true)
+        } else {
+            segment = ""
+        }
+    }
+}
+
 private struct Gemma4ResponseTokenParser {
     private enum State {
         case normal
@@ -397,7 +443,7 @@ private struct Gemma4ResponseTokenParser {
     private let suppressedBlockTokenIDs: [Int: Int]
     private let oneShotControlTokenIDs: Set<Int>
     private var state = State.normal
-    private var detokenizer: MLXLMCommon.NaiveStreamingDetokenizer
+    private var detokenizer: SpecialTokenSkippingDetokenizer
     private var tokenPreview: [String] = []
     private(set) var totalTokenCount = 0
     private(set) var visibleChunkCount = 0
@@ -405,10 +451,7 @@ private struct Gemma4ResponseTokenParser {
 
     init(tokenizer: any MLXLMCommon.Tokenizer) {
         self.tokenizer = tokenizer
-        self.detokenizer = MLXLMCommon.NaiveStreamingDetokenizer(
-            tokenizer: tokenizer,
-            skipSpecialTokens: true
-        )
+        self.detokenizer = SpecialTokenSkippingDetokenizer(tokenizer: tokenizer)
         self.suppressedBlockTokenIDs = Dictionary(
             uniqueKeysWithValues: Self.suppressedBlocks.compactMap { start, end in
                 guard

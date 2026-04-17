@@ -179,7 +179,7 @@ final class BackgroundModelDownloadCoordinator: NSObject, @unchecked Sendable {
 
     func clearState(using hub: HubApi, repositoryID: String) async {
         let repoLocation = hub.localRepoLocation(Hub.Repo(id: repositoryID))
-        try? await cancelAllTasks()
+        try? await cancelTasks(repositoryID: repositoryID)
         try? fileManager.removeItem(at: cacheDirectory(for: repoLocation))
     }
 
@@ -199,7 +199,7 @@ final class BackgroundModelDownloadCoordinator: NSObject, @unchecked Sendable {
             return persistedState.manifest
         }
 
-        try? await cancelAllTasks()
+        try? await cancelTasks(repositoryID: repositoryID)
         try? fileManager.removeItem(at: cacheDirectory(for: repoLocation))
 
         let manifest = try await buildManifest(
@@ -433,9 +433,15 @@ final class BackgroundModelDownloadCoordinator: NSObject, @unchecked Sendable {
         }
     }
 
-    private func cancelAllTasks() async throws {
+    private func cancelTasks(repositoryID: String) async throws {
         let tasks = await currentTasks()
-        tasks.forEach { $0.cancel() }
+        let scopedTasks = tasks.filter { task in
+            guard let descriptor = Self.parseTaskDescription(task.taskDescription) else {
+                return false
+            }
+            return descriptor.repositoryID == repositoryID
+        }
+        scopedTasks.forEach { $0.cancel() }
     }
 
     private func finishBackgroundEventsIfNeeded() {
