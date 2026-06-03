@@ -311,6 +311,16 @@ private struct ChatUserMessageBubble: View {
             RoundedRectangle(cornerRadius: AppTheme.Radius.medium, style: .continuous)
                 .stroke(AppTheme.userBubbleBorder, lineWidth: 1)
         )
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilityLabel(text: text, shouldRenderText: shouldRenderText))
+    }
+
+    private func accessibilityLabel(text: String, shouldRenderText: Bool) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if shouldRenderText, !trimmed.isEmpty {
+            return "You said, \(trimmed)"
+        }
+        return "You sent an attachment"
     }
 }
 
@@ -341,7 +351,13 @@ private struct ChatAssistantMessageBody: View {
             }
 
             if shouldRenderText {
-                RichMessageText(text: text, isStreaming: isStreaming)
+                if isStreaming {
+                    RichMessageText(text: text, isStreaming: true)
+                } else {
+                    RichMessageText(text: text, isStreaming: false)
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel("Yemma said, \(text.trimmingCharacters(in: .whitespacesAndNewlines))")
+                }
             }
 
             if isActionStripVisible {

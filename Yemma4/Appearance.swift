@@ -92,9 +92,24 @@ enum AppTheme {
         static let utilityRowDetail = Font.subheadline.weight(.medium)
         static let utilityCaption = Font.footnote.weight(.medium)
         static let chatLabel = Font.caption.weight(.semibold)
-        static let chatComposer = Font.system(size: 18, weight: .medium, design: .rounded)
-        static let chatUserMessage = Font.system(size: 16, weight: .medium, design: .rounded)
-        static let chatAssistantMessage = Font.system(size: 16, weight: .regular)
+        // Chat body/message/composer fonts scale with the user's Dynamic Type
+        // setting (relative to the given text style) while keeping the design's
+        // base point sizes. Decorative brand display sizes stay fixed.
+        static let chatComposer = scaledFont(size: 18, relativeTo: .body, weight: .medium, design: .rounded)
+        static let chatUserMessage = scaledFont(size: 16, relativeTo: .body, weight: .medium, design: .rounded)
+        static let chatAssistantMessage = scaledFont(size: 16, relativeTo: .body, weight: .regular)
+
+        private static func scaledFont(
+            size: CGFloat,
+            relativeTo textStyle: UIFont.TextStyle,
+            weight: UIFont.Weight = .regular,
+            design: UIFontDescriptor.SystemDesign = .default
+        ) -> Font {
+            let baseDescriptor = UIFont.systemFont(ofSize: size, weight: weight).fontDescriptor
+            let descriptor = baseDescriptor.withDesign(design) ?? baseDescriptor
+            let baseFont = UIFont(descriptor: descriptor, size: size)
+            return Font(UIFontMetrics(forTextStyle: textStyle).scaledFont(for: baseFont))
+        }
     }
 
     enum ShadowStyle {
