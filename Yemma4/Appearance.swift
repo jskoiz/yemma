@@ -489,11 +489,15 @@ final class VariableBlurUIView: UIVisualEffectView {
             return
         }
 
+        // If the CoreImage gradient cannot be produced (e.g. low memory or an
+        // unusual display scale), degrade gracefully to no blur instead of
+        // crashing the entire UI via a force-unwrap.
+        guard let maskImage = makeGradientImage(startOffset: startOffset, direction: direction) else {
+            return
+        }
+
         variableBlur.setValue(maxBlurRadius, forKey: "inputRadius")
-        variableBlur.setValue(
-            makeGradientImage(startOffset: startOffset, direction: direction),
-            forKey: "inputMaskImage"
-        )
+        variableBlur.setValue(maskImage, forKey: "inputMaskImage")
         variableBlur.setValue(true, forKey: "inputNormalizeEdges")
 
         let backdropLayer = subviews.first?.layer
@@ -521,7 +525,7 @@ final class VariableBlurUIView: UIVisualEffectView {
         height: CGFloat = 100,
         startOffset: CGFloat,
         direction: VariableBlurDirection
-    ) -> CGImage {
+    ) -> CGImage? {
         let gradient = CIFilter.linearGradient()
         gradient.color0 = CIColor.black
         gradient.color1 = CIColor.clear
@@ -533,10 +537,17 @@ final class VariableBlurUIView: UIVisualEffectView {
             gradient.point1.y = height - gradient.point1.y
         }
 
+        // CoreImage can fail to produce an output image or a CGImage under
+        // memory pressure or with unusual inputs; return nil so the caller can
+        // fall back to no blur rather than crashing.
+        guard let outputImage = gradient.outputImage else {
+            return nil
+        }
+
         return CIContext().createCGImage(
-            gradient.outputImage!,
+            outputImage,
             from: CGRect(x: 0, y: 0, width: width, height: height)
-        )!
+        )
     }
 }
 #endif
