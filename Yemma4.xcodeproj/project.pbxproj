@@ -32,6 +32,7 @@
 		D4000005 /* ChatMessageActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4000006 /* ChatMessageActions.swift */; };
 		D4000007 /* ChatShareSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4000008 /* ChatShareSheet.swift */; };
 		D4000009 /* ChatTranscriptView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D400000A /* ChatTranscriptView.swift */; };
+		D4000021 /* ChatSidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4000020 /* ChatSidebarView.swift */; };
 		CB7B05E97139FE38BFE49578 /* ConversationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60BF02FF587F6CBD41EDD4C6 /* ConversationStore.swift */; };
 		E1000001 /* MLXLMCommon in Frameworks */ = {isa = PBXBuildFile; productRef = E1000101 /* MLXLMCommon */; };
 		E1000002 /* MLXVLM in Frameworks */ = {isa = PBXBuildFile; productRef = E1000102 /* MLXVLM */; };
@@ -72,6 +73,7 @@
 		D4000006 /* ChatMessageActions.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ChatMessageActions.swift; sourceTree = "<group>"; };
 		D4000008 /* ChatShareSheet.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ChatShareSheet.swift; sourceTree = "<group>"; };
 		D400000A /* ChatTranscriptView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ChatTranscriptView.swift; sourceTree = "<group>"; };
+		D4000020 /* ChatSidebarView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ChatSidebarView.swift; sourceTree = "<group>"; };
 		60BF02FF587F6CBD41EDD4C6 /* ConversationStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ConversationStore.swift; sourceTree = "<group>"; };
 		E1000007 /* MLXModelSupport.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MLXModelSupport.swift; sourceTree = "<group>"; };
 		E1000011 /* YemmaPromptPlanner.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = YemmaPromptPlanner.swift; sourceTree = "<group>"; };
@@ -107,6 +109,7 @@
 				D4000006 /* ChatMessageActions.swift */,
 				D4000008 /* ChatShareSheet.swift */,
 				D400000A /* ChatTranscriptView.swift */,
+				D4000020 /* ChatSidebarView.swift */,
 			);
 			path = Chat;
 			sourceTree = "<group>";
@@ -298,6 +301,7 @@
 				D4000005 /* ChatMessageActions.swift in Sources */,
 				D4000007 /* ChatShareSheet.swift in Sources */,
 				D4000009 /* ChatTranscriptView.swift in Sources */,
+				D4000021 /* ChatSidebarView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
