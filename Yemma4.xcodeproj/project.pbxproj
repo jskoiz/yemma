@@ -239,6 +239,7 @@
 			);
 			mainGroup = B1000000B;
 			packageReferences = (
+				E1000300 /* XCLocalSwiftPackageReference "." */,
 				759333B69AA7F2876F0CFA95 /* XCRemoteSwiftPackageReference "Chat" */,
 				A1000004 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */,
 					E1000201 /* XCRemoteSwiftPackageReference "mlx-swift-lm" */,
@@ -539,6 +540,13 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		E1000300 /* XCLocalSwiftPackageReference "." */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = .;
+		};
+/* End XCLocalSwiftPackageReference section */
 
 /* Begin XCRemoteSwiftPackageReference section */
 		A1000004 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */ = {
