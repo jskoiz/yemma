@@ -686,6 +686,26 @@ public final class ModelDownloader {
                 guard let validatedDirectory = try? ModelDirectoryValidator.validatedDirectory(at: location) else {
                     continue
                 }
+
+                // A structurally-present bundle is not enough: the Gemma 4 asset
+                // contract (token ids / soft-token budget / pooling) must also hold
+                // so that "downloaded" implies "loadable". This cheaply reads the
+                // processor/config JSON only — full weights are not loaded here.
+                do {
+                    try Gemma4MLXSupport.normalizeAssetContractIfNeeded(validatedDirectory)
+                    try Gemma4MLXSupport.validateAssetContract(validatedDirectory)
+                } catch {
+                    AppDiagnostics.shared.record(
+                        "Rejected downloaded MLX bundle that failed the Gemma 4 asset contract",
+                        category: "download",
+                        metadata: [
+                            "repository": repositoryID,
+                            "error": (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                        ]
+                    )
+                    continue
+                }
+
                 return (validatedDirectory, Gemma4MLXSupport.directorySize(at: location))
             }
 
