@@ -77,4 +77,57 @@ final class ConversationStoreTests: XCTestCase {
         XCTAssertEqual(snapshot?.messages.first?.createdAt, createdAt)
         XCTAssertEqual(snapshot?.messages.first?.text, "Hello")
     }
+
+    func testPersistedConversationFilesUseCompleteUntilFirstUserAuthenticationProtection() throws {
+        #if os(iOS)
+        let fileManager = FileManager.default
+        let storageRoot = fileManager.temporaryDirectory.appendingPathComponent(
+            "ConversationStoreTests-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        let defaultsName = "ConversationStoreTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: defaultsName))
+
+        defer {
+            defaults.removePersistentDomain(forName: defaultsName)
+            try? fileManager.removeItem(at: storageRoot)
+        }
+
+        let store = ConversationStore(
+            fileManager: fileManager,
+            defaults: defaults,
+            storageRootOverride: storageRoot
+        )
+
+        let message = ChatMessage(
+            id: "message-1",
+            user: .user,
+            status: .sent,
+            createdAt: Date(),
+            text: "Hello",
+            attachments: []
+        )
+        let conversationID = store.saveConversation(
+            id: nil,
+            messages: [message],
+            draftText: "",
+            draftAttachments: []
+        )
+
+        let indexURL = storageRoot.appendingPathComponent("index.json")
+        let conversationURL = storageRoot
+            .appendingPathComponent(conversationID.uuidString, isDirectory: true)
+            .appendingPathComponent("conversation.json")
+
+        func protection(of url: URL) throws -> FileProtectionType? {
+            try fileManager.attributesOfItem(atPath: url.path)[.protectionKey] as? FileProtectionType
+        }
+
+        XCTAssertEqual(try protection(of: indexURL), .completeUntilFirstUserAuthentication)
+        XCTAssertEqual(try protection(of: conversationURL), .completeUntilFirstUserAuthentication)
+        XCTAssertEqual(try protection(of: storageRoot), .completeUntilFirstUserAuthentication)
+        #else
+        throw XCTSkip("File protection attributes are only enforced on iOS.")
+        #endif
+    }
 }
