@@ -125,7 +125,7 @@ struct Gemma4ModelSource: Codable, Equatable, Identifiable, Sendable {
         return custom(repositoryID: repositoryID, sourceURLString: "https://huggingface.co/\(repositoryID)")
     }
 
-    private static func parseRepositoryID(from input: String) throws -> String {
+    static func parseRepositoryID(from input: String) throws -> String {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             throw Gemma4ModelSourceInputError.emptyInput
@@ -150,7 +150,7 @@ struct Gemma4ModelSource: Codable, Equatable, Identifiable, Sendable {
         return try normalizeRepositoryID(trimmed)
     }
 
-    private static func normalizeRepositoryID(_ input: String) throws -> String {
+    static func normalizeRepositoryID(_ input: String) throws -> String {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         let components = trimmed
             .split(separator: "/", omittingEmptySubsequences: true)
@@ -168,7 +168,7 @@ struct Gemma4ModelSource: Codable, Equatable, Identifiable, Sendable {
     }
 }
 
-private enum Gemma4ModelSourceInputError: LocalizedError {
+enum Gemma4ModelSourceInputError: LocalizedError, Equatable {
     case emptyInput
     case unsupportedHost(String)
     case missingRepository(String)

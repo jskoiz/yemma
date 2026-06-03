@@ -658,7 +658,7 @@ final class LLMService: @unchecked Sendable {
         return options.isEmpty ? [defaultMaxResponseTokens] : options
     }
 
-    private static func maxResponseTokenCeiling(
+    static func maxResponseTokenCeiling(
         physicalMemory: UInt64 = ProcessInfo.processInfo.physicalMemory
     ) -> Int {
         let sixGigabytes = UInt64(6) * 1024 * 1024 * 1024
@@ -675,7 +675,7 @@ final class LLMService: @unchecked Sendable {
         return 4096
     }
 
-    private static func normalizedMaxResponseTokens(
+    static func normalizedMaxResponseTokens(
         _ value: Int,
         physicalMemory: UInt64 = ProcessInfo.processInfo.physicalMemory
     ) -> Int {
