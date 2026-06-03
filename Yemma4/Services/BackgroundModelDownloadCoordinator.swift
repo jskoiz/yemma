@@ -1,6 +1,39 @@
 import Foundation
 @preconcurrency import Hub
 
+enum ModelDownloadStorageCheck {
+    /// Headroom added on top of the model size so the download has room for
+    /// temporary files and leaves the device usable. Whichever is larger of a
+    /// flat 500 MB or 10% of the model size.
+    static let minimumHeadroomBytes: Int64 = 500 * 1024 * 1024
+
+    static func requiredBytes(forModelBytes modelBytes: Int64) -> Int64 {
+        let modelBytes = max(modelBytes, 0)
+        let proportionalHeadroom = Int64(Double(modelBytes) * 0.1)
+        return modelBytes + max(minimumHeadroomBytes, proportionalHeadroom)
+    }
+
+    static func hasSufficientCapacity(modelBytes: Int64, availableBytes: Int64) -> Bool {
+        availableBytes >= requiredBytes(forModelBytes: modelBytes)
+    }
+
+    static func insufficientStorageMessage(forModelBytes modelBytes: Int64) -> String {
+        let neededGB = formattedGigabytes(requiredBytes(forModelBytes: modelBytes))
+        return "Not enough storage — Yemma needs about \(neededGB) free to download the model. Free up some space and try again."
+    }
+
+    static func formattedGigabytes(_ bytes: Int64) -> String {
+        let gigabytes = Double(max(bytes, 0)) / 1_073_741_824
+        let rounded = (gigabytes * 10).rounded(.up) / 10
+        return String(format: "%.1f GB", rounded)
+    }
+}
+
+struct InsufficientStorageError: LocalizedError {
+    let message: String
+    var errorDescription: String? { message }
+}
+
 struct BackgroundModelDownloadSnapshot: Sendable {
     let totalBytes: Int64
     let completedBytes: Int64
@@ -101,8 +134,76 @@ final class BackgroundModelDownloadCoordinator: NSObject, @unchecked Sendable {
             matching: patterns
         )
 
+        try ensureSufficientStorage(for: manifest, hub: hub)
+
         try await enqueueMissingTasks(using: manifest, hub: hub)
         return await snapshot(using: hub, repositoryID: repositoryID)
+    }
+
+    private func ensureSufficientStorage(
+        for manifest: DownloadManifest,
+        hub: HubApi
+    ) throws {
+        // Only the not-yet-downloaded files will consume new space.
+        let repoLocation = hub.localRepoLocation(Hub.Repo(id: manifest.repositoryID))
+        let remainingBytes = manifest.files.reduce(into: Int64(0)) { partialResult, file in
+            guard !completedFileExists(file, in: repoLocation) else {
+                return
+            }
+            partialResult += file.expectedBytes
+        }
+
+        guard remainingBytes > 0 else {
+            return
+        }
+
+        guard let availableBytes = availableCapacityBytes(forVolumeContaining: repoLocation) else {
+            // If the capacity can't be determined, don't block the download.
+            return
+        }
+
+        guard
+            ModelDownloadStorageCheck.hasSufficientCapacity(
+                modelBytes: remainingBytes,
+                availableBytes: availableBytes
+            )
+        else {
+            let message = ModelDownloadStorageCheck.insufficientStorageMessage(forModelBytes: remainingBytes)
+            AppDiagnostics.shared.record(
+                "Blocked MLX model download: insufficient storage",
+                category: "download",
+                metadata: [
+                    "repository": manifest.repositoryID,
+                    "requiredBytes": String(ModelDownloadStorageCheck.requiredBytes(forModelBytes: remainingBytes)),
+                    "availableBytes": String(availableBytes)
+                ]
+            )
+            throw InsufficientStorageError(message: message)
+        }
+    }
+
+    private func availableCapacityBytes(forVolumeContaining url: URL) -> Int64? {
+        // Resolve to an existing directory on the destination volume so the
+        // volume resource lookup succeeds even before the repo folder exists.
+        var probeURL = url
+        while !fileManager.fileExists(atPath: probeURL.path) {
+            let parent = probeURL.deletingLastPathComponent()
+            guard parent.path != probeURL.path else {
+                break
+            }
+            probeURL = parent
+        }
+
+        guard
+            let values = try? probeURL.resourceValues(
+                forKeys: [.volumeAvailableCapacityForImportantUsageKey]
+            ),
+            let capacity = values.volumeAvailableCapacityForImportantUsage
+        else {
+            return nil
+        }
+
+        return capacity
     }
 
     func snapshot(using hub: HubApi, repositoryID: String) async -> BackgroundModelDownloadSnapshot {
