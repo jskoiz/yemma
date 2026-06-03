@@ -6,6 +6,7 @@ import MLXLMCommon
 import MLXVLM
 import OSLog
 import Tokenizers
+import UIKit
 
 struct PromptImageAsset: Hashable, Sendable {
     let id: String
@@ -578,6 +579,7 @@ final class LLMService: @unchecked Sendable {
     @ObservationIgnored private var loadedModelPath: String?
     @ObservationIgnored private var loadingModelPath: String?
     @ObservationIgnored private var generationTask: Task<Void, Never>?
+    @ObservationIgnored private var memoryWarningObserver: NSObjectProtocol?
     @ObservationIgnored private let stateLock = NSLock()
     @ObservationIgnored private let logger = Logger(
         subsystem: Yemma4AppConfiguration.bundleIdentifier,
@@ -604,10 +606,52 @@ final class LLMService: @unchecked Sendable {
 
         maxResponseTokens = Self.normalizedMaxResponseTokens(maxResponseTokens)
         defaults.set(maxResponseTokens, forKey: Self.maxTokensDefaultsKey)
+
+        registerForMemoryWarnings()
     }
 
     deinit {
+        if let memoryWarningObserver {
+            NotificationCenter.default.removeObserver(memoryWarningObserver)
+        }
         stopGenerationSynchronously()
+    }
+
+    /// Frees the multi-GB MLX model when the system reports memory pressure so iOS
+    /// can reclaim memory instead of jetsam-killing the app. The unload is skipped
+    /// while a response is generating; the model lazily reloads on next use.
+    private func registerForMemoryWarnings() {
+        memoryWarningObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.didReceiveMemoryWarningNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.handleMemoryWarning()
+        }
+    }
+
+    @MainActor
+    private func handleMemoryWarning() {
+        guard !isGenerating else {
+            AppDiagnostics.shared.record(
+                "Memory warning received during generation; skipping model unload",
+                category: "model"
+            )
+            return
+        }
+
+        guard isModelLoaded || isModelLoading else {
+            return
+        }
+
+        AppDiagnostics.shared.record(
+            "Memory warning received; unloading MLX model",
+            category: "model"
+        )
+
+        Task { [weak self] in
+            await self?.unloadModel()
+        }
     }
 
     func resetAdvancedSettings() {
