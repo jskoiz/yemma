@@ -77,7 +77,9 @@ final class AppDiagnostics: @unchecked Sendable {
         if metadataText.isEmpty {
             logger.log("\(category, privacy: .public): \(message, privacy: .public)")
         } else {
-            logger.log("\(category, privacy: .public): \(message, privacy: .public) [\(metadataText, privacy: .public)]")
+            // Metadata values can carry user-derived strings; redact them from the
+            // system log so raw content never reaches sysdiagnose/Console in cleartext.
+            logger.log("\(category, privacy: .public): \(message, privacy: .public) [\(metadataText, privacy: .private)]")
         }
     }
 

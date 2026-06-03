@@ -825,7 +825,7 @@ final class LLMService: @unchecked Sendable {
             metadata: [
                 "route": promptRoute.rawValue,
                 "roles": roleSummary,
-                "latestUser": latestUserPrompt,
+                "latestUserChars": latestUserPrompt.count,
                 "messageCount": conversation.count,
                 "images": conversationImageCount,
                 "videos": 0,
@@ -991,7 +991,7 @@ final class LLMService: @unchecked Sendable {
                             if let parser {
                                 if Yemma4AutomationConfiguration.current.rawTokenLoggingEnabled {
                                     logger.debug(
-                                        "Gemma4 raw stream mode=\(promptMode, privacy: .public) tokens=\(parser.totalTokenCount, privacy: .public) visibleChunks=\(parser.visibleChunkCount, privacy: .public) visibleChars=\(parser.visibleCharacterCount, privacy: .public) preview=[\(parser.tokenPreviewSummary, privacy: .public)]"
+                                        "Gemma4 raw stream mode=\(promptMode, privacy: .public) tokens=\(parser.totalTokenCount, privacy: .public) visibleChunks=\(parser.visibleChunkCount, privacy: .public) visibleChars=\(parser.visibleCharacterCount, privacy: .public) preview=[\(parser.tokenPreviewSummary, privacy: .private)]"
                                     )
                                 }
                             }
