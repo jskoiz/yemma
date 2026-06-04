@@ -1050,7 +1050,13 @@ final class LLMService: @unchecked Sendable {
                     if Task.isCancelled {
                         completionTask.cancel()
                     }
-                    _ = await completionTask.result
+                    // Bound the join on the MLX completion task. During a long
+                    // prefill the underlying TokenIterator only observes
+                    // cancellation between tokens, so awaiting its full result
+                    // can block well past the user's stop request. Cancel and
+                    // detach if it does not settle promptly; the AsyncStream
+                    // continuation is still finished below regardless.
+                    await Self.joinOrDetach(completionTask)
                 } catch {
                     if !Task.isCancelled {
                         await self.setLastError(error.localizedDescription)
@@ -1087,9 +1093,37 @@ final class LLMService: @unchecked Sendable {
     func stopGeneration() async {
         let task = takeGenerationTask()
         task?.cancel()
-        _ = await task?.result
+        // Cancel-and-detach rather than cancel-and-join. The generation task may
+        // be parked inside a slow MLX prefill that only observes cancellation
+        // between tokens, so an unconditional `await task?.result` can block
+        // indefinitely — stalling loadModel/unloadModel which call this first.
+        // Race a bounded join against a timeout and return promptly either way;
+        // the detached task still finalizes itself (resets isGenerating, finishes
+        // its stream continuation) once MLX yields.
+        if let task {
+            await Self.joinOrDetach(task)
+        }
         await MainActor.run {
             isGenerating = false
+        }
+    }
+
+    /// Awaits a generation task's completion, but only up to a short bound.
+    /// If the task does not settle within the deadline (e.g. MLX is mid-prefill
+    /// and not yet observing cancellation), this returns and lets the task drain
+    /// on its own. Callers must not rely on the task being finished on return.
+    private static func joinOrDetach(_ task: Task<Void, Never>) async {
+        let timeoutNanoseconds: UInt64 = 250_000_000 // 0.25s
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask {
+                _ = await task.result
+            }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: timeoutNanoseconds)
+            }
+            // Whichever finishes first wins; cancel the loser and proceed.
+            await group.next()
+            group.cancelAll()
         }
     }
 
