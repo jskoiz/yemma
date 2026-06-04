@@ -4,6 +4,14 @@ import XCTest
 @testable import Yemma4
 
 final class ModelDownloadIntegrityTests: XCTestCase {
+    func testGemma4RepositoryRevisionIsPinnedToCommitSHA() {
+        let revision = Gemma4MLXSupport.repositoryRevision
+
+        XCTAssertNotEqual(revision, "main")
+        XCTAssertEqual(revision.count, 40)
+        XCTAssertTrue(revision.allSatisfy(\.isHexDigit))
+    }
+
     func testStrategyUsesSHA256ForBare64HexETag() {
         let etag = String(repeating: "a", count: 64)
 

@@ -39,6 +39,9 @@ let package = Package(
             path: "Yemma4",
             exclude: [
                 "Yemma4.entitlements",
+            ],
+            resources: [
+                .copy("PrivacyInfo.xcprivacy"),
             ]
         ),
         .testTarget(

@@ -407,7 +407,7 @@ final class BackgroundModelDownloadCoordinator: NSObject, @unchecked Sendable {
                         category: "download",
                         metadata: [
                             "file": file.relativePath,
-                            "sourceURL": file.sourceURL
+                            "repository": manifest.repositoryID
                         ]
                     )
                     continue

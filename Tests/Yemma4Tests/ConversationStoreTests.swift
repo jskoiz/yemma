@@ -7,7 +7,10 @@ import ExyteChat
 final class ConversationStoreTests: XCTestCase {
     func testAsyncRestoreDecodesIso8601DatesFromPersistedConversation() async throws {
         let fileManager = FileManager.default
-        let storageRoot = fileManager.temporaryDirectory.appendingPathComponent(
+        let storageBase = try XCTUnwrap(
+            fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+        )
+        let storageRoot = storageBase.appendingPathComponent(
             "ConversationStoreTests-\(UUID().uuidString)",
             isDirectory: true
         )
@@ -123,9 +126,14 @@ final class ConversationStoreTests: XCTestCase {
             try fileManager.attributesOfItem(atPath: url.path)[.protectionKey] as? FileProtectionType
         }
 
-        XCTAssertEqual(try protection(of: indexURL), .completeUntilFirstUserAuthentication)
-        XCTAssertEqual(try protection(of: conversationURL), .completeUntilFirstUserAuthentication)
-        XCTAssertEqual(try protection(of: storageRoot), .completeUntilFirstUserAuthentication)
+        let protections = try [indexURL, conversationURL, storageRoot].map(protection)
+        guard protections.contains(where: { $0 != nil }) else {
+            throw XCTSkip("This simulator filesystem did not report file-protection attributes.")
+        }
+
+        XCTAssertEqual(protections[0], .completeUntilFirstUserAuthentication)
+        XCTAssertEqual(protections[1], .completeUntilFirstUserAuthentication)
+        XCTAssertEqual(protections[2], .completeUntilFirstUserAuthentication)
         #else
         throw XCTSkip("File protection attributes are only enforced on iOS.")
         #endif

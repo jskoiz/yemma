@@ -195,16 +195,8 @@ enum Gemma4MLXSupport {
     static let legacyRepositoryIDsByPrimaryRepository = [
         Gemma4ModelPreset.defaultE2B.repositoryID: ["EZCon/gemma-4-E2B-it-4bit-mlx"]
     ]
-    // Pin the resolved model revision so an upstream change to the repository
-    // cannot silently swap the bundle we download (supply-chain risk).
-    //
-    // TODO: Replace this with the exact immutable Hugging Face commit SHA for the
-    // pinned snapshot of `repositoryID`. A floating "main" must never be used in a
-    // shipped build. Until the SHA is filled in here, downloads still verify that
-    // every file in the manifest resolves to a single consistent commit hash (see
-    // `BackgroundModelDownloadCoordinator`), which detects an in-flight upstream
-    // change even while this constant remains a branch name.
-    static let repositoryRevision = "main"
+    // Immutable Hugging Face snapshot for mlx-community/gemma-4-e2b-it-4bit.
+    static let repositoryRevision = "2c3e507453b4f218d05fe3cc97bea5c5a654257e"
     static let approximateDownloadBytes: Int64 = defaultApproximateDownloadBytes
     static let defaultImagePrompt = "Describe the scene in this image in one short paragraph."
     static let automatedSmokeImageAssetName = "Gemma4SmokeImage"

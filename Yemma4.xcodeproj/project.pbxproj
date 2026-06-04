@@ -17,6 +17,7 @@
 		B10000001 /* Yemma4App.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000002 /* Yemma4App.swift */; };
 		B10000003 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000004 /* ContentView.swift */; };
 		B10000005 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B10000006 /* Assets.xcassets */; };
+		P1000001 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = P1000002 /* PrivacyInfo.xcprivacy */; };
 		B10000016 /* Appearance.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000017 /* Appearance.swift */; };
 		A2000001 /* AdvancedSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000002 /* AdvancedSettingsView.swift */; };
 		A2000003 /* DebugModelVariantsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000004 /* DebugModelVariantsView.swift */; };
@@ -34,6 +35,12 @@
 		D4000009 /* ChatTranscriptView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D400000A /* ChatTranscriptView.swift */; };
 		D4000021 /* ChatSidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4000020 /* ChatSidebarView.swift */; };
 		CB7B05E97139FE38BFE49578 /* ConversationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60BF02FF587F6CBD41EDD4C6 /* ConversationStore.swift */; };
+		T2000001 /* ConversationStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T2000002 /* ConversationStoreTests.swift */; };
+		T2000003 /* Gemma4AssetContractTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T2000004 /* Gemma4AssetContractTests.swift */; };
+		T2000005 /* ModelDownloadIntegrityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T2000006 /* ModelDownloadIntegrityTests.swift */; };
+		T2000007 /* ModelDownloadStorageCheckTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T2000008 /* ModelDownloadStorageCheckTests.swift */; };
+		T2000009 /* PureFunctionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T200000A /* PureFunctionTests.swift */; };
+		T200000B /* StreamingRendererTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T200000C /* StreamingRendererTests.swift */; };
 		E1000001 /* MLXLMCommon in Frameworks */ = {isa = PBXBuildFile; productRef = E1000101 /* MLXLMCommon */; };
 		E1000002 /* MLXVLM in Frameworks */ = {isa = PBXBuildFile; productRef = E1000102 /* MLXVLM */; };
 		E1000003 /* MLX in Frameworks */ = {isa = PBXBuildFile; productRef = E1000103 /* MLX */; };
@@ -51,6 +58,7 @@
 /* Begin PBXFileReference section */
 		11FB93FF040AF083B453837C /* ModelDownloader.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ModelDownloader.swift; sourceTree = "<group>"; };
 		39C187E5F33C4B9C302E7029 /* Yemma4.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = Yemma4.entitlements; sourceTree = "<group>"; };
+		P1000002 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		4E23D9EC68D2134067159DFB /* OnboardingView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		53CB1EB0E92750BF686F214C /* LaunchScreen.storyboard */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
 		70EEE36ABE229B869B690BFB /* LLMService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LLMService.swift; sourceTree = "<group>"; };
@@ -82,6 +90,13 @@
 		F1000002 /* BackgroundModelDownloadCoordinator.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BackgroundModelDownloadCoordinator.swift; sourceTree = "<group>"; };
 		F1000006 /* ModelDownloadIntegrity.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ModelDownloadIntegrity.swift; sourceTree = "<group>"; };
 		F1000004 /* Yemma4AppDelegate.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = Yemma4AppDelegate.swift; sourceTree = "<group>"; };
+		T2000002 /* ConversationStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationStoreTests.swift; sourceTree = "<group>"; };
+		T2000004 /* Gemma4AssetContractTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Gemma4AssetContractTests.swift; sourceTree = "<group>"; };
+		T2000006 /* ModelDownloadIntegrityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelDownloadIntegrityTests.swift; sourceTree = "<group>"; };
+		T2000008 /* ModelDownloadStorageCheckTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelDownloadStorageCheckTests.swift; sourceTree = "<group>"; };
+		T200000A /* PureFunctionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PureFunctionTests.swift; sourceTree = "<group>"; };
+		T200000C /* StreamingRendererTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamingRendererTests.swift; sourceTree = "<group>"; };
+		T200000D /* Yemma4Tests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = Yemma4Tests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 
 /* End PBXFileReference section */
 
@@ -99,10 +114,38 @@
 				8ED5E2862DF091C3920ED85D /* ExyteChat in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
+			};
+		T200000E /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
 		};
-/* End PBXFrameworksBuildPhase section */
+	/* End PBXFrameworksBuildPhase section */
 
-/* Begin PBXGroup section */
+	/* Begin PBXGroup section */
+		T200000F /* Tests */ = {
+			isa = PBXGroup;
+			children = (
+				T2000010 /* Yemma4Tests */,
+			);
+			path = Tests;
+			sourceTree = "<group>";
+		};
+		T2000010 /* Yemma4Tests */ = {
+			isa = PBXGroup;
+			children = (
+				T2000002 /* ConversationStoreTests.swift */,
+				T2000004 /* Gemma4AssetContractTests.swift */,
+				T2000006 /* ModelDownloadIntegrityTests.swift */,
+				T2000008 /* ModelDownloadStorageCheckTests.swift */,
+				T200000A /* PureFunctionTests.swift */,
+				T200000C /* StreamingRendererTests.swift */,
+			);
+			path = Yemma4Tests;
+			sourceTree = "<group>";
+		};
 		D400000B /* Chat */ = {
 			isa = PBXGroup;
 			children = (
@@ -144,6 +187,7 @@
 			isa = PBXGroup;
 			children = (
 				B10000007 /* Yemma4.app */,
+				T200000D /* Yemma4Tests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -156,6 +200,7 @@
 				F1000004 /* Yemma4AppDelegate.swift */,
 				B10000004 /* ContentView.swift */,
 				B10000006 /* Assets.xcassets */,
+				P1000002 /* PrivacyInfo.xcprivacy */,
 				5B7C0764582A88CC0118AAB9 /* Models */,
 				CE67C04D23A2513EC55AA96D /* Services */,
 				54934DF62416A306B1C5304E /* Views */,
@@ -169,6 +214,7 @@
 			isa = PBXGroup;
 			children = (
 				B1000000A /* Yemma4 */,
+				T200000F /* Tests */,
 				B10000009 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -192,6 +238,16 @@
 		};
 
 /* End PBXGroup section */
+
+/* Begin PBXContainerItemProxy section */
+		T2000011 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = B10000010 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B1000000C;
+			remoteInfo = Yemma4;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXNativeTarget section */
 		B1000000C /* Yemma4 */ = {
@@ -220,7 +276,25 @@
 			productReference = B10000007 /* Yemma4.app */;
 			productType = "com.apple.product-type.application";
 		};
-/* End PBXNativeTarget section */
+		T2000012 /* Yemma4Tests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = T2000013 /* Build configuration list for PBXNativeTarget "Yemma4Tests" */;
+			buildPhases = (
+				T2000014 /* Sources */,
+				T200000E /* Frameworks */,
+				T2000015 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				T2000016 /* PBXTargetDependency */,
+			);
+			name = Yemma4Tests;
+			productName = Yemma4Tests;
+			productReference = T200000D /* Yemma4Tests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+	/* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
 		B10000010 /* Project object */ = {
@@ -232,6 +306,10 @@
 				TargetAttributes = {
 					B1000000C = {
 						CreatedOnToolsVersion = 16.2;
+					};
+					T2000012 = {
+						CreatedOnToolsVersion = 26.5;
+						TestTargetID = B1000000C;
 					};
 				};
 			};
@@ -257,6 +335,7 @@
 			projectRoot = "";
 			targets = (
 				B1000000C /* Yemma4 */,
+				T2000012 /* Yemma4Tests */,
 			);
 		};
 /* End PBXProject section */
@@ -267,11 +346,19 @@
 			buildActionMask = 2147483647;
 			files = (
 				B10000005 /* Assets.xcassets in Resources */,
+				P1000001 /* PrivacyInfo.xcprivacy in Resources */,
 				38135214F3C193EF4A21DDEE /* LaunchScreen.storyboard in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-/* End PBXResourcesBuildPhase section */
+		T2000015 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+	/* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		B1000000E /* Sources */ = {
@@ -310,7 +397,28 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-/* End PBXSourcesBuildPhase section */
+		T2000014 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				T2000001 /* ConversationStoreTests.swift in Sources */,
+				T2000003 /* Gemma4AssetContractTests.swift in Sources */,
+				T2000005 /* ModelDownloadIntegrityTests.swift in Sources */,
+				T2000007 /* ModelDownloadStorageCheckTests.swift in Sources */,
+				T2000009 /* PureFunctionTests.swift in Sources */,
+				T200000B /* StreamingRendererTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+	/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		T2000016 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = B1000000C /* Yemma4 */;
+			targetProxy = T2000011 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		B10000012 /* Debug */ = {
@@ -526,7 +634,53 @@
 			};
 			name = Release;
 		};
-/* End XCBuildConfiguration section */
+		T2000017 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = H8PYU9TN9X;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.avmillabs.yemma4Tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Yemma4.app/Yemma4";
+			};
+			name = Debug;
+		};
+		T2000018 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = H8PYU9TN9X;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.avmillabs.yemma4Tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Yemma4.app/Yemma4";
+			};
+			name = Release;
+		};
+	/* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
 		B1000000D /* Build configuration list for PBXNativeTarget "Yemma4" */ = {
@@ -547,7 +701,16 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-/* End XCConfigurationList section */
+		T2000013 /* Build configuration list for PBXNativeTarget "Yemma4Tests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				T2000017 /* Debug */,
+				T2000018 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+	/* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
 		E1000300 /* XCLocalSwiftPackageReference "." */ = {

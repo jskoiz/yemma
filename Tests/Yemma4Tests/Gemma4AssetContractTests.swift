@@ -35,6 +35,7 @@ final class Gemma4AssetContractTests: XCTestCase {
         includePadTokenID: Bool = true
     ) throws -> URL {
         var config: [String: Any] = [
+            "text_config": ["pad_token_id": 0],
             "vision_config": ["default_output_length": defaultOutputLength],
             "image_token_id": imageTokenId,
             "boi_token_id": boiTokenId,

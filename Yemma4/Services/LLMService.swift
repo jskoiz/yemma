@@ -57,6 +57,21 @@ struct GenerationDebugStats: Sendable, Equatable {
     let isSimulated: Bool
 }
 
+private final class BoundedJoinState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var didResume = false
+
+    func resumeOnce(_ continuation: CheckedContinuation<Void, Never>) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !didResume else {
+            return
+        }
+        didResume = true
+        continuation.resume()
+    }
+}
+
 enum LLMServiceError: LocalizedError {
     case modelNotLoaded
     case modelLoadFailed(path: String)
@@ -579,6 +594,7 @@ final class LLMService: @unchecked Sendable {
     @ObservationIgnored private var loadedModelPath: String?
     @ObservationIgnored private var loadingModelPath: String?
     @ObservationIgnored private var generationTask: Task<Void, Never>?
+    @ObservationIgnored private var activeGenerationID: UUID?
     @ObservationIgnored private var memoryWarningObserver: NSObjectProtocol?
     @ObservationIgnored private let stateLock = NSLock()
     @ObservationIgnored private let logger = Logger(
@@ -626,7 +642,9 @@ final class LLMService: @unchecked Sendable {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.handleMemoryWarning()
+            Task { @MainActor [weak self] in
+                self?.handleMemoryWarning()
+            }
         }
     }
 
@@ -640,7 +658,15 @@ final class LLMService: @unchecked Sendable {
             return
         }
 
-        guard isModelLoaded || isModelLoading else {
+        guard isModelLoaded else {
+            return
+        }
+
+        guard !isModelLoading else {
+            AppDiagnostics.shared.record(
+                "Memory warning received while model load is in progress; skipping model unload",
+                category: "model"
+            )
             return
         }
 
@@ -1068,13 +1094,11 @@ final class LLMService: @unchecked Sendable {
                     }
                 }
 
-                await self.finishGeneration()
-                continuation.finish()
-            }
+                    await self.finishGeneration(generationID: generationID)
+                    continuation.finish()
+                }
 
-            self.withLock {
-                generationTask = task
-            }
+            self.publishGenerationTask(task, generationID: generationID)
 
             Task { @MainActor [weak self] in
                 self?.isGenerating = true
@@ -1114,16 +1138,16 @@ final class LLMService: @unchecked Sendable {
     /// on its own. Callers must not rely on the task being finished on return.
     private static func joinOrDetach(_ task: Task<Void, Never>) async {
         let timeoutNanoseconds: UInt64 = 250_000_000 // 0.25s
-        await withTaskGroup(of: Void.self) { group in
-            group.addTask {
+        await withCheckedContinuation { continuation in
+            let state = BoundedJoinState()
+            Task {
                 _ = await task.result
+                state.resumeOnce(continuation)
             }
-            group.addTask {
+            Task {
                 try? await Task.sleep(nanoseconds: timeoutNanoseconds)
+                state.resumeOnce(continuation)
             }
-            // Whichever finishes first wins; cancel the loser and proceed.
-            await group.next()
-            group.cancelAll()
         }
     }
 
@@ -1166,9 +1190,17 @@ final class LLMService: @unchecked Sendable {
         AppDiagnostics.shared.record("MLX model unloaded", category: "model")
     }
 
-    private func finishGeneration() async {
-        withLock {
+    private func finishGeneration(generationID finishedGenerationID: UUID) async {
+        let shouldPublish = withLock {
+            guard activeGenerationID == finishedGenerationID else {
+                return false
+            }
             generationTask = nil
+            activeGenerationID = nil
+            return true
+        }
+        guard shouldPublish else {
+            return
         }
         await MainActor.run {
             isGenerating = false
@@ -1541,12 +1573,20 @@ private extension LLMService {
         }
     }
 
+    func publishGenerationTask(_ task: Task<Void, Never>, generationID: UUID) {
+        withLock {
+            self.generationTask = task
+            activeGenerationID = generationID
+        }
+    }
+
     func makeSimulatorStream(prompt: PromptMessageInput, history: [PromptMessageInput]) -> AsyncStream<String> {
         let transcriptCount = history.count + 1
         let response = Self.simulatorResponse(
             for: prompt,
             transcriptCount: transcriptCount
         )
+        let generationID = UUID()
 
         return AsyncStream { continuation in
             let task = Task { [weak self] in
@@ -1559,13 +1599,11 @@ private extension LLMService {
                     try? await Task.sleep(for: .milliseconds(14))
                 }
 
-                await self?.finishGeneration()
+                await self?.finishGeneration(generationID: generationID)
                 continuation.finish()
             }
 
-            withLock {
-                generationTask = task
-            }
+            publishGenerationTask(task, generationID: generationID)
 
             Task { @MainActor [weak self] in
                 self?.isGenerating = true
