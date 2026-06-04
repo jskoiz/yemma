@@ -353,6 +353,18 @@ final class BackgroundModelDownloadCoordinator: NSObject, @unchecked Sendable {
             )
         }
 
+        // All files must resolve to a single commit hash. If the upstream
+        // repository changes while a floating revision (e.g. "main") is being
+        // resolved, the per-file commit hashes diverge and we refuse to build an
+        // inconsistent manifest rather than mixing snapshots.
+        let commitHashes = Set(files.map(\.commitHash))
+        if commitHashes.count > 1 {
+            throw Hub.HubClientError.downloadError(
+                "Model files resolved to inconsistent commit hashes for \(repositoryID); "
+                    + "the upstream revision changed mid-resolution."
+            )
+        }
+
         return DownloadManifest(
             repositoryID: repositoryID,
             revision: revision,
@@ -397,6 +409,32 @@ final class BackgroundModelDownloadCoordinator: NSObject, @unchecked Sendable {
                 relativePath: file.relativePath
             )
             task.resume()
+        }
+    }
+
+    /// Verifies a freshly-downloaded file at `destination` against the manifest
+    /// entry. When the captured etag is an LFS SHA-256 the file's streamed digest
+    /// must match; otherwise the existing byte-size check is used. Throws on any
+    /// mismatch so the caller can discard the file.
+    private func verifyDownloadedFile(_ file: DownloadFile, at destination: URL) throws {
+        switch ModelDownloadIntegrity.strategy(forETag: file.etag) {
+        case let .sha256(expected):
+            let actual = try ModelDownloadIntegrity.sha256Digest(ofFileAt: destination)
+            guard actual == expected else {
+                throw Hub.HubClientError.downloadError(
+                    "Downloaded file SHA-256 did not match \(file.relativePath)."
+                )
+            }
+        case .size:
+            guard
+                let attributes = try? fileManager.attributesOfItem(atPath: destination.path),
+                let fileSize = attributes[.size] as? NSNumber,
+                fileSize.int64Value == file.expectedBytes
+            else {
+                throw Hub.HubClientError.downloadError(
+                    "Downloaded file size did not match \(file.relativePath)."
+                )
+            }
         }
     }
 
@@ -580,20 +618,16 @@ extension BackgroundModelDownloadCoordinator: URLSessionDownloadDelegate, URLSes
             try fileManager.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
             try fileManager.moveItem(at: location, to: destination)
 
-            if
-                let file = state.manifest.files.first(where: { $0.relativePath == descriptor.relativePath }),
-                let attributes = try? fileManager.attributesOfItem(atPath: destination.path),
-                let fileSize = attributes[.size] as? NSNumber,
-                fileSize.int64Value != file.expectedBytes
-            {
-                throw Hub.HubClientError.downloadError(
-                    "Downloaded file size did not match \(descriptor.relativePath)."
-                )
+            if let file = state.manifest.files.first(where: { $0.relativePath == descriptor.relativePath }) {
+                try verifyDownloadedFile(file, at: destination)
             }
 
             removeResumeData(for: descriptor.relativePath, in: repoLocation)
             updateLastError(nil, repositoryID: descriptor.repositoryID)
         } catch {
+            // A correctly-sized-but-corrupt or tampered file must never be left in
+            // place: remove it so the next download pass re-fetches the shard.
+            try? fileManager.removeItem(at: destination)
             updateLastError(error.localizedDescription, repositoryID: descriptor.repositoryID)
         }
     }

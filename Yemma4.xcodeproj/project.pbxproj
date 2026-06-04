@@ -42,6 +42,7 @@
 		E1000010 /* YemmaPromptPlanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1000011 /* YemmaPromptPlanner.swift */; };
 		E1000012 /* Gemma4SmokeAutomation.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1000013 /* Gemma4SmokeAutomation.swift */; };
 		F1000001 /* BackgroundModelDownloadCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1000002 /* BackgroundModelDownloadCoordinator.swift */; };
+		F1000005 /* ModelDownloadIntegrity.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1000006 /* ModelDownloadIntegrity.swift */; };
 		F1000003 /* Yemma4AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1000004 /* Yemma4AppDelegate.swift */; };
 
 /* End PBXBuildFile section */
@@ -77,6 +78,7 @@
 		E1000011 /* YemmaPromptPlanner.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = YemmaPromptPlanner.swift; sourceTree = "<group>"; };
 		E1000013 /* Gemma4SmokeAutomation.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = Gemma4SmokeAutomation.swift; sourceTree = "<group>"; };
 		F1000002 /* BackgroundModelDownloadCoordinator.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BackgroundModelDownloadCoordinator.swift; sourceTree = "<group>"; };
+		F1000006 /* ModelDownloadIntegrity.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ModelDownloadIntegrity.swift; sourceTree = "<group>"; };
 		F1000004 /* Yemma4AppDelegate.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = Yemma4AppDelegate.swift; sourceTree = "<group>"; };
 
 /* End PBXFileReference section */
@@ -176,6 +178,7 @@
 				E1000013 /* Gemma4SmokeAutomation.swift */,
 				70EEE36ABE229B869B690BFB /* LLMService.swift */,
 				E1000007 /* MLXModelSupport.swift */,
+				F1000006 /* ModelDownloadIntegrity.swift */,
 				11FB93FF040AF083B453837C /* ModelDownloader.swift */,
 				D3000006 /* StreamingRenderer.swift */,
 				60BF02FF587F6CBD41EDD4C6 /* ConversationStore.swift */,
@@ -281,6 +284,7 @@
 				F1000001 /* BackgroundModelDownloadCoordinator.swift in Sources */,
 				E1000012 /* Gemma4SmokeAutomation.swift in Sources */,
 				E1000006 /* MLXModelSupport.swift in Sources */,
+				F1000005 /* ModelDownloadIntegrity.swift in Sources */,
 				8804C30D1CAED09270D51D6D /* LLMService.swift in Sources */,
 				F6A19338069476EC14B97082 /* ModelDownloader.swift in Sources */,
 				DF571A73493F2913161C6971 /* ChatView.swift in Sources */,
