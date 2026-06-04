@@ -68,7 +68,7 @@ struct ChatTranscriptView: View {
                             reduceMotion
                                 ? nil
                                 : .spring(response: 0.34, dampingFraction: 0.9),
-                            value: messages.map(\.id)
+                            value: messageListIdentity
                         )
                     }
                     .coordinateSpace(name: scrollCoordinateSpaceName)
@@ -99,6 +99,19 @@ struct ChatTranscriptView: View {
                 }
             }
         }
+    }
+
+    /// Stable, allocation-free identity for the message list used to drive the
+    /// insert/remove spring. Mapping the whole array to `[id]` allocated a new array
+    /// on every streaming flush even though only the trailing message's text changed;
+    /// keying on count + boundary ids triggers the animation on add/remove without
+    /// the per-flush allocation.
+    private var messageListIdentity: MessageListIdentity {
+        MessageListIdentity(
+            count: messages.count,
+            firstID: messages.first?.id,
+            lastID: messages.last?.id
+        )
     }
 
     private var bottomAnchorID: String { "conversation-bottom-anchor" }
@@ -478,6 +491,12 @@ struct ChatAttachmentPreviewTile: View {
                 .stroke(AppTheme.assistantBubbleBorder, lineWidth: 1)
         )
     }
+}
+
+private struct MessageListIdentity: Equatable {
+    let count: Int
+    let firstID: String?
+    let lastID: String?
 }
 
 private struct ConversationBottomOffsetPreferenceKey: PreferenceKey {

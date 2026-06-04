@@ -12,7 +12,10 @@ struct RichMessageText: View {
     var isStreaming = false
     var foregroundColor: Color = AppTheme.assistantMessageText
 
-    @State private var displayedStreamingText = ""
+    /// Render mode is decided once when a stream begins and only re-evaluated when
+    /// the stream finalizes. Locking it for the stream duration avoids reflowing the
+    /// whole subtree the moment the first markdown token arrives mid-stream.
+    @State private var lockedRendersMarkdown: Bool?
 
     private let chatMarkdownTheme = Theme.gitHub
         .text {
@@ -127,89 +130,50 @@ struct RichMessageText: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: isStreaming)
-        .task(id: StreamingAnimationKey(targetText: text, isStreaming: isStreaming, reduceMotion: reduceMotion)) {
-            await synchronizeDisplayedStreamingText()
+        .onChange(of: isStreaming, initial: true) { _, streaming in
+            // Re-evaluate the render mode only when streaming starts or stops, never
+            // mid-stream, so the first markdown token can't reflow the whole subtree.
+            if streaming {
+                lockMarkdownDecisionIfNeeded()
+            } else {
+                lockedRendersMarkdown = nil
+            }
+        }
+        .onChange(of: text) { _, _ in
+            // While streaming, latch the decision once content first looks like
+            // markdown so a later marker doesn't trigger a plain -> markdown swap.
+            // The decision is never reverted for the rest of the stream.
+            guard isStreaming else { return }
+            lockMarkdownDecisionIfNeeded()
+        }
+    }
+
+    private func lockMarkdownDecisionIfNeeded() {
+        // Latch the decision exactly once: as soon as the stream either looks like
+        // markdown or has produced real (non-placeholder) content. After it is set
+        // it is never changed mid-stream, so no plain <-> markdown reflow occurs.
+        guard lockedRendersMarkdown == nil else { return }
+
+        if MarkdownHeuristics.looksLikeMarkdown(text) {
+            lockedRendersMarkdown = true
+        } else if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            lockedRendersMarkdown = false
         }
     }
 
     private var shouldRenderMarkdown: Bool {
-        MarkdownHeuristics.looksLikeMarkdown(text)
+        if isStreaming, let lockedRendersMarkdown {
+            return lockedRendersMarkdown
+        }
+        return MarkdownHeuristics.looksLikeMarkdown(text)
     }
 
+    /// The text the policy has already flushed is the single source of truth for what
+    /// is on screen. The visible reveal cadence is driven entirely by the upstream
+    /// `StreamingUpdatePolicy` flushes plus the per-token transitions below.
     private var renderedText: String {
-        guard isStreaming else { return text }
-        return text.hasPrefix(displayedStreamingText) ? displayedStreamingText : text
+        text
     }
-
-    @MainActor
-    private func synchronizeDisplayedStreamingText() async {
-        guard isStreaming, !reduceMotion else {
-            displayedStreamingText = text
-            return
-        }
-
-        guard displayedStreamingText != text else {
-            return
-        }
-
-        let targetCharacters = Array(text)
-        let currentCharacters = Array(displayedStreamingText)
-
-        guard targetCharacters.starts(with: currentCharacters) else {
-            displayedStreamingText = text
-            return
-        }
-
-        var revealedCount = currentCharacters.count
-
-        while revealedCount < targetCharacters.count {
-            guard !Task.isCancelled else { return }
-
-            let remainingCharacters = targetCharacters.count - revealedCount
-            let revealStep = min(Self.characterRevealStep(for: remainingCharacters), remainingCharacters)
-
-            revealedCount += revealStep
-            displayedStreamingText = String(targetCharacters.prefix(revealedCount))
-
-            guard revealedCount < targetCharacters.count else { break }
-
-            do {
-                try await Task.sleep(for: Self.characterRevealDelay(for: remainingCharacters))
-            } catch {
-                return
-            }
-        }
-    }
-
-    private static func characterRevealStep(for remainingCharacters: Int) -> Int {
-        switch remainingCharacters {
-        case 0...4:
-            return 1
-        case 5...12:
-            return 2
-        case 13...24:
-            return 3
-        default:
-            return 4
-        }
-    }
-
-    private static func characterRevealDelay(for remainingCharacters: Int) -> Duration {
-        switch remainingCharacters {
-        case 0...6:
-            return .milliseconds(18)
-        case 7...18:
-            return .milliseconds(12)
-        default:
-            return .milliseconds(8)
-        }
-    }
-}
-
-private struct StreamingAnimationKey: Equatable {
-    let targetText: String
-    let isStreaming: Bool
-    let reduceMotion: Bool
 }
 
 private struct StreamingRichMessageText: View {
