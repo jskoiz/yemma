@@ -232,7 +232,7 @@ struct AppSetupSnapshot {
             && modelLoadError == nil
     }
 
-    private static func formatETA(_ seconds: Double) -> String {
+    static func formatETA(_ seconds: Double) -> String {
         let s = max(Int(seconds), 0)
         if s < 60 {
             return "less than a minute"
