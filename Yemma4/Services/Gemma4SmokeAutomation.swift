@@ -259,14 +259,10 @@ final class Gemma4SmokeAutomation {
     }
 
     private func persistSmokeImage(_ imageData: Data) throws -> URL {
-        let directory = ConversationAttachmentStore.directoryURL()
-        try FileManager.default.createDirectory(
-            at: directory,
-            withIntermediateDirectories: true
-        )
+        let directory = try ConversationAttachmentStore.prepareDirectory()
 
         let fileURL = directory.appendingPathComponent("gemma4-smoke-image.jpg")
-        try imageData.write(to: fileURL, options: [.atomic])
+        try imageData.write(to: fileURL, options: ConversationAttachmentStore.writeOptions)
         return fileURL
     }
 

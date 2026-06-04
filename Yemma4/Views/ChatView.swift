@@ -890,16 +890,10 @@ public struct ChatView: View {
     }
 
     private func storeAttachmentData(_ data: Data, fileExtension: String) throws -> URL {
-        let directory = ConversationAttachmentStore.directoryURL()
-
-        try FileManager.default.createDirectory(
-            at: directory,
-            withIntermediateDirectories: true,
-            attributes: nil
-        )
+        let directory = try ConversationAttachmentStore.prepareDirectory()
 
         let fileURL = directory.appendingPathComponent("\(UUID().uuidString).\(fileExtension)")
-        try data.write(to: fileURL, options: [.atomic])
+        try data.write(to: fileURL, options: ConversationAttachmentStore.writeOptions)
         return fileURL
     }
 

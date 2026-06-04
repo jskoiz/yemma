@@ -24,6 +24,14 @@ struct ConversationSnapshot: Sendable {
 enum ConversationAttachmentStore {
     private static let directoryName = "chat-attachments"
 
+    /// At-rest protection for locally stored chat attachments.
+    ///
+    /// `.completeUntilFirstUserAuthentication` keeps data encrypted while the
+    /// device is locked before the first unlock after boot, but still allows
+    /// background access afterwards. `.complete` is intentionally avoided so
+    /// background download/restore is not broken.
+    static let fileProtection: FileProtectionType = .completeUntilFirstUserAuthentication
+
     static func directoryURL(
         fileManager: FileManager = .default,
         baseDirectoryOverride: URL? = nil
@@ -37,6 +45,29 @@ enum ConversationAttachmentStore {
         }
 
         return cachesDirectory.appendingPathComponent(directoryName, isDirectory: true)
+    }
+
+    /// Creates the attachment directory (if needed) with data protection applied,
+    /// and returns its URL. Callers should use this instead of creating the
+    /// directory directly so attachments are encrypted at rest.
+    @discardableResult
+    static func prepareDirectory(
+        fileManager: FileManager = .default,
+        baseDirectoryOverride: URL? = nil
+    ) throws -> URL {
+        let directory = directoryURL(fileManager: fileManager, baseDirectoryOverride: baseDirectoryOverride)
+        try fileManager.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true,
+            attributes: [.protectionKey: fileProtection]
+        )
+        try? fileManager.setAttributes([.protectionKey: fileProtection], ofItemAtPath: directory.path)
+        return directory
+    }
+
+    /// File-write options that apply data protection to a newly written attachment.
+    static var writeOptions: Data.WritingOptions {
+        [.atomic, .completeFileProtectionUntilFirstUserAuthentication]
     }
 
     static func removeAll(
@@ -546,25 +577,33 @@ final class ConversationStore {
 
     private func writeConversationLocked(_ conversation: PersistedConversation) {
         guard let data = try? Self.encoder.encode(conversation) else { return }
-        try? data.write(to: conversationURL(for: conversation.id), options: .atomic)
+        try? data.write(to: conversationURL(for: conversation.id), options: Self.fileWriteOptions)
     }
 
     private func writeIndexLocked() {
         guard let data = try? Self.encoder.encode(conversations) else { return }
-        try? data.write(to: indexURL, options: .atomic)
+        try? data.write(to: indexURL, options: Self.fileWriteOptions)
     }
 
     private func ensureRootDirectoryLocked() {
-        if !fileManager.fileExists(atPath: rootDirectory.path) {
-            try? fileManager.createDirectory(at: rootDirectory, withIntermediateDirectories: true)
-        }
+        ensureProtectedDirectory(at: rootDirectory)
     }
 
     private func ensureConversationDirectoryLocked(id: UUID) {
-        let directory = conversationDirectory(for: id)
+        ensureProtectedDirectory(at: conversationDirectory(for: id))
+    }
+
+    /// Creates `directory` (if needed) with data protection applied and ensures the
+    /// protection attribute is set so chat history is encrypted at rest.
+    private func ensureProtectedDirectory(at directory: URL) {
         if !fileManager.fileExists(atPath: directory.path) {
-            try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+            try? fileManager.createDirectory(
+                at: directory,
+                withIntermediateDirectories: true,
+                attributes: [.protectionKey: Self.fileProtection]
+            )
         }
+        try? fileManager.setAttributes([.protectionKey: Self.fileProtection], ofItemAtPath: directory.path)
     }
 
     private func cleanedTitle(_ title: String?) -> String? {
@@ -626,6 +665,19 @@ final class ConversationStore {
         }
         return lhs.updatedAt > rhs.updatedAt
     }
+
+    /// At-rest protection for locally stored chat history.
+    ///
+    /// `.completeUntilFirstUserAuthentication` keeps data encrypted while the
+    /// device is locked before the first unlock after boot while still allowing
+    /// background access afterwards. `.complete` is intentionally avoided so
+    /// background restore/persistence is not broken.
+    private static let fileProtection: FileProtectionType = .completeUntilFirstUserAuthentication
+
+    private static let fileWriteOptions: Data.WritingOptions = [
+        .atomic,
+        .completeFileProtectionUntilFirstUserAuthentication
+    ]
 
     private static let encoder: JSONEncoder = {
         let encoder = JSONEncoder()
