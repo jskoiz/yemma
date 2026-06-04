@@ -396,6 +396,20 @@ final class BackgroundModelDownloadCoordinator: NSObject, @unchecked Sendable {
                 task = session.downloadTask(withResumeData: resumeData)
             } else {
                 guard let url = URL(string: file.sourceURL) else {
+                    // A file we cannot turn into a task would silently never download,
+                    // leaving the bundle incomplete with no pending work. Surface it.
+                    updateLastError(
+                        "Invalid download URL for \(file.relativePath).",
+                        repositoryID: manifest.repositoryID
+                    )
+                    AppDiagnostics.shared.record(
+                        "Skipped background model download with invalid source URL",
+                        category: "download",
+                        metadata: [
+                            "file": file.relativePath,
+                            "sourceURL": file.sourceURL
+                        ]
+                    )
                     continue
                 }
 
@@ -564,6 +578,26 @@ final class BackgroundModelDownloadCoordinator: NSObject, @unchecked Sendable {
         try? fileManager.removeItem(at: url)
     }
 
+    private func selfHealMarkerURL(for relativePath: String, in repoLocation: URL) -> URL {
+        cacheDirectory(for: repoLocation)
+            .appending(path: "resume-data")
+            .appending(path: relativePath + ".selfheal")
+    }
+
+    private func markSelfHealAttempted(for relativePath: String, in repoLocation: URL) {
+        let url = selfHealMarkerURL(for: relativePath, in: repoLocation)
+        try? fileManager.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? Data().write(to: url, options: .atomic)
+    }
+
+    private func selfHealAlreadyAttempted(for relativePath: String, in repoLocation: URL) -> Bool {
+        fileManager.fileExists(atPath: selfHealMarkerURL(for: relativePath, in: repoLocation).path)
+    }
+
+    private func clearSelfHealMarker(for relativePath: String, in repoLocation: URL) {
+        try? fileManager.removeItem(at: selfHealMarkerURL(for: relativePath, in: repoLocation))
+    }
+
     private func currentTasks() async -> [URLSessionTask] {
         await withCheckedContinuation { continuation in
             session.getAllTasks { tasks in
@@ -623,13 +657,79 @@ extension BackgroundModelDownloadCoordinator: URLSessionDownloadDelegate, URLSes
             }
 
             removeResumeData(for: descriptor.relativePath, in: repoLocation)
+            clearSelfHealMarker(for: descriptor.relativePath, in: repoLocation)
             updateLastError(nil, repositoryID: descriptor.repositoryID)
         } catch {
-            // A correctly-sized-but-corrupt or tampered file must never be left in
-            // place: remove it so the next download pass re-fetches the shard.
-            try? fileManager.removeItem(at: destination)
+            // The system temp file at `location` is consumed once this delegate
+            // returns. Whether the failure was a move error, size mismatch, or
+            // hash mismatch, clear any partial/corrupt destination and re-enqueue
+            // the file once so the next pass downloads a clean copy.
             updateLastError(error.localizedDescription, repositoryID: descriptor.repositoryID)
+            selfHealFailedFinish(
+                file: state.manifest.files.first(where: { $0.relativePath == descriptor.relativePath }),
+                repositoryID: descriptor.repositoryID,
+                relativePath: descriptor.relativePath,
+                destination: destination,
+                repoLocation: repoLocation
+            )
         }
+    }
+
+    private func selfHealFailedFinish(
+        file: DownloadFile?,
+        repositoryID: String,
+        relativePath: String,
+        destination: URL,
+        repoLocation: URL
+    ) {
+        // Remove any partial/corrupt file left at the destination so the missing
+        // file is detected as incomplete and a re-download can take its place.
+        if fileManager.fileExists(atPath: destination.path) {
+            try? fileManager.removeItem(at: destination)
+        }
+        // Stale resume data would resume a download we just deemed broken; drop it
+        // so the re-enqueue starts cleanly from the source URL.
+        removeResumeData(for: relativePath, in: repoLocation)
+
+        guard let file, let url = URL(string: file.sourceURL) else {
+            AppDiagnostics.shared.record(
+                "Unable to self-heal failed background model download",
+                category: "download",
+                metadata: [
+                    "file": relativePath,
+                    "repository": repositoryID
+                ]
+            )
+            return
+        }
+
+        // Re-enqueue at most once per failure to avoid an infinite loop when the
+        // cause is persistent (e.g. an unwritable destination or a server that
+        // keeps returning a wrong-sized file). The marker is cleared on success.
+        guard !selfHealAlreadyAttempted(for: relativePath, in: repoLocation) else {
+            AppDiagnostics.shared.record(
+                "Skipped repeat self-heal for background model download",
+                category: "download",
+                metadata: ["file": relativePath]
+            )
+            return
+        }
+        markSelfHealAttempted(for: relativePath, in: repoLocation)
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        let task = session.downloadTask(with: request)
+        task.taskDescription = Self.taskDescription(
+            repositoryID: repositoryID,
+            relativePath: relativePath
+        )
+        task.resume()
+
+        AppDiagnostics.shared.record(
+            "Re-enqueued background model download after failed file move",
+            category: "download",
+            metadata: ["file": relativePath]
+        )
     }
 
     func urlSession(
