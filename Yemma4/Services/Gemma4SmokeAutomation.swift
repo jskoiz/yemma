@@ -394,7 +394,7 @@ final class Gemma4SmokeAutomation {
         }
 
         return
-            "route=\(event.metadata["route"] ?? "unknown") internalChat=roles=\(event.metadata["roles"] ?? "[]") latestUser=\"\(event.metadata["latestUser"] ?? "")\" messageCount=\(event.metadata["messageCount"] ?? "?") images=\(event.metadata["images"] ?? "?") videos=\(event.metadata["videos"] ?? "?")"
+            "route=\(event.metadata["route"] ?? "unknown") internalChat=roles=\(event.metadata["roles"] ?? "[]") latestUserChars=\(event.metadata["latestUserChars"] ?? "?") messageCount=\(event.metadata["messageCount"] ?? "?") images=\(event.metadata["images"] ?? "?") videos=\(event.metadata["videos"] ?? "?")"
     }
 
     private static func preparedInputSummary(from events: [DiagnosticEvent]) -> String? {
