@@ -138,6 +138,8 @@ After the bundle is downloaded, Yemma can load, unload, and run it entirely on d
 3. Use `./scripts/sim_run.sh` for simulator testing with mocked replies.
 4. Use `./scripts/device_startup_probe.sh` when you need a clean first-launch timing probe on device.
 
+Lint (optional, not a build dependency): with [SwiftLint](https://github.com/realm/SwiftLint) installed, run `swiftlint lint --config .swiftlint.yml --quiet`.
+
 ## Release
 
 App Store Connect deployment via `asc-cli`.
