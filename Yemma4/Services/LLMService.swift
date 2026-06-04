@@ -825,7 +825,12 @@ final class LLMService: @unchecked Sendable {
 
         let container = withLock { modelContainer }
         guard let container else {
-            lastError = LLMServiceError.modelNotLoaded.localizedDescription
+            // Route the Observable mutation through the main actor like every other
+            // mutation of `lastError` in this file; `generate` itself is not isolated.
+            let message = LLMServiceError.modelNotLoaded.localizedDescription
+            Task { @MainActor in
+                self.lastError = message
+            }
             return AsyncStream { continuation in
                 continuation.finish()
             }
@@ -1089,9 +1094,11 @@ final class LLMService: @unchecked Sendable {
     }
 
     func stopGenerationSynchronously() {
+        // Called from deinit, which is not isolated to the main actor. Only cancel
+        // the in-flight generation task here; do not write `isGenerating` (an
+        // Observation-tracked property), which must be mutated on the main actor.
         let task = takeGenerationTask()
         task?.cancel()
-        isGenerating = false
     }
 
     func clearCachedPrefix() {

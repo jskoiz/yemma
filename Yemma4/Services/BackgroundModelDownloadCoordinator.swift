@@ -622,7 +622,12 @@ final class BackgroundModelDownloadCoordinator: NSObject, @unchecked Sendable {
         let completionHandler = backgroundCompletionHandler
         backgroundCompletionHandler = nil
         completionHandlerLock.unlock()
-        completionHandler?()
+        // UIKit requires the background-events completion handler be invoked on the
+        // main thread; this delegate callback runs on the session's background queue.
+        guard let completionHandler else { return }
+        DispatchQueue.main.async {
+            completionHandler()
+        }
     }
 }
 
