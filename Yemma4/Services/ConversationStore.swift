@@ -21,6 +21,11 @@ struct ConversationSnapshot: Sendable {
     let draftAttachments: [Attachment]
 }
 
+private struct ConversationIndexLoadResult: Sendable {
+    let conversations: [ConversationMetadata]
+    let recoveredFromConversationFiles: Bool
+}
+
 enum ConversationAttachmentStore {
     private static let directoryName = "chat-attachments"
 
@@ -488,27 +493,105 @@ final class ConversationStore {
     }
 
     private func loadIndexAsync() async {
-        let decoded = await Task.detached(priority: .utility) { [indexURL] in
-            let decoder = JSONDecoder()
-            decoder.dateDecodingStrategy = .iso8601
-            guard let data = try? Data(contentsOf: indexURL) else {
-                return [ConversationMetadata]()
-            }
-
-            do {
-                return try decoder.decode([ConversationMetadata].self, from: data)
-            } catch {
-                return [ConversationMetadata]()
-            }
+        let rootDirectory = rootDirectory
+        let indexURL = indexURL
+        let result = await Task.detached(priority: .utility) {
+            Self.loadConversationIndex(rootDirectory: rootDirectory, indexURL: indexURL)
         }.value
 
         await MainActor.run {
             ioLock.lock()
             defer { ioLock.unlock() }
-            conversations = decoded.sorted(by: Self.sortConversations)
+            conversations = result.conversations.sorted(by: Self.sortConversations)
+            repairCurrentConversationSelectionLocked()
+            if result.recoveredFromConversationFiles {
+                ensureRootDirectoryLocked()
+                writeIndexLocked()
+                AppDiagnostics.shared.record(
+                    "Conversation index recovered",
+                    category: "storage",
+                    metadata: ["conversations": conversations.count]
+                )
+            }
             hasLoadedConversationIndex = true
             isLoadingConversationIndex = false
         }
+    }
+
+    private func repairCurrentConversationSelectionLocked() {
+        guard let currentConversationID else { return }
+        guard !conversations.contains(where: { $0.id == currentConversationID }) else { return }
+
+        if let firstConversationID = conversations.first?.id {
+            self.currentConversationID = firstConversationID
+            defaults.set(firstConversationID.uuidString, forKey: Self.currentConversationDefaultsKey)
+        } else {
+            self.currentConversationID = nil
+            defaults.removeObject(forKey: Self.currentConversationDefaultsKey)
+        }
+    }
+
+    nonisolated private static func loadConversationIndex(
+        rootDirectory: URL,
+        indexURL: URL
+    ) -> ConversationIndexLoadResult {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        if let data = try? Data(contentsOf: indexURL),
+           let conversations = try? decoder.decode([ConversationMetadata].self, from: data) {
+            return ConversationIndexLoadResult(
+                conversations: conversations,
+                recoveredFromConversationFiles: false
+            )
+        }
+
+        let fileManager = FileManager.default
+        let directoryURLs = (try? fileManager.contentsOfDirectory(
+            at: rootDirectory,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        )) ?? []
+
+        let conversations = directoryURLs.compactMap { directoryURL -> ConversationMetadata? in
+            guard UUID(uuidString: directoryURL.lastPathComponent) != nil else { return nil }
+            let conversationURL = directoryURL.appendingPathComponent("conversation.json")
+            guard let data = try? Data(contentsOf: conversationURL),
+                  let conversation = try? decoder.decode(PersistedConversation.self, from: data),
+                  conversation.id.uuidString == directoryURL.lastPathComponent else {
+                return nil
+            }
+
+            return recoveredMetadata(from: conversation)
+        }
+
+        return ConversationIndexLoadResult(
+            conversations: conversations,
+            recoveredFromConversationFiles: !directoryURLs.isEmpty || fileManager.fileExists(atPath: indexURL.path)
+        )
+    }
+
+    nonisolated private static func recoveredMetadata(
+        from conversation: PersistedConversation
+    ) -> ConversationMetadata {
+        let messages = conversation.messages.map { $0.makeMessage() }
+        return ConversationMetadata(
+            id: conversation.id,
+            title: conversation.title,
+            preview: previewText(
+                messages: messages,
+                draftText: conversation.draftText,
+                draftAttachments: conversation.draftAttachments
+            ),
+            createdAt: conversation.createdAt,
+            updatedAt: conversation.updatedAt,
+            messageCount: messages.count,
+            hasDraft: !conversation.draftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                || !conversation.draftAttachments.isEmpty,
+            // A recovered index cannot distinguish generated titles from user-edited titles.
+            // Preserve the stored title instead of risking a future save overwriting it.
+            isCustomTitle: true
+        )
     }
 
     private func persist(conversation: PersistedConversation, metadata: ConversationMetadata) {
@@ -591,7 +674,7 @@ final class ConversationStore {
         return "New chat"
     }
 
-    private static func previewText(messages: [ChatMessage], draftText: String, draftAttachments: [Attachment]) -> String {
+    nonisolated private static func previewText(messages: [ChatMessage], draftText: String, draftAttachments: [Attachment]) -> String {
         if !draftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return "Draft: \(compactTitle(draftText))"
         }
@@ -611,7 +694,7 @@ final class ConversationStore {
         return "No messages yet"
     }
 
-    private static func compactTitle(_ text: String) -> String {
+    nonisolated private static func compactTitle(_ text: String) -> String {
         let collapsed = text
             .replacingOccurrences(of: "\n", with: " ")
             .split(whereSeparator: \.isWhitespace)

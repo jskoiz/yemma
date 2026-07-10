@@ -43,6 +43,10 @@
 		E1000012 /* Gemma4SmokeAutomation.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1000013 /* Gemma4SmokeAutomation.swift */; };
 		F1000001 /* BackgroundModelDownloadCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1000002 /* BackgroundModelDownloadCoordinator.swift */; };
 		F1000003 /* Yemma4AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1000004 /* Yemma4AppDelegate.swift */; };
+		D5000001 /* ConversationStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5000002 /* ConversationStoreTests.swift */; };
+		D5000003 /* StreamingRendererTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5000004 /* StreamingRendererTests.swift */; };
+		D5000010 /* ExyteChat in Frameworks */ = {isa = PBXBuildFile; productRef = 9D280E543558115939ECD091 /* ExyteChat */; };
+		D6000001 /* ExyteMediaPicker in Frameworks */ = {isa = PBXBuildFile; productRef = D6000003 /* ExyteMediaPicker */; };
 
 /* End PBXBuildFile section */
 
@@ -78,14 +82,28 @@
 		E1000013 /* Gemma4SmokeAutomation.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = Gemma4SmokeAutomation.swift; sourceTree = "<group>"; };
 		F1000002 /* BackgroundModelDownloadCoordinator.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BackgroundModelDownloadCoordinator.swift; sourceTree = "<group>"; };
 		F1000004 /* Yemma4AppDelegate.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = Yemma4AppDelegate.swift; sourceTree = "<group>"; };
+		D5000002 /* ConversationStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationStoreTests.swift; sourceTree = "<group>"; };
+		D5000004 /* StreamingRendererTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamingRendererTests.swift; sourceTree = "<group>"; };
+		D5000005 /* Yemma4Tests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = Yemma4Tests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 
 /* End PBXFileReference section */
+
+/* Begin PBXContainerItemProxy section */
+		D500000C /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = B10000010 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B1000000C;
+			remoteInfo = Yemma4;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		B10000008 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				D6000001 /* ExyteMediaPicker in Frameworks */,
 				E1000005 /* Tokenizers in Frameworks */,
 				E1000004 /* Hub in Frameworks */,
 				E1000003 /* MLX in Frameworks */,
@@ -93,6 +111,14 @@
 				E1000001 /* MLXLMCommon in Frameworks */,
 				A1000003 /* MarkdownUI in Frameworks */,
 				8ED5E2862DF091C3920ED85D /* ExyteChat in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D5000009 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D5000010 /* ExyteChat in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -139,6 +165,7 @@
 			isa = PBXGroup;
 			children = (
 				B10000007 /* Yemma4.app */,
+				D5000005 /* Yemma4Tests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -164,8 +191,26 @@
 			isa = PBXGroup;
 			children = (
 				B1000000A /* Yemma4 */,
+				D5000006 /* Tests */,
 				B10000009 /* Products */,
 			);
+			sourceTree = "<group>";
+		};
+		D5000006 /* Tests */ = {
+			isa = PBXGroup;
+			children = (
+				D5000007 /* Yemma4Tests */,
+			);
+			path = Tests;
+			sourceTree = "<group>";
+		};
+		D5000007 /* Yemma4Tests */ = {
+			isa = PBXGroup;
+			children = (
+				D5000002 /* ConversationStoreTests.swift */,
+				D5000004 /* StreamingRendererTests.swift */,
+			);
+			path = Yemma4Tests;
 			sourceTree = "<group>";
 		};
 		CE67C04D23A2513EC55AA96D /* Services */ = {
@@ -203,6 +248,7 @@
 			name = Yemma4;
 			packageProductDependencies = (
 				9D280E543558115939ECD091 /* ExyteChat */,
+				D6000003 /* ExyteMediaPicker */,
 				A1000005 /* MarkdownUI */,
 				E1000103 /* MLX */,
 				E1000101 /* MLXLMCommon */,
@@ -213,6 +259,27 @@
 			productName = Yemma4;
 			productReference = B10000007 /* Yemma4.app */;
 			productType = "com.apple.product-type.application";
+		};
+		D500000D /* Yemma4Tests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D5000011 /* Build configuration list for PBXNativeTarget "Yemma4Tests" */;
+			buildPhases = (
+				D5000008 /* Sources */,
+				D5000009 /* Frameworks */,
+				D500000A /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				D500000B /* PBXTargetDependency */,
+			);
+			name = Yemma4Tests;
+			packageProductDependencies = (
+				9D280E543558115939ECD091 /* ExyteChat */,
+			);
+			productName = Yemma4Tests;
+			productReference = D5000005 /* Yemma4Tests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
 		};
 /* End PBXNativeTarget section */
 
@@ -227,6 +294,10 @@
 					B1000000C = {
 						CreatedOnToolsVersion = 16.2;
 					};
+					D500000D = {
+						CreatedOnToolsVersion = 16.2;
+						TestTargetID = B1000000C;
+					};
 				};
 			};
 			buildConfigurationList = B10000011 /* Build configuration list for PBXProject "Yemma4" */;
@@ -240,6 +311,7 @@
 			mainGroup = B1000000B;
 			packageReferences = (
 				759333B69AA7F2876F0CFA95 /* XCRemoteSwiftPackageReference "Chat" */,
+				D6000002 /* XCRemoteSwiftPackageReference "MediaPicker" */,
 				A1000004 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */,
 					E1000201 /* XCRemoteSwiftPackageReference "mlx-swift-lm" */,
 				E1000202 /* XCRemoteSwiftPackageReference "mlx-swift" */,
@@ -250,6 +322,7 @@
 			projectRoot = "";
 			targets = (
 				B1000000C /* Yemma4 */,
+				D500000D /* Yemma4Tests */,
 			);
 		};
 /* End PBXProject section */
@@ -261,6 +334,13 @@
 			files = (
 				B10000005 /* Assets.xcassets in Resources */,
 				38135214F3C193EF4A21DDEE /* LaunchScreen.storyboard in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D500000A /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -301,7 +381,24 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		D5000008 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D5000001 /* ConversationStoreTests.swift in Sources */,
+				D5000003 /* StreamingRendererTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		D500000B /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = B1000000C /* Yemma4 */;
+			targetProxy = D500000C /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		B10000012 /* Debug */ = {
@@ -517,6 +614,50 @@
 			};
 			name = Release;
 		};
+		D5000012 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = H8PYU9TN9X;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.avmillabs.yemma4.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Yemma4.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Yemma4";
+			};
+			name = Debug;
+		};
+		D5000013 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = H8PYU9TN9X;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.avmillabs.yemma4.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Yemma4.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Yemma4";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -538,9 +679,26 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		D5000011 /* Build configuration list for PBXNativeTarget "Yemma4Tests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D5000012 /* Debug */,
+				D5000013 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		D6000002 /* XCRemoteSwiftPackageReference "MediaPicker" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/exyte/MediaPicker.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 3.2.4;
+			};
+		};
 		A1000004 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/gonzalezreal/swift-markdown-ui.git";
@@ -584,6 +742,11 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		D6000003 /* ExyteMediaPicker */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D6000002 /* XCRemoteSwiftPackageReference "MediaPicker" */;
+			productName = ExyteMediaPicker;
+		};
 		9D280E543558115939ECD091 /* ExyteChat */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 759333B69AA7F2876F0CFA95 /* XCRemoteSwiftPackageReference "Chat" */;

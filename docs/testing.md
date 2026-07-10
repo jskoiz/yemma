@@ -1,17 +1,18 @@
 # Testing Notes
 
-The highest-value pure-Swift coverage added for this task lives under `Tests/Yemma4Tests/`:
+The highest-value pure-Swift coverage lives under `Tests/Yemma4Tests/`:
 
-- `ConversationStoreTests.swift` exercises the async restore path against an ISO-8601 persisted conversation.
+- `ConversationStoreTests.swift` exercises async restore, on-disk index recovery, and stale-selection repair.
 - `StreamingRendererTests.swift` covers the sanitizer and stop-stream detection helpers.
 
-Run the package-backed XCTest target with:
+Run the app-backed XCTest target with:
 
 ```bash
-xcodebuild test \
-  -workspace .swiftpm/xcode/package.xcworkspace \
-  -scheme Yemma4 \
-  -destination 'platform=iOS Simulator,name=Yemma Preview 17 Pro Max'
+./scripts/local_validation.sh
 ```
 
-The app target can still be validated separately with the project build path when you want a simulator compile of the shipped shell.
+The validation script runs the shared `Yemma4` scheme's iOS unit tests and therefore compiles the
+shipping app target too. Use `./scripts/sim_run.sh` when you also want to install and launch the
+simulator shell. Both scripts reuse scoped paths under `/tmp/codex-xcode-derived-data` by default so
+repeated local checks do not grow build artifacts inside the repository. Override
+`DERIVED_DATA_PATH` when a separate lane is needed.

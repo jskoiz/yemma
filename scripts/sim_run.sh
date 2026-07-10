@@ -5,7 +5,7 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 PROJECT_PATH="$ROOT_DIR/Yemma4.xcodeproj"
 SCHEME="${SCHEME:-Yemma4}"
 BUNDLE_ID="${BUNDLE_ID:-com.avmillabs.yemma4}"
-DERIVED_DATA_PATH="${DERIVED_DATA_PATH:-$ROOT_DIR/.deriveddata}"
+DERIVED_DATA_PATH="${DERIVED_DATA_PATH:-/tmp/codex-xcode-derived-data/yemma-simulator}"
 DEFAULT_DEVICE_NAME="${DEVICE_NAME:-iPhone 17 Pro}"
 
 BOOTED_DEVICE_ID="$(xcrun simctl list devices booted available | awk -F '[()]' '/Booted/ {print $2; exit}')"

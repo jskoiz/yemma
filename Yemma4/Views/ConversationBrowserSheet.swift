@@ -53,6 +53,7 @@ struct ConversationBrowserSheet: View {
     @State private var renameTitle = ""
     @State private var deleteConversation: ConversationMetadata?
     @State private var showDeleteArchivedConfirmation = false
+    @State private var searchText = ""
 
     var body: some View {
         ZStack {
@@ -61,6 +62,10 @@ struct ConversationBrowserSheet: View {
             ScrollView(showsIndicators: false) {
                 VStack(spacing: AppTheme.Layout.sectionSpacing) {
                     header
+
+                    if !scope.conversations(in: conversationStore).isEmpty {
+                        searchField
+                    }
 
                     UtilitySection(scope.title) {
                         Button {
@@ -182,7 +187,14 @@ struct ConversationBrowserSheet: View {
     }
 
     private var displayedConversations: [ConversationMetadata] {
-        scope.conversations(in: conversationStore)
+        let conversations = scope.conversations(in: conversationStore)
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return conversations }
+
+        return conversations.filter { conversation in
+            conversation.title.localizedCaseInsensitiveContains(query)
+                || conversation.preview.localizedCaseInsensitiveContains(query)
+        }
     }
 
     private var header: some View {
@@ -199,13 +211,41 @@ struct ConversationBrowserSheet: View {
         .padding(.top, 18)
     }
 
+    private var searchField: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(AppTheme.textSecondary)
+
+            TextField("Search archived chats", text: $searchText)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+
+            if !searchText.isEmpty {
+                Button {
+                    searchText = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(AppTheme.textTertiary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear archive search")
+            }
+        }
+        .font(AppTheme.Typography.utilityRowTitle)
+        .foregroundStyle(AppTheme.textPrimary)
+        .padding(.horizontal, 14)
+        .frame(minHeight: 48)
+        .inputChrome(cornerRadius: AppTheme.Radius.medium)
+    }
+
     private var emptyStateRow: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(scope.emptyTitle)
+            Text(searchText.isEmpty ? scope.emptyTitle : "No matching chats")
                 .font(AppTheme.Typography.utilityRowTitle.weight(.semibold))
                 .foregroundStyle(AppTheme.textPrimary)
 
-            Text(scope.emptyDetail)
+            Text(searchText.isEmpty ? scope.emptyDetail : "Try a different word from the chat title or preview.")
                 .font(AppTheme.Typography.utilityRowDetail)
                 .foregroundStyle(AppTheme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
