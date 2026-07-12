@@ -45,6 +45,150 @@ final class Gemma4PromptMessageTests: XCTestCase {
     }
 }
 
+// MARK: - Apple Foundation Model runtime
+
+final class AppleFoundationModelRuntimeTests: XCTestCase {
+    func testInitialRuntimeSelectionHonorsPersistenceAndDeviceEligibility() {
+        XCTAssertEqual(
+            InferenceRuntime.initialSelection(
+                persistedValue: InferenceRuntime.gemma4.rawValue,
+                appleAvailability: .available
+            ),
+            .gemma4
+        )
+        XCTAssertEqual(
+            InferenceRuntime.initialSelection(
+                persistedValue: InferenceRuntime.appleFoundationModel.rawValue,
+                appleAvailability: .deviceNotEligible
+            ),
+            .appleFoundationModel
+        )
+        XCTAssertEqual(
+            InferenceRuntime.initialSelection(
+                persistedValue: nil,
+                appleAvailability: .available
+            ),
+            .appleFoundationModel
+        )
+        XCTAssertEqual(
+            InferenceRuntime.initialSelection(
+                persistedValue: nil,
+                appleAvailability: .requiresIOS26
+            ),
+            .gemma4
+        )
+        XCTAssertEqual(
+            InferenceRuntime.initialSelection(
+                persistedValue: nil,
+                appleAvailability: .deviceNotEligible
+            ),
+            .gemma4
+        )
+        XCTAssertEqual(
+            InferenceRuntime.initialSelection(
+                persistedValue: nil,
+                appleAvailability: .modelNotReady
+            ),
+            .appleFoundationModel
+        )
+        XCTAssertEqual(
+            InferenceRuntime.initialSelection(
+                persistedValue: nil,
+                appleAvailability: .appleIntelligenceNotEnabled
+            ),
+            .appleFoundationModel
+        )
+        XCTAssertEqual(
+            InferenceRuntime.initialSelection(
+                persistedValue: nil,
+                appleAvailability: .unsupportedLocale
+            ),
+            .appleFoundationModel
+        )
+    }
+
+    func testBoundedHistoryKeepsTheMostRecentContiguousMessages() {
+        let history = [
+            PromptMessageInput(role: "user", text: "oldest", images: []),
+            PromptMessageInput(role: "assistant", text: "boundary", images: []),
+            PromptMessageInput(role: "user", text: "five5", images: []),
+            PromptMessageInput(role: "assistant", text: "last5", images: []),
+        ]
+
+        let bounded = AppleFoundationModelRuntime.boundedHistory(
+            history,
+            maximumCharacters: 10
+        )
+
+        XCTAssertEqual(bounded.map(\.role), ["user", "assistant"])
+        XCTAssertEqual(bounded.map(\.text), ["five5", "last5"])
+    }
+
+    func testBoundedHistoryDoesNotStartWithAnOrphanedAssistantResponse() {
+        let history = [
+            PromptMessageInput(role: "user", text: "too long", images: []),
+            PromptMessageInput(role: "assistant", text: "ok", images: []),
+        ]
+
+        XCTAssertTrue(
+            AppleFoundationModelRuntime.boundedHistory(
+                history,
+                maximumCharacters: 2
+            ).isEmpty
+        )
+    }
+
+    func testSnapshotDeltaConvertsCumulativeSnapshotsAndRejectsReplacement() {
+        XCTAssertEqual(
+            try AppleFoundationModelRuntime.snapshotDelta(previous: "", current: "Hello"),
+            "Hello"
+        )
+        XCTAssertEqual(
+            try AppleFoundationModelRuntime.snapshotDelta(
+                previous: "Hello",
+                current: "Hello world"
+            ),
+            " world"
+        )
+        XCTAssertEqual(
+            try AppleFoundationModelRuntime.snapshotDelta(
+                previous: "Hello 🌺",
+                current: "Hello 🌺!"
+            ),
+            "!"
+        )
+        XCTAssertThrowsError(
+            try AppleFoundationModelRuntime.snapshotDelta(
+                previous: "Hello",
+                current: "Retry"
+            )
+        )
+    }
+
+#if targetEnvironment(simulator)
+    func testSimulatorGenerationTakesPrecedenceOverSelectedRuntime() async {
+        let suiteName = "AppleFoundationModelRuntimeTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let service = LLMService(defaults: defaults, appleAvailability: .available)
+        XCTAssertEqual(service.selectedRuntime, .appleFoundationModel)
+
+        var response = ""
+        for await chunk in service.generate(
+            prompt: PromptMessageInput(role: "user", text: "Hello", images: []),
+            history: []
+        ) {
+            response += chunk
+        }
+
+        XCTAssertTrue(response.contains("Simulator mode reply"))
+        XCTAssertTrue(response.contains("Prompt received: Hello"))
+        XCTAssertFalse(service.isGenerating)
+    }
+#endif
+}
+
 // MARK: - LLMService response-token math
 
 final class LLMResponseTokenMathTests: XCTestCase {

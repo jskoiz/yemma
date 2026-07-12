@@ -28,6 +28,8 @@ public struct OnboardingView: View {
     @Environment(ModelDownloader.self) private var modelDownloader
     @Environment(LLMService.self) private var llmService
     @State private var isStartingDownload = false
+    @State private var isSelectingRuntime = false
+    @State private var runtimeSelectionError: String?
     @State private var didRecordInteractiveReady = false
     @State private var didRecordFirstTouch = false
 
@@ -121,6 +123,19 @@ public struct OnboardingView: View {
                     recordFirstTouchIfNeeded()
                 }
         )
+        .alert(
+            "Unable to Switch Models",
+            isPresented: Binding(
+                get: { runtimeSelectionError != nil },
+                set: { if !$0 { runtimeSelectionError = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) {
+                runtimeSelectionError = nil
+            }
+        } message: {
+            Text(runtimeSelectionError ?? "The current model is still stopping.")
+        }
     }
 
     @ViewBuilder
@@ -131,6 +146,18 @@ public struct OnboardingView: View {
                 systemImage: "desktopcomputer",
                 title: "Mock replies for UI testing",
                 trailing: "Simulator"
+            )
+        case .appleReady:
+            SetupStatusRow(
+                systemImage: "sparkles",
+                title: "Built into iOS",
+                trailing: "0 GB"
+            )
+        case .appleUnavailable:
+            SetupStatusRow(
+                systemImage: "exclamationmark.triangle.fill",
+                title: appSetup.appleFoundationModelAvailability.title,
+                trailing: "Use Gemma"
             )
         case .intro:
             VStack(alignment: .leading, spacing: 10) {
@@ -215,6 +242,14 @@ public struct OnboardingView: View {
             return "Use the simulator for UI testing. A real iPhone is required for on-device AI."
         }
 
+        if appSetup.selectedRuntime == .appleFoundationModel {
+            if appSetup.appleFoundationModelAvailability.isAvailable {
+                return "Use Apple's built-in on-device model with no Yemma model download."
+            }
+
+            return "Apple's built-in model is not ready here. Choose Gemma explicitly if you want to continue."
+        }
+
         return "One-time setup saves the model on this iPhone. After that, Yemma works offline for everyday tasks."
     }
 
@@ -229,14 +264,32 @@ public struct OnboardingView: View {
                 actionTitle: "Continue in simulator",
                 actionSubtitle: "Mock replies for UI testing"
             )
+        case .appleReady:
+            return SetupCopy(
+                badgeText: "Ready",
+                title: "Yemma is ready",
+                message: "Apple's on-device model is ready for private text chat. No Yemma model download is needed.",
+                note: "Choose Gemma 4 later if you want image understanding.",
+                actionTitle: "Open chat",
+                actionSubtitle: "Built into iOS and ready now"
+            )
+        case .appleUnavailable:
+            return SetupCopy(
+                badgeText: appSetup.appleFoundationModelAvailability.title,
+                title: appSetup.appleFoundationModelAvailability.title,
+                message: appSetup.appleFoundationModelAvailability.detail,
+                note: "Yemma will not switch models or start a download automatically.",
+                actionTitle: "Use Gemma 4",
+                actionSubtitle: "Select the optional model without starting its download"
+            )
         case .intro:
             return SetupCopy(
-                badgeText: "One-time setup",
-                title: "Get Yemma ready",
-                message: "First launch saves the model on this iPhone. After setup, Yemma is ready for notes, rewrites, questions, and image help.",
+                badgeText: "Gemma 4 setup",
+                title: "Download Gemma 4",
+                message: "Save the optional Gemma 4 model on this iPhone for notes, rewrites, questions, and image help.",
                 note: "Best for everyday personal tasks. For hard or very current questions, a cloud model may still do better.",
-                actionTitle: "Start setup",
-                actionSubtitle: "Saved locally on this iPhone"
+                actionTitle: "Download Gemma 4",
+                actionSubtitle: "Start the explicit one-time download"
             )
         case .downloading:
             return SetupCopy(
@@ -298,11 +351,15 @@ public struct OnboardingView: View {
     }
 
     private var statusBadgeForeground: Color {
-        setupState == .failed ? AppTheme.destructive : AppTheme.accent
+        setupState == .failed || setupState == .appleUnavailable
+            ? AppTheme.destructive
+            : AppTheme.accent
     }
 
     private var statusBadgeBackground: Color {
-        setupState == .failed ? AppTheme.destructive.opacity(0.14) : AppTheme.accentSoft
+        setupState == .failed || setupState == .appleUnavailable
+            ? AppTheme.destructive.opacity(0.14)
+            : AppTheme.accentSoft
     }
 
     private var stats: [SetupStat] {
@@ -313,6 +370,20 @@ public struct OnboardingView: View {
                 SetupStat(title: "Replies", value: "Mocked"),
                 SetupStat(title: "Download", value: "Disabled"),
                 SetupStat(title: "Device", value: "Real iPhone")
+            ]
+        case .appleReady:
+            return [
+                SetupStat(title: "Status", value: "Ready"),
+                SetupStat(title: "Yemma download", value: "0 GB"),
+                SetupStat(title: "Source", value: "Built into iOS"),
+                SetupStat(title: "Input", value: "Text")
+            ]
+        case .appleUnavailable:
+            return [
+                SetupStat(title: "Status", value: appSetup.appleFoundationModelAvailability.title),
+                SetupStat(title: "Yemma download", value: "0 GB"),
+                SetupStat(title: "Alternative", value: "Gemma 4"),
+                SetupStat(title: "Next step", value: "Choose Gemma")
             ]
         case .intro:
             return [
@@ -379,6 +450,22 @@ public struct OnboardingView: View {
             ]
         }
 
+        if appSetup.selectedRuntime == .appleFoundationModel {
+            if !appSetup.appleFoundationModelAvailability.isAvailable {
+                return [
+                    SetupBenefit(title: "No automatic switch", systemImage: "arrow.triangle.2.circlepath"),
+                    SetupBenefit(title: "Optional Gemma model", systemImage: "cube.transparent"),
+                    SetupBenefit(title: "Runs on-device", systemImage: "iphone")
+                ]
+            }
+
+            return [
+                SetupBenefit(title: "Runs locally", systemImage: "iphone"),
+                SetupBenefit(title: "No Yemma download", systemImage: "arrow.down.circle"),
+                SetupBenefit(title: "Private text chat", systemImage: "text.bubble")
+            ]
+        }
+
         return [
             SetupBenefit(title: "Runs locally", systemImage: "iphone"),
             SetupBenefit(title: "Best for everyday tasks", systemImage: "sparkles"),
@@ -388,21 +475,23 @@ public struct OnboardingView: View {
 
     private var shouldShowPrimaryAction: Bool {
         switch setupState {
-        case .simulator, .preparing, .ready:
+        case .simulator, .appleReady, .preparing, .ready:
             return onContinue != nil
         case .downloading:
             return false
-        case .intro, .paused, .failed:
+        case .appleUnavailable, .intro, .paused, .failed:
             return true
         }
     }
 
     private var actionEnabled: Bool {
         switch setupState {
-        case .simulator, .preparing, .ready:
+        case .simulator, .appleReady, .preparing, .ready:
             return onContinue != nil
         case .downloading:
             return false
+        case .appleUnavailable:
+            return !isSelectingRuntime
         case .paused:
             return !modelDownloader.isDownloading && !isStartingDownload
         case .intro, .failed:
@@ -433,8 +522,10 @@ public struct OnboardingView: View {
         )
 
         switch setupState {
-        case .simulator, .preparing, .ready:
+        case .simulator, .appleReady, .preparing, .ready:
             onContinue?()
+        case .appleUnavailable:
+            Task { await selectGemmaRuntime() }
         case .failed where hasModelPreparationError:
             onRetryModelLoad?()
         case .intro, .downloading, .paused, .failed:
@@ -446,12 +537,27 @@ public struct OnboardingView: View {
     private func startDownload() async {
         guard !isStartingDownload else { return }
         guard supportsLocalModelRuntime else { return }
+        guard llmService.selectedRuntime == .gemma4 else { return }
         guard !appSetup.hasModelPreparationError else { return }
         guard !modelDownloader.isDownloading else { return }
 
         isStartingDownload = true
         defer { isStartingDownload = false }
         await modelDownloader.downloadModel()
+    }
+
+    @MainActor
+    private func selectGemmaRuntime() async {
+        guard !isSelectingRuntime else { return }
+        guard llmService.selectedRuntime != .gemma4 else { return }
+
+        isSelectingRuntime = true
+        defer { isSelectingRuntime = false }
+        guard await llmService.selectRuntime(.gemma4) else {
+            runtimeSelectionError = llmService.lastError
+                ?? "The current model is still stopping. Try again in a moment."
+            return
+        }
     }
 
     private func recordFirstTouchIfNeeded() {

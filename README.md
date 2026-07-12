@@ -15,28 +15,28 @@
 <p align="center">
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-111111?style=for-the-badge"></a>
   <img alt="iOS 17+" src="https://img.shields.io/badge/iOS-17%2B-0A84FF?style=for-the-badge&logo=apple">
-  <img alt="Swift 6.1 toolchain" src="https://img.shields.io/badge/Toolchain-Swift%206.1-F05138?style=for-the-badge&logo=swift&logoColor=white">
+  <img alt="Xcode 26+" src="https://img.shields.io/badge/Toolchain-Xcode%2026%2B-147EFB?style=for-the-badge&logo=xcode&logoColor=white">
   <img alt="On-device inference" src="https://img.shields.io/badge/Inference-On--Device-5E4AE3?style=for-the-badge">
-  <img alt="Gemma 4 E2B" src="https://img.shields.io/badge/Model-Gemma%204%20E2B-2E7D32?style=for-the-badge">
+  <img alt="Apple and Gemma 4 runtimes" src="https://img.shields.io/badge/Runtimes-Apple%20%2B%20Gemma%204-2E7D32?style=for-the-badge">
 </p>
 
 <p align="center">
   <strong>AI that lives on your iPhone.</strong><br>
-  Good for notes, writing, questions, and image help. Private by design, offline after setup, and honest about what local AI does best.
+  Good for notes, writing, questions, and image help. Private by design, on device, and honest about what local AI does best.
 </p>
 
 <p align="center">
   <a href="#what-its-good-for">What it's good for</a> ·
   <a href="#screenshots">Screenshots</a> ·
   <a href="#structure">Structure</a> ·
-  <a href="#gemma-4-mlx-port">Gemma 4 MLX Port</a> ·
-  <a href="#model-bundle">Model Bundle</a> ·
+  <a href="#runtime-selection">Runtime Selection</a> ·
+  <a href="#optional-gemma-4-bundle">Optional Gemma Bundle</a> ·
   <a href="#build">Build</a>
 </p>
 
 This repo contains the iOS app, landing page, and brand assets.
 
-Yemma runs Gemma 4 E2B locally through a Swift-native MLX multimodal runtime. One model bundle handles both text and image flows. After a one-time download (~4.2 GB), the app works entirely offline — no cloud inference, no accounts, no telemetry.
+On eligible iPhones running iOS 26 or newer with Apple Intelligence available, Yemma uses `SystemLanguageModel.default` for zero-download text chat. Gemma 4 is an explicit optional 4.2 GB download for text and image chat, and the local choice for older or Apple Intelligence-ineligible devices. Yemma never downloads Gemma automatically. There is no cloud inference, no account, and no telemetry.
 
 ## What it's good for
 
@@ -52,9 +52,9 @@ Yemma is not trying to replace frontier cloud models. Where you need deep reason
 ## Features
 
 - Streaming chat with markdown rendering, image attachments, and conversation history
-- Resumable background model bundle download (~4.2 GB first-time setup)
-- On-device multimodal text and image inference via `MLXVLM`
-- Local model-bundle validation before the app marks setup complete
+- Zero-download text chat through Apple Foundation Models on eligible iOS 26+ Apple Intelligence devices
+- Explicit optional Gemma 4 download (~4.2 GB) for text and image inference via `MLXVLM`
+- Resumable background Gemma download and strict local bundle validation
 - Configurable response style, temperature, and response limits
 - Light / Dark / System appearance modes
 - Built-in diagnostics, debug probes, and simulator mock mode
@@ -83,9 +83,10 @@ Yemma is not trying to replace frontier cloud models. Where you need deep reason
 ## Structure
 
 - `ContentView.swift` — root state machine (onboarding vs chat)
-- `LLMService.swift` — MLX multimodal load, generation, streaming, and runtime lifecycle
+- `LLMService.swift` — runtime selection, generation, streaming, and MLX lifecycle
+- `AppleFoundationModelRuntime.swift` — iOS 26 availability, Apple transcript shaping, and snapshot streaming
 - `MLXModelSupport.swift` — model directory validation and Gemma 4 asset contract checks
-- `ModelDownloader.swift` — single-repository download, resume, cleanup, and local validation
+- `ModelDownloader.swift` — optional Gemma download, resume, cleanup, and local validation
 - `ConversationStore.swift` — chat history persistence
 - `ChatMessage.swift` — app-owned message, user, and attachment value types
 - `YemmaPromptPlanner.swift` — prompt shaping for the chat experience
@@ -94,6 +95,16 @@ Yemma is not trying to replace frontier cloud models. Where you need deep reason
 - `DebugInferenceScenario.swift` — debug prompt and renderer scenarios
 - `Appearance.swift` — theme system
 - `website/` — landing page and brand assets
+
+## Runtime Selection
+
+- Simulator: deterministic mock replies; neither real runtime is invoked.
+- Eligible iOS 26+ Apple Intelligence device: Apple Foundation Models is the zero-download initial runtime for text chat.
+- iOS 17-25 or Apple Intelligence-ineligible device: Gemma 4 is the initial runtime choice, but its 4.2 GB download begins only when the user starts setup.
+- Images: choose the optional Gemma 4 runtime. Yemma's Apple runtime is text-only.
+- Apple Intelligence off, model not ready, or unsupported language: Yemma explains the unavailable state and lets the user enable Apple Intelligence or explicitly choose Gemma.
+
+Both runtimes operate on device. Real inference requires a physical iPhone; Simulator builds keep using mock replies.
 
 ## Gemma 4 MLX Port
 
@@ -106,10 +117,10 @@ Validated upstream baseline:
 - `mlx-swift-lm` at `3.31.3` for Gemma 4 model, processor, and parity fixes
 - `mlx-swift-examples` at `31b6cf6` for app-side smoke validation and request-shaping patterns
 
-How the current Yemma integration works:
+How the optional Gemma integration works:
 
 - `Yemma4.xcodeproj` declares `MLX`, `MLXLMCommon`, `MLXVLM`, `Hub`, and `Tokenizers`, so the runtime stays inside Swift instead of bridging through `llama.cpp` or Objective-C++ vision code.
-- `ModelDownloader` pulls the single shipped MLX model repository, `mlx-community/gemma-4-e2b-it-4bit`, using `*.safetensors`, `*.json`, and `*.jinja` patterns instead of downloading a text GGUF and a second `mmproj` file.
+- After the user selects Gemma and starts setup, `ModelDownloader` pulls `mlx-community/gemma-4-e2b-it-4bit` using `*.safetensors`, `*.json`, and `*.jinja` patterns instead of downloading a text GGUF and a second `mmproj` file.
 - `ModelDirectoryValidator` proves the downloaded bundle is structurally usable by checking required metadata files, processor config, tokenizer files, weight shards, and safetensors index references before the app accepts setup as complete.
 - `Gemma4MLXSupport` enforces the Gemma 4 multimodal asset contract in Swift by cross-checking processor and model values like soft-token budgets, patch size, and pooling kernel size. It also normalizes a known compatibility gap when a bundle is missing a top-level `pad_token_id`.
 - `LLMService` converts each conversation turn into structured `Chat.Message` and `UserInput` values with optional image URLs, then calls `context.processor.prepare(input:)` so MLX performs the image and text preprocessing directly inside the same runtime path as inference.
@@ -120,24 +131,24 @@ What that buys us:
 
 - no standalone `mmproj` download
 - no Objective-C++ multimodal bridge
-- one model bundle to download, validate, load, unload, and delete
+- one optional model bundle to download, validate, load, unload, and delete
 - one Swift runtime path for both text-only and image-assisted turns
 
-## Model Bundle
+## Optional Gemma 4 Bundle
 
-- Current default download source: [`mlx-community/gemma-4-e2b-it-4bit`](https://huggingface.co/mlx-community/gemma-4-e2b-it-4bit)
+- Download source: [`mlx-community/gemma-4-e2b-it-4bit`](https://huggingface.co/mlx-community/gemma-4-e2b-it-4bit)
 - Approximate first-download size: `4.2 GB`
 - Downloaded file classes: safetensors weights, tokenizer/config JSON, processor config, and chat template files
 - Runtime contract: `config.json`, `tokenizer.json`, `tokenizer_config.json`, `processor_config.json` or `preprocessor_config.json`, plus one or more readable `.safetensors` weight files and any referenced safetensors index entries
 
-After the bundle is downloaded, Yemma can load, unload, and run it entirely on device.
+Yemma does not download this bundle automatically. After the user chooses Gemma and completes setup, Yemma can load, unload, and run it entirely on device.
 
 ## Build
 
 1. Open `Yemma4.xcodeproj`; it is the sole build graph and owns the pinned SwiftPM dependencies.
-2. Use a Swift 6.1-compatible toolchain. The app and test targets currently compile in Swift 5 language mode.
+2. Use Xcode 26 or newer with an iOS 26 SDK. The deployment target remains iOS 17 and the app and test targets currently compile in Swift 5 language mode.
 3. Run `./scripts/local_validation.sh` for simulator tests plus an unsigned Release compile for a generic iOS device.
-4. Run on a physical iPhone with iOS 17+ for real MLX inference.
+4. Run on a physical iPhone for real Apple Foundation Models or Gemma inference.
 5. Use `./scripts/sim_run.sh` only when you also want to install and launch the mocked simulator app.
 6. Use `./scripts/device_startup_probe.sh` when you need a clean first-launch timing probe on an already installed device build.
 

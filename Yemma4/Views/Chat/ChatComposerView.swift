@@ -14,8 +14,13 @@ struct ChatComposerView: View {
     let canSubmitDraft: Bool
     let shouldShowTypingIndicator: Bool
     let isComposerFocused: FocusState<Bool>.Binding
+    let supportsImageInput: Bool
+    let inputBlockReason: String?
+    let inputBlockActionTitle: String?
+    let inputBlockAction: (() -> Void)?
     let primarySetupActionTitle: String?
     let primarySetupAction: (() -> Void)?
+    let onUnavailableImageInput: () -> Void
     let onSubmitDraft: () -> Void
     let onStopGeneration: () -> Void
     let onRemoveAttachment: (Attachment) -> Void
@@ -42,6 +47,10 @@ struct ChatComposerView: View {
                             ? .opacity
                             : .opacity.combined(with: .move(edge: .bottom))
                     )
+            }
+
+            if let inputBlockReason {
+                inputCapabilityNotice(message: inputBlockReason)
             }
 
             HStack(spacing: 10) {
@@ -155,6 +164,36 @@ struct ChatComposerView: View {
         .accessibilityElement(children: .combine)
     }
 
+    private func inputCapabilityNotice(message: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "photo.badge.exclamationmark")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(AppTheme.accent)
+
+            Text(message)
+                .font(AppTheme.Typography.utilityCaption)
+                .foregroundStyle(AppTheme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Spacer(minLength: 0)
+
+            if let inputBlockActionTitle, let inputBlockAction {
+                Button(inputBlockActionTitle, action: inputBlockAction)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(AppTheme.accent)
+                    .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(AppTheme.controlFill)
+        .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.medium, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AppTheme.Radius.medium, style: .continuous)
+                .stroke(AppTheme.controlBorder, lineWidth: 1)
+        )
+    }
+
     @ViewBuilder
     private var composerSetupStatusIcon: some View {
         if appSetup.isModelLoading {
@@ -189,7 +228,11 @@ struct ChatComposerView: View {
 
     private var attachmentPickerButton: some View {
         Button {
-            isShowingPhotoPicker = true
+            if supportsImageInput {
+                isShowingPhotoPicker = true
+            } else {
+                onUnavailableImageInput()
+            }
         } label: {
             Image(systemName: isImportingAttachments ? "hourglass" : "plus")
                 .font(.system(size: 22, weight: .semibold))
@@ -206,7 +249,11 @@ struct ChatComposerView: View {
         )
         .disabled(isImportingAttachments)
         .accessibilityLabel("Add image")
-        .accessibilityHint("Attach up to four images to your next message.")
+        .accessibilityHint(
+            supportsImageInput
+                ? "Attach up to four images to your next message."
+                : "Image chat requires the optional Gemma 4 model."
+        )
     }
 
     private var composerAttachmentStrip: some View {

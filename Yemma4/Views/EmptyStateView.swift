@@ -102,7 +102,7 @@ struct EmptyStateView: View {
                         .font(AppTheme.Typography.brandSection)
                         .foregroundStyle(AppTheme.textPrimary)
 
-                    Text("A local assistant for everyday notes, rewrites, questions, and image help. Cloud models may still do better on harder or more current tasks.")
+                    Text("A local assistant for everyday notes, rewrites, and questions. Choose the optional Gemma model when you need image help.")
                         .font(.system(size: 15, weight: .medium))
                         .foregroundStyle(AppTheme.textSecondary)
                 }

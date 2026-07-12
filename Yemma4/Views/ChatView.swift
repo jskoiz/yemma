@@ -30,6 +30,7 @@ public struct ChatView: View {
     @State private var isSidebarOpen = false
     @State private var sidebarDragOffset: CGFloat = 0
     @State private var isShowingPhotoPicker = false
+    @State private var showGemmaImageRequirement = false
     @State private var showArchiveBrowser = false
     @State private var loadedConversationID: UUID?
     @State private var isRestoringConversation = false
@@ -220,6 +221,18 @@ public struct ChatView: View {
             } message: {
                 Text(memoryAlertMessage ?? "Your device ran low on memory. Try a shorter conversation.")
             }
+            .confirmationDialog(
+                "Use Gemma 4 for image chat?",
+                isPresented: $showGemmaImageRequirement,
+                titleVisibility: .visible
+            ) {
+                Button("Use Gemma 4") {
+                    selectGemmaRuntime()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Gemma 4 adds image understanding through an optional 4.2 GB download. Selecting it does not start the download.")
+            }
             .sheet(item: $sharePayload) { payload in
                 ActivityShareSheet(activityItems: [payload.text])
             }
@@ -357,8 +370,15 @@ public struct ChatView: View {
             canSubmitDraft: canSubmitDraft,
             shouldShowTypingIndicator: shouldShowTypingIndicator,
             isComposerFocused: $isComposerFocused,
+            supportsImageInput: llmService.supportsImageInput || !supportsLocalModelRuntime,
+            inputBlockReason: imageInputBlockReason,
+            inputBlockActionTitle: imageInputBlockReason == nil ? nil : "Use Gemma",
+            inputBlockAction: imageInputBlockReason == nil ? nil : selectGemmaRuntime,
             primarySetupActionTitle: primarySetupActionTitle,
             primarySetupAction: primarySetupAction,
+            onUnavailableImageInput: {
+                showGemmaImageRequirement = true
+            },
             onSubmitDraft: submitDraft,
             onStopGeneration: triggerStopGeneration,
             onRemoveAttachment: removePendingAttachment
@@ -373,12 +393,38 @@ public struct ChatView: View {
 
     private var canSubmitDraft: Bool {
         guard !isImportingAttachments else { return false }
+        guard !llmService.isSwitchingRuntime else { return false }
         let hasDraft = !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         guard hasDraft || !pendingAttachments.isEmpty else { return false }
         if !appSetup.supportsLocalModelRuntime {
             return true
         }
-        return appSetup.isTextModelReady
+        return appSetup.isTextModelReady && imageInputBlockReason == nil
+    }
+
+    private var imageInputBlockReason: String? {
+        guard supportsLocalModelRuntime, !llmService.supportsImageInput else {
+            return nil
+        }
+
+        if !pendingAttachments.isEmpty {
+            return "This draft contains images. Keep it here and switch to Gemma 4 to send it."
+        }
+
+        if messages.contains(where: { !$0.attachments.isEmpty }) {
+            return "This chat contains images. Start a new text chat or switch to Gemma 4."
+        }
+
+        return nil
+    }
+
+    private func selectGemmaRuntime() {
+        Task { @MainActor in
+            let didSelect = await llmService.selectRuntime(.gemma4)
+            if !didSelect {
+                showToast(llmService.lastError ?? "Try switching again in a moment")
+            }
+        }
     }
 
     private var primarySetupActionTitle: String? {
@@ -426,6 +472,15 @@ public struct ChatView: View {
     }
 
     private func selectStarter(_ starter: ChatStarter) {
+        if starter.behavior == .promptAndPickImage,
+           supportsLocalModelRuntime,
+           !llmService.supportsImageInput
+        {
+            isComposerFocused = false
+            showGemmaImageRequirement = true
+            return
+        }
+
         draft = resolvedPrompt(for: starter)
         if starter.behavior == .promptAndPickImage {
             isComposerFocused = false
@@ -479,6 +534,12 @@ public struct ChatView: View {
     private func canRetryAssistantResponse(_ message: ChatMessage, index: Int) -> Bool {
         guard !llmService.isGenerating, !message.user.isCurrentUser else { return false }
         guard index >= 0, index == latestAssistantMessageIndex(), index == messages.indices.last else { return false }
+        if supportsLocalModelRuntime,
+           !llmService.supportsImageInput,
+           messages.prefix(index).contains(where: { !$0.attachments.isEmpty })
+        {
+            return false
+        }
         return userPromptIndex(forAssistantAt: index) != nil
     }
 
@@ -573,6 +634,10 @@ public struct ChatView: View {
 
     private func refineAssistantResponse(_ message: ChatMessage, refinement: AssistantRefinement) async {
         guard !llmService.isGenerating, !message.user.isCurrentUser else { return }
+        guard imageInputBlockReason == nil else {
+            showToast("Use Gemma 4 for this image chat")
+            return
+        }
         guard let latestAssistantMessageIndex = latestAssistantMessageIndex() else { return }
         guard message.id == messages[latestAssistantMessageIndex].id else { return }
         AppHaptics.selection()
@@ -794,6 +859,11 @@ public struct ChatView: View {
     @MainActor
     private func importSelectedPhotos(from items: [PhotosPickerItem]) async {
         guard !items.isEmpty else { return }
+        guard llmService.supportsImageInput || !supportsLocalModelRuntime else {
+            selectedPhotoItems = []
+            showToast("Image chat requires Gemma 4")
+            return
+        }
 
         isImportingAttachments = true
         defer {
@@ -860,6 +930,14 @@ public struct ChatView: View {
     private func submitDraft() {
         let trimmedText = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedText.isEmpty || !pendingAttachments.isEmpty else { return }
+        guard !llmService.isSwitchingRuntime else {
+            showToast("The on-device model is still switching")
+            return
+        }
+        guard imageInputBlockReason == nil else {
+            showToast("Use Gemma 4 for this image chat")
+            return
+        }
         guard appSetup.isTextModelReady || !appSetup.supportsLocalModelRuntime else {
             AppDiagnostics.shared.record(
                 "Send ignored because model is not ready",
@@ -1142,7 +1220,7 @@ public struct ChatView: View {
                 .previewMessage(user: .user, text: prompt),
                 .previewMessage(
                     user: .yemma,
-                    text: "Load the local model first, then rerun this debug scenario."
+                    text: "Choose a ready on-device model, then rerun this debug scenario."
                 )
             ]
             persistConversationNow()

@@ -113,11 +113,20 @@ public struct ContentView: View {
                 category: "startup",
                 metadata: [
                     "cachedModelPath": modelDownloader.modelPath ?? "nil",
+                    "runtime": llmService.selectedRuntime.rawValue,
                     "elapsedMs": StartupTiming.elapsedMs()
                 ]
             )
         }
-        .task(id: modelDownloader.modelPath ?? "") {
+        .task(id: llmService.selectedRuntime.rawValue) {
+            if llmService.selectedRuntime == .gemma4 {
+                await modelDownloader.validateDownloadedModel()
+            } else {
+                loadedModelSignature = nil
+            }
+        }
+        .task(id: "\(llmService.selectedRuntime.rawValue)|\(modelDownloader.modelPath ?? "")") {
+            guard llmService.selectedRuntime == .gemma4 else { return }
             guard let modelPath = modelDownloader.modelPath else { return }
             await Task.yield()
             guard !Task.isCancelled else { return }
@@ -136,6 +145,12 @@ public struct ContentView: View {
             recordStartupMilestonesIfNeeded()
         }
         .onChange(of: llmService.isVisionReady) { _, _ in
+            recordStartupMilestonesIfNeeded()
+        }
+        .onChange(of: llmService.selectedRuntime) { _, _ in
+            recordStartupMilestonesIfNeeded()
+        }
+        .onChange(of: llmService.appleFoundationModelAvailability) { _, _ in
             recordStartupMilestonesIfNeeded()
         }
         .alert(
@@ -236,6 +251,10 @@ public struct ContentView: View {
                 loadedModelSignature = nil
                 modelLoadError = nil
             }
+            return
+        }
+
+        guard llmService.selectedRuntime == .gemma4 else {
             return
         }
 
