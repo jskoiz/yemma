@@ -1,5 +1,4 @@
 import Foundation
-import ExyteChat
 
 enum YemmaPromptPlanner {
     static func promptInput(from message: ChatMessage) -> PromptMessageInput {

@@ -157,6 +157,6 @@ Representative commits:
 - `3a184c3` Clean up README: remove fluff and tighten copy
 - `16ed460` Further trim README: cut redundancy and tighten captions
 
-## Current Known Limitation
+## Current Runtime
 
-Yemma currently builds in current Xcode for both simulator and iOS device targets, but the LiteRT Ask Image bridge is intentionally stubbed on device until the bundled LiteRT SDK, generated protobufs, and bridge API are version-aligned for real native inference.
+Yemma now ships one Swift-native MLX Gemma 4 runtime for text and image prompts. The earlier `llama.cpp` and LiteRT work above is retained as dated project history and is no longer part of the product build.

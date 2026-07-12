@@ -1,6 +1,5 @@
 import PhotosUI
 import SwiftUI
-import ExyteChat
 
 struct ChatComposerView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion

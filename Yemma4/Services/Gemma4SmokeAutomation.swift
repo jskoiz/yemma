@@ -1,6 +1,5 @@
 import Foundation
 import Observation
-import ExyteChat
 
 #if canImport(UIKit)
 import UIKit

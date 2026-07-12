@@ -135,33 +135,11 @@ enum ResponseStylePreset: String, CaseIterable, Identifiable, Sendable {
     var maxResponseTokens: Int {
         switch self {
         case .focused:
-            return 192
+            return 256
         case .balanced:
             return 512
         case .detailed:
             return 1024
-        }
-    }
-
-    var legacyTemperature: Double {
-        switch self {
-        case .focused:
-            return 0.4
-        case .balanced:
-            return 0.7
-        case .detailed:
-            return 0.9
-        }
-    }
-
-    var legacyMaxResponseTokens: Int {
-        switch self {
-        case .focused:
-            return 768
-        case .balanced:
-            return 1024
-        case .detailed:
-            return 1536
         }
     }
 
@@ -221,7 +199,7 @@ enum ResponseStylePreset: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
-private struct Gemma4ConversationMessage: Sendable {
+struct Gemma4ConversationMessage: Sendable {
     let role: String
     let content: String
     let imageURLs: [URL]
@@ -607,18 +585,8 @@ final class LLMService: @unchecked Sendable {
         let savedTemperature = defaults.object(forKey: Self.temperatureDefaultsKey) as? Double
         let savedMaxResponseTokens = defaults.object(forKey: Self.maxTokensDefaultsKey) as? Int
 
-        if let migratedPreset = Self.migratedLegacyPreset(
-            temperature: savedTemperature,
-            maxResponseTokens: savedMaxResponseTokens
-        ) {
-            temperature = migratedPreset.temperature
-            maxResponseTokens = migratedPreset.maxResponseTokens
-            defaults.set(temperature, forKey: Self.temperatureDefaultsKey)
-            defaults.set(maxResponseTokens, forKey: Self.maxTokensDefaultsKey)
-        } else {
-            temperature = savedTemperature ?? Self.defaultTemperature
-            maxResponseTokens = savedMaxResponseTokens ?? Self.defaultMaxResponseTokens
-        }
+        temperature = savedTemperature ?? Self.defaultTemperature
+        maxResponseTokens = savedMaxResponseTokens ?? Self.defaultMaxResponseTokens
 
         maxResponseTokens = Self.normalizedMaxResponseTokens(maxResponseTokens)
         defaults.set(maxResponseTokens, forKey: Self.maxTokensDefaultsKey)
@@ -939,13 +907,6 @@ final class LLMService: @unchecked Sendable {
                                 "image": imageShape
                             ]
                         )
-                        if let imagePixels = lmInput.image?.pixels {
-                            AppDiagnostics.shared.record(
-                                "Multimodal image tensor",
-                                category: "generation",
-                                metadata: ["summary": Self.summarizeImageTensor(imagePixels)]
-                            )
-                        }
 
                         if promptMode == "multimodal"
                             && Yemma4AutomationConfiguration.current.multimodalFirstTokenTraceEnabled
@@ -1226,17 +1187,33 @@ final class LLMService: @unchecked Sendable {
         }
     }
 
-    private static func migratedLegacyPreset(
-        temperature: Double?,
-        maxResponseTokens: Int?
-    ) -> ResponseStylePreset? {
-        guard let temperature, let maxResponseTokens else { return nil }
+    static func promptMessagesForGemma4(
+        from messages: [PromptMessageInput]
+    ) -> [Gemma4ConversationMessage] {
+        messages.compactMap { message in
+            let imageURLs = message.images.map { URL(fileURLWithPath: $0.filePath) }
+            let trimmedText = message.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedText.isEmpty || !imageURLs.isEmpty else {
+                return nil
+            }
 
-        return ResponseStylePreset.allCases.first { preset in
-            abs(preset.legacyTemperature - temperature) < 0.01
-                && preset.legacyMaxResponseTokens == maxResponseTokens
+            let content = if Self.chatRole(for: message.role) == .user,
+                trimmedText.isEmpty,
+                !imageURLs.isEmpty
+            {
+                Gemma4MLXSupport.defaultImagePrompt
+            } else {
+                message.text
+            }
+
+            return Gemma4ConversationMessage(
+                role: message.role,
+                content: content,
+                imageURLs: imageURLs
+            )
         }
     }
+
 }
 
 private extension LLMService {
@@ -1321,56 +1298,6 @@ private extension LLMService {
             hiddenChannelTokenBudget: Self.hiddenChannelTokenBudget,
             baseProcessor: baseProcessor
         )
-    }
-
-    static func promptMessagesForGemma4(from messages: [PromptMessageInput]) -> [Gemma4ConversationMessage] {
-        let promptMessages = messages.compactMap { message -> Gemma4ConversationMessage? in
-            let imageURLs = message.images.map { URL(fileURLWithPath: $0.filePath) }
-            let trimmedText = message.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmedText.isEmpty || !imageURLs.isEmpty else {
-                return nil
-            }
-
-            return Gemma4ConversationMessage(
-                role: message.role,
-                content: message.text,
-                imageURLs: imageURLs
-            )
-        }
-
-        guard let latestImageIndex = promptMessages.lastIndex(where: { !$0.imageURLs.isEmpty }) else {
-            return promptMessages
-        }
-
-        let leadingNonImageMessages = Array(promptMessages.prefix(while: { $0.imageURLs.isEmpty }))
-        let trailingMessages = Array(promptMessages[latestImageIndex...])
-        let normalizedMessages = leadingNonImageMessages + trailingMessages
-
-        guard let normalizedLatestImageIndex = normalizedMessages.lastIndex(where: { !$0.imageURLs.isEmpty }) else {
-            return normalizedMessages
-        }
-
-        return normalizedMessages.enumerated().map { index, message in
-            let trimmedContent = message.content.trimmingCharacters(in: .whitespacesAndNewlines)
-            let normalizedContent: String
-            if index == normalizedLatestImageIndex,
-                Self.chatRole(for: message.role) == .user,
-                trimmedContent.isEmpty
-            {
-                normalizedContent = Gemma4MLXSupport.defaultImagePrompt
-            } else {
-                normalizedContent = message.content
-            }
-
-            let normalizedImages =
-                index == normalizedLatestImageIndex ? Array(message.imageURLs.prefix(1)) : []
-
-            return Gemma4ConversationMessage(
-                role: message.role,
-                content: normalizedContent,
-                imageURLs: normalizedImages
-            )
-        }
     }
 
     func makeGemma4UserInput(
@@ -1690,24 +1617,6 @@ private extension LLMService {
 
         Attached images in this turn: \(prompt.images.count)
         """
-    }
-
-    static func summarizeImageTensor(_ pixels: MLXArray) -> String {
-        let values = pixels.asArray(Float.self)
-        guard !values.isEmpty else {
-            return "shape=\(pixels.shape.map(String.init).joined(separator: "x")) empty"
-        }
-
-        let planeSize = max(1, pixels.dim(2) * pixels.dim(3))
-        let firstRed = values[0]
-        let firstGreen = values.indices.contains(planeSize) ? values[planeSize] : firstRed
-        let firstBlue = values.indices.contains(planeSize * 2) ? values[planeSize * 2] : firstGreen
-        let minValue = values.min() ?? 0
-        let maxValue = values.max() ?? 0
-        let shape = pixels.shape.map(String.init).joined(separator: "x")
-
-        return
-            "shape=\(shape) dtype=\(String(describing: pixels.dtype)) range=[\(formatLogit(minValue)),\(formatLogit(maxValue))] firstRGB=[\(formatLogit(firstRed)),\(formatLogit(firstGreen)),\(formatLogit(firstBlue))]"
     }
 
     static func formatLogit(_ value: Float) -> String {

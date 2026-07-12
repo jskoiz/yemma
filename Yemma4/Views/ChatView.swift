@@ -1,9 +1,9 @@
 import Observation
 import PhotosUI
 import SwiftUI
-import ExyteChat
 
 #if canImport(UIKit)
+import ImageIO
 import UIKit
 #endif
 
@@ -22,6 +22,7 @@ public struct ChatView: View {
     @State private var pendingAttachments: [Attachment] = []
     @State private var isImportingAttachments = false
     @State private var generationTask: Task<Void, Never>?
+    @State private var activeGenerationSessionID: UUID?
     @State private var generationError: String?
     @State private var memoryAlertMessage: String?
     @State private var toastMessage: String?
@@ -471,18 +472,8 @@ public struct ChatView: View {
         messages.firstIndex(where: { $0.id == message.id }) ?? -1
     }
 
-    private func lastUserMessageIndex() -> Int? {
-        messages.lastIndex(where: \.user.isCurrentUser)
-    }
-
     private func latestAssistantMessageIndex() -> Int? {
         messages.lastIndex(where: { !$0.user.isCurrentUser })
-    }
-
-    private func canEditAndResend(_ message: ChatMessage) -> Bool {
-        guard !llmService.isGenerating, message.user.isCurrentUser else { return false }
-        guard let lastUserMessageIndex = lastUserMessageIndex() else { return false }
-        return message.id == messages[lastUserMessageIndex].id
     }
 
     private func canRetryAssistantResponse(_ message: ChatMessage, index: Int) -> Bool {
@@ -547,28 +538,6 @@ public struct ChatView: View {
         sharePayload = SharePayload(text: text)
     }
 
-    private func editAndResendLastUserTurn(_ message: ChatMessage) {
-        guard canEditAndResend(message) else { return }
-        guard let messageIndex = messages.firstIndex(where: { $0.id == message.id }) else { return }
-        AppHaptics.selection()
-
-        AppDiagnostics.shared.record(
-            "Last user turn edited",
-            category: "ui",
-            metadata: [
-                "chars": message.text.count,
-                "images": message.attachments.count
-            ]
-        )
-
-        draft = message.text
-        pendingAttachments = message.attachments
-        selectedPhotoItems = []
-        messages.removeSubrange(messageIndex..<messages.endIndex)
-        isComposerFocused = true
-        scheduleConversationSave(delayMs: 0)
-    }
-
     private func userPromptIndex(forAssistantAt index: Int) -> Int? {
         guard index > 0 else { return nil }
         return messages[..<index].lastIndex(where: \.user.isCurrentUser)
@@ -595,13 +564,10 @@ public struct ChatView: View {
         updateMessageText(id: message.id, text: "")
         assistantResponseStats.removeValue(forKey: message.id)
         completedAssistantMessageIDs.remove(message.id)
-        streamingMessageID = message.id
         generationError = nil
         memoryAlertMessage = nil
         isPinnedToBottom = true
-        generationTask = Task {
-            await streamReply(prompt: prompt, history: history, assistantID: message.id)
-        }
+        startGeneration(prompt: prompt, history: history, assistantID: message.id)
         scheduleConversationSave(delayMs: 0)
     }
 
@@ -864,32 +830,23 @@ public struct ChatView: View {
         }
 
 #if canImport(UIKit)
-        guard let image = UIImage(data: data) else {
-            throw CocoaError(.fileReadCorruptFile)
-        }
-
-        let encodedData: Data
-        let fileExtension: String
-
-        if let jpegData = image.jpegData(compressionQuality: 0.9) {
-            encodedData = jpegData
-            fileExtension = "jpg"
-        } else if let pngData = image.pngData() {
-            encodedData = pngData
-            fileExtension = "png"
-        } else {
-            throw CocoaError(.fileWriteUnknown)
-        }
+        return try await Task.detached(priority: .userInitiated) {
+            try autoreleasepool {
+                let encodedImage = try ChatAttachmentImagePipeline.encodedModelImage(from: data)
+                let fileURL = try Self.storeAttachmentData(
+                    encodedImage.data,
+                    fileExtension: encodedImage.fileExtension
+                )
+                return Attachment(id: UUID().uuidString, url: fileURL, type: .image)
+            }
+        }.value
 #else
-        let encodedData = data
-        let fileExtension = "bin"
-#endif
-
-        let fileURL = try storeAttachmentData(encodedData, fileExtension: fileExtension)
+        let fileURL = try Self.storeAttachmentData(data, fileExtension: "bin")
         return Attachment(id: UUID().uuidString, url: fileURL, type: .image)
+#endif
     }
 
-    private func storeAttachmentData(_ data: Data, fileExtension: String) throws -> URL {
+    nonisolated private static func storeAttachmentData(_ data: Data, fileExtension: String) throws -> URL {
         let directory = try ConversationAttachmentStore.prepareDirectory()
 
         let fileURL = directory.appendingPathComponent("\(UUID().uuidString).\(fileExtension)")
@@ -975,14 +932,11 @@ public struct ChatView: View {
 
         assistantResponseStats.removeValue(forKey: assistantID)
         completedAssistantMessageIDs.remove(assistantID)
-        streamingMessageID = assistantID
         isPinnedToBottom = true
         latestContentOverflow = 0
         generationError = nil
         memoryAlertMessage = nil
-        generationTask = Task {
-            await streamReply(prompt: prompt, history: history, assistantID: assistantID)
-        }
+        startGeneration(prompt: prompt, history: history, assistantID: assistantID)
         scheduleConversationSave(delayMs: 0)
     }
 
@@ -990,30 +944,57 @@ public struct ChatView: View {
         YemmaPromptPlanner.conversationHistory(from: messages)
     }
 
+    @MainActor
+    private func startGeneration(
+        prompt: PromptMessageInput,
+        history: [PromptMessageInput],
+        assistantID: String
+    ) {
+        let sessionID = UUID()
+        activeGenerationSessionID = sessionID
+        streamingMessageID = assistantID
+        generationTask = Task {
+            await streamReply(
+                prompt: prompt,
+                history: history,
+                assistantID: assistantID,
+                sessionID: sessionID
+            )
+        }
+    }
+
     /// Streams tokens into a buffer and flushes visible text at ~50ms intervals or word boundaries.
     private func streamReply(
         prompt: PromptMessageInput,
         history: [PromptMessageInput],
-        assistantID: String
+        assistantID: String,
+        sessionID: UUID
     ) async {
         var streamingPolicy = StreamingUpdatePolicy()
         let previousGenerationID = llmService.lastGenerationStats?.generationID
 
         defer {
             Task { @MainActor in
-                self.generationTask = nil
-                self.streamingMessageID = nil
+                finishGenerationSessionIfCurrent(sessionID: sessionID, assistantID: assistantID)
             }
         }
 
         for await token in llmService.generate(prompt: prompt, history: history) {
+            guard !Task.isCancelled else { return }
+
             let update = streamingPolicy.append(token)
 
-            if let visibleText = update.visibleText {
-                await MainActor.run {
+            let isCurrent = await MainActor.run {
+                guard isCurrentGenerationSession(sessionID: sessionID, assistantID: assistantID) else {
+                    return false
+                }
+
+                if let visibleText = update.visibleText {
                     updateMessageText(id: assistantID, text: visibleText)
                 }
+                return true
             }
+            guard isCurrent, !Task.isCancelled else { return }
 
             if update.shouldStop {
                 await llmService.stopGeneration()
@@ -1021,12 +1002,17 @@ public struct ChatView: View {
             }
         }
 
+        guard !Task.isCancelled else { return }
+
         // Final flush — applies full sanitization and switches to markdown rendering
         let finalText = streamingPolicy.finalize()
         let responseStats = llmService.lastGenerationStats?.generationID == previousGenerationID
             ? nil
             : llmService.lastGenerationStats
         await MainActor.run {
+            guard isCurrentGenerationSession(sessionID: sessionID, assistantID: assistantID) else {
+                return
+            }
             finalizeAssistantMessage(
                 id: assistantID,
                 text: finalText,
@@ -1035,8 +1021,13 @@ public struct ChatView: View {
             persistConversationNow()
         }
 
+        guard !Task.isCancelled else { return }
+
         if let lastError = llmService.lastError {
             await MainActor.run {
+                guard isCurrentGenerationSession(sessionID: sessionID, assistantID: assistantID) else {
+                    return
+                }
                 if isLowMemoryError(lastError) {
                     self.memoryAlertMessage = "Your device ran low on memory. Try a shorter conversation."
                 } else {
@@ -1074,7 +1065,22 @@ public struct ChatView: View {
         } else {
             assistantResponseStats.removeValue(forKey: id)
         }
-        persistConversationNow()
+    }
+
+    @MainActor
+    private func isCurrentGenerationSession(sessionID: UUID, assistantID: String) -> Bool {
+        activeGenerationSessionID == sessionID && streamingMessageID == assistantID
+    }
+
+    @MainActor
+    private func finishGenerationSessionIfCurrent(sessionID: UUID, assistantID: String) {
+        guard isCurrentGenerationSession(sessionID: sessionID, assistantID: assistantID) else {
+            return
+        }
+
+        activeGenerationSessionID = nil
+        generationTask = nil
+        streamingMessageID = nil
     }
 
     // MARK: - Conversation management
@@ -1176,6 +1182,7 @@ public struct ChatView: View {
 
     @MainActor
     private func stopGeneration() async {
+        activeGenerationSessionID = nil
         generationTask?.cancel()
         generationTask = nil
         streamingMessageID = nil
@@ -1184,10 +1191,78 @@ public struct ChatView: View {
     }
 }
 
+#if canImport(UIKit)
+enum ChatAttachmentImagePipeline {
+    struct EncodedImage: Sendable {
+        let data: Data
+        let fileExtension: String
+    }
+
+    struct DecodedImage: @unchecked Sendable {
+        let image: UIImage
+    }
+
+    private static let modelInputMaxPixelDimension = 2_048
+
+    nonisolated static func encodedModelImage(from data: Data) throws -> EncodedImage {
+        guard let image = downsampledImage(from: data, maxPixelDimension: modelInputMaxPixelDimension) else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+
+        if let jpegData = image.jpegData(compressionQuality: 0.9) {
+            return EncodedImage(data: jpegData, fileExtension: "jpg")
+        }
+
+        if let pngData = image.pngData() {
+            return EncodedImage(data: pngData, fileExtension: "png")
+        }
+
+        throw CocoaError(.fileWriteUnknown)
+    }
+
+    nonisolated static func decodedThumbnail(
+        at url: URL,
+        maxPixelDimension: Int
+    ) -> DecodedImage? {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let cgImage = downsampledCGImage(from: source, maxPixelDimension: maxPixelDimension) else {
+            return nil
+        }
+
+        return DecodedImage(image: UIImage(cgImage: cgImage))
+    }
+
+    nonisolated private static func downsampledImage(
+        from data: Data,
+        maxPixelDimension: Int
+    ) -> UIImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let cgImage = downsampledCGImage(from: source, maxPixelDimension: maxPixelDimension) else {
+            return nil
+        }
+
+        return UIImage(cgImage: cgImage)
+    }
+
+    nonisolated private static func downsampledCGImage(
+        from source: CGImageSource,
+        maxPixelDimension: Int
+    ) -> CGImage? {
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixelDimension,
+            kCGImageSourceShouldCacheImmediately: true
+        ]
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+    }
+}
+#endif
+
 // MARK: - Preview helpers
 
 private extension ChatMessage {
-    static func previewMessage(user: ExyteChat.User, text: String) -> ChatMessage {
+    static func previewMessage(user: User, text: String) -> ChatMessage {
         ChatMessage(
             id: UUID().uuidString,
             user: user,

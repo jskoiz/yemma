@@ -2,122 +2,46 @@ import Foundation
 import XCTest
 @testable import Yemma4
 
-// MARK: - Gemma4ModelSource parsing/validation
+// MARK: - Gemma 4 prompt shaping
 
-final class Gemma4ModelSourceTests: XCTestCase {
-    func testFromUserInputAcceptsOwnerRepositoryID() throws {
-        let source = try Gemma4ModelSource.fromUserInput("mlx-community/gemma-4-e2b-it-4bit")
+final class Gemma4PromptMessageTests: XCTestCase {
+    func testPromptMessagesPreserveHistoryAndEveryAttachedImage() {
+        let firstImage = PromptImageAsset(id: "first", filePath: "/tmp/first.jpg")
+        let secondImage = PromptImageAsset(id: "second", filePath: "/tmp/second.jpg")
+        let thirdImage = PromptImageAsset(id: "third", filePath: "/tmp/third.jpg")
+        let messages = [
+            PromptMessageInput(role: "user", text: "Start here", images: []),
+            PromptMessageInput(role: "assistant", text: "Initial context", images: []),
+            PromptMessageInput(role: "user", text: "First image", images: [firstImage]),
+            PromptMessageInput(role: "assistant", text: "Keep this response", images: []),
+            PromptMessageInput(role: "user", text: "Compare these", images: [secondImage, thirdImage]),
+        ]
 
-        XCTAssertEqual(source.repositoryID, "mlx-community/gemma-4-e2b-it-4bit")
-        // This repository id matches the default preset, so it resolves to a preset source.
-        XCTAssertEqual(source.kind, .preset)
-        XCTAssertEqual(source.preset, .defaultE2B)
-    }
+        let shaped = LLMService.promptMessagesForGemma4(from: messages)
 
-    func testFromUserInputAcceptsCustomRepositoryID() throws {
-        let source = try Gemma4ModelSource.fromUserInput("someowner/some-repo")
-
-        XCTAssertEqual(source.repositoryID, "someowner/some-repo")
-        XCTAssertEqual(source.kind, .custom)
-        XCTAssertNil(source.preset)
-        XCTAssertTrue(source.isCustom)
-        XCTAssertEqual(source.sourceURLString, "https://huggingface.co/someowner/some-repo")
-    }
-
-    func testFromUserInputTrimsSurroundingWhitespace() throws {
-        let source = try Gemma4ModelSource.fromUserInput("   someowner/some-repo  \n")
-
-        XCTAssertEqual(source.repositoryID, "someowner/some-repo")
-    }
-
-    func testFromUserInputAcceptsFullHuggingFaceURL() throws {
-        let source = try Gemma4ModelSource.fromUserInput("https://huggingface.co/someowner/some-repo")
-
-        XCTAssertEqual(source.repositoryID, "someowner/some-repo")
-    }
-
-    func testFromUserInputAcceptsWWWHostAndExtraPathComponents() throws {
-        let source = try Gemma4ModelSource.fromUserInput(
-            "https://www.huggingface.co/someowner/some-repo/tree/main"
+        XCTAssertEqual(shaped.map(\.content), messages.map(\.text))
+        XCTAssertEqual(shaped.map(\.imageURLs.count), [0, 0, 1, 0, 2])
+        XCTAssertEqual(shaped[2].imageURLs.map(\.path), [firstImage.filePath])
+        XCTAssertEqual(
+            shaped[4].imageURLs.map(\.path),
+            [secondImage.filePath, thirdImage.filePath]
         )
-
-        XCTAssertEqual(source.repositoryID, "someowner/some-repo")
     }
 
-    func testParseRepositoryIDReturnsNormalizedOwnerRepo() throws {
-        let parsed = try Gemma4ModelSource.parseRepositoryID(from: "someowner/some-repo")
-        XCTAssertEqual(parsed, "someowner/some-repo")
-    }
+    func testPromptMessagesDefaultOnlyImageOnlyUserText() {
+        let image = PromptImageAsset(id: "image", filePath: "/tmp/image.jpg")
+        let messages = [
+            PromptMessageInput(role: "user", text: "  \n", images: [image]),
+            PromptMessageInput(role: "assistant", text: "", images: [image]),
+            PromptMessageInput(role: "user", text: "", images: []),
+        ]
 
-    func testParseRepositoryIDFromURLReturnsFirstTwoPathComponents() throws {
-        let parsed = try Gemma4ModelSource.parseRepositoryID(
-            from: "https://huggingface.co/someowner/some-repo/blob/main/config.json"
-        )
-        XCTAssertEqual(parsed, "someowner/some-repo")
-    }
+        let shaped = LLMService.promptMessagesForGemma4(from: messages)
 
-    func testEmptyInputThrowsEmptyInput() {
-        assertThrows(.emptyInput) {
-            try Gemma4ModelSource.fromUserInput("   \n  ")
-        }
-    }
-
-    func testUnsupportedHostThrowsUnsupportedHost() {
-        assertThrows(.unsupportedHost("https://example.com/owner/repo")) {
-            try Gemma4ModelSource.fromUserInput("https://example.com/owner/repo")
-        }
-    }
-
-    func testNonHTTPSchemeWithUnsupportedHostThrowsUnsupportedHost() {
-        assertThrows(.unsupportedHost("ftp://huggingface.co.evil.com/owner/repo")) {
-            try Gemma4ModelSource.fromUserInput("ftp://huggingface.co.evil.com/owner/repo")
-        }
-    }
-
-    func testHuggingFaceURLWithoutRepositoryThrowsMissingRepository() {
-        assertThrows(.missingRepository("https://huggingface.co/owner")) {
-            try Gemma4ModelSource.fromUserInput("https://huggingface.co/owner")
-        }
-    }
-
-    func testInvalidRepositoryIDWithoutSlashThrowsInvalidRepositoryID() {
-        assertThrows(.invalidRepositoryID("justaname")) {
-            try Gemma4ModelSource.fromUserInput("justaname")
-        }
-    }
-
-    func testInvalidRepositoryIDWithTooManyComponentsThrowsInvalidRepositoryID() {
-        assertThrows(.invalidRepositoryID("a/b/c")) {
-            try Gemma4ModelSource.fromUserInput("a/b/c")
-        }
-    }
-
-    func testNormalizeRepositoryIDRejectsInternalWhitespace() {
-        assertThrows(.invalidRepositoryID("owner/some repo")) {
-            _ = try Gemma4ModelSource.normalizeRepositoryID("owner/some repo")
-        }
-    }
-
-    func testNormalizeRepositoryIDCollapsesEmptyPathSegments() throws {
-        // split(omittingEmptySubsequences: true) drops the empty segment from the
-        // doubled slash, yielding exactly two components.
-        let normalized = try Gemma4ModelSource.normalizeRepositoryID("owner//repo")
-        XCTAssertEqual(normalized, "owner/repo")
-    }
-
-    private func assertThrows(
-        _ expected: Gemma4ModelSourceInputError,
-        file: StaticString = #filePath,
-        line: UInt = #line,
-        _ body: () throws -> Void
-    ) {
-        XCTAssertThrowsError(try body(), file: file, line: line) { error in
-            guard let typed = error as? Gemma4ModelSourceInputError else {
-                XCTFail("Expected Gemma4ModelSourceInputError, got \(error)", file: file, line: line)
-                return
-            }
-            XCTAssertEqual(typed, expected, file: file, line: line)
-        }
+        XCTAssertEqual(shaped.count, 2)
+        XCTAssertEqual(shaped[0].content, Gemma4MLXSupport.defaultImagePrompt)
+        XCTAssertEqual(shaped[1].content, "")
+        XCTAssertEqual(shaped.map(\.imageURLs.count), [1, 1])
     }
 }
 
@@ -125,6 +49,27 @@ final class Gemma4ModelSourceTests: XCTestCase {
 
 final class LLMResponseTokenMathTests: XCTestCase {
     private let gigabyte = UInt64(1024) * 1024 * 1024
+
+    func testFocusedPresetUsesSupportedStableTokenLimit() {
+        let preset = ResponseStylePreset.focused
+        let memory = UInt64(16) * gigabyte
+
+        XCTAssertEqual(preset.maxResponseTokens, 256)
+        XCTAssertEqual(
+            LLMService.normalizedMaxResponseTokens(
+                preset.maxResponseTokens,
+                physicalMemory: memory
+            ),
+            preset.maxResponseTokens
+        )
+        XCTAssertEqual(
+            ResponseStylePreset.matching(
+                temperature: preset.temperature,
+                maxResponseTokens: preset.maxResponseTokens
+            ),
+            preset
+        )
+    }
 
     func testCeilingBelowSixGigabytesIs1024() {
         let memory = UInt64(4) * gigabyte

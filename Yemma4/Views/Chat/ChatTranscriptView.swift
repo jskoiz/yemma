@@ -1,5 +1,4 @@
 import SwiftUI
-import ExyteChat
 
 #if canImport(UIKit)
 import UIKit
@@ -465,16 +464,18 @@ struct ChatAttachmentPreviewTile: View {
     let attachment: Attachment
     let height: CGFloat
 
+    @State private var thumbnailImage: UIImage?
+
+    private static let thumbnailCache = ChatAttachmentThumbnailCache()
+    private static let thumbnailMaxPixelDimension = 1_024
+
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(AppTheme.controlFill)
 
-            if
-                attachment.thumbnail.isFileURL,
-                let image = UIImage(contentsOfFile: attachment.thumbnail.path)
-            {
-                Image(uiImage: image)
+            if let thumbnailImage {
+                Image(uiImage: thumbnailImage)
                     .resizable()
                     .scaledToFill()
             } else {
@@ -490,6 +491,57 @@ struct ChatAttachmentPreviewTile: View {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(AppTheme.assistantBubbleBorder, lineWidth: 1)
         )
+        .task(id: attachment.thumbnail) {
+            await loadThumbnail()
+        }
+    }
+
+    @MainActor
+    private func loadThumbnail() async {
+        guard attachment.thumbnail.isFileURL else {
+            thumbnailImage = nil
+            return
+        }
+
+        let fileURL = attachment.thumbnail.standardizedFileURL
+        let cacheKey = fileURL as NSURL
+        if let cachedImage = Self.thumbnailCache.image(for: cacheKey) {
+            thumbnailImage = cachedImage
+            return
+        }
+
+        thumbnailImage = nil
+        let maxPixelDimension = Self.thumbnailMaxPixelDimension
+        let decodedImage = await Task.detached(priority: .utility) {
+            autoreleasepool {
+                ChatAttachmentImagePipeline.decodedThumbnail(
+                    at: fileURL,
+                    maxPixelDimension: maxPixelDimension
+                )
+            }
+        }.value
+
+        guard !Task.isCancelled, let decodedImage else { return }
+        Self.thumbnailCache.insert(decodedImage.image, for: cacheKey)
+        thumbnailImage = decodedImage.image
+    }
+}
+
+private final class ChatAttachmentThumbnailCache: @unchecked Sendable {
+    private let storage = NSCache<NSURL, UIImage>()
+
+    init() {
+        storage.countLimit = 12
+        storage.totalCostLimit = 24 * 1_024 * 1_024
+    }
+
+    func image(for url: NSURL) -> UIImage? {
+        storage.object(forKey: url)
+    }
+
+    func insert(_ image: UIImage, for url: NSURL) {
+        let estimatedCost = image.cgImage.map { $0.bytesPerRow * $0.height } ?? 0
+        storage.setObject(image, forKey: url, cost: estimatedCost)
     }
 }
 
