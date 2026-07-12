@@ -588,37 +588,6 @@ struct ChatSidebarView: View {
         .contentShape(Rectangle())
     }
 
-    private func disclosureRow(
-        icon: String,
-        title: String,
-        subtitle: String,
-        isExpanded: Bool
-    ) -> some View {
-        HStack(spacing: 14) {
-            Image(systemName: icon)
-                .frame(width: AppTheme.Layout.rowIconSize)
-                .foregroundStyle(AppTheme.textPrimary)
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text(title)
-                    .font(AppTheme.Typography.utilityRowTitle.weight(.semibold))
-                    .foregroundStyle(AppTheme.textPrimary)
-
-                Text(subtitle)
-                    .font(AppTheme.Typography.utilityRowDetail)
-                    .foregroundStyle(AppTheme.textSecondary)
-            }
-
-            Spacer()
-
-            Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(AppTheme.textSecondary)
-        }
-        .utilityRowPadding()
-        .contentShape(Rectangle())
-    }
-
     private func infoRow(icon: String, title: String, detail: String) -> some View {
         ViewThatFits(in: .vertical) {
             HStack(spacing: 14) {
@@ -773,13 +742,6 @@ struct ChatSidebarView: View {
         let version = info?["CFBundleShortVersionString"] as? String ?? "Unknown"
         let build = info?["CFBundleVersion"] as? String ?? "Unknown"
         return "\(version) (\(build))"
-    }
-
-    private func tokenLabel(_ count: Int) -> String {
-        if count >= 1024 {
-            return String(format: "%.1fK", Double(count) / 1024.0)
-        }
-        return "\(count)"
     }
 
     private static func relativeDateText(for date: Date) -> String {

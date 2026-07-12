@@ -1,6 +1,5 @@
 import Foundation
 import Observation
-import ExyteChat
 
 struct ConversationMetadata: Codable, Identifiable, Hashable, Sendable {
     let id: UUID
@@ -154,18 +153,6 @@ private struct PersistedMessage: Codable, Sendable {
     let text: String
     let attachments: [Attachment]
 
-    private var placeholderDraftMessage: DraftMessage {
-        DraftMessage(
-            id: id,
-            text: text,
-            medias: [],
-            giphyMedia: nil,
-            recording: nil,
-            replyMessage: nil,
-            createdAt: createdAt
-        )
-    }
-
     init(message: ChatMessage) {
         id = message.id
         user = message.user
@@ -199,7 +186,7 @@ private struct PersistedMessage: Codable, Sendable {
         case .read:
             .read
         case .error:
-            .error(placeholderDraftMessage)
+            .error
         case nil:
             nil
         }

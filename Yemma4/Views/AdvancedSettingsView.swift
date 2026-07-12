@@ -2,7 +2,6 @@ import SwiftUI
 
 struct AdvancedSettingsView: View {
     @Environment(LLMService.self) private var llmService
-    @Environment(ModelDownloader.self) private var modelDownloader
     @Environment(AppDiagnostics.self) private var diagnostics
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -115,7 +114,7 @@ struct AdvancedSettingsView: View {
             infoRow(
                 icon: "shippingbox.circle",
                 title: "Model source",
-                detail: activeModelSourceDetailText
+                detail: Gemma4MLXSupport.repositoryID
             )
             UtilitySectionSeparator()
             infoRow(
@@ -357,19 +356,6 @@ struct AdvancedSettingsView: View {
                 isOn: $showsAssistantResponseStats
             )
 
-            UtilitySectionSeparator()
-
-                NavigationLink {
-                    DebugModelVariantsView()
-                } label: {
-                    utilityActionRow(
-                        icon: "shippingbox.circle",
-                        title: "Debug model variants",
-                        detail: "Open debug-only model switching, download progress, and unsupported Hugging Face source controls."
-                    )
-                }
-                .buttonStyle(.plain)
-
             if let onRunDebugScenario {
                 UtilitySectionSeparator()
 
@@ -447,14 +433,6 @@ struct AdvancedSettingsView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, AppTheme.Layout.rowHorizontalPadding)
         .padding(.vertical, 14)
-    }
-
-    private var activeModelSourceDetailText: String {
-        if modelDownloader.isUsingDefaultModelSource {
-            return "Shipped default: \(Gemma4MLXSupport.defaultModelSource.repositoryID)"
-        }
-
-        return "\(modelDownloader.activeModelSourceBoundaryLabel): \(modelDownloader.activeModelSource.repositoryID)"
     }
 
     private func infoRow(icon: String, title: String, detail: String) -> some View {

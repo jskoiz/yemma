@@ -1,6 +1,5 @@
 import Foundation
 import XCTest
-import ExyteChat
 @testable import Yemma4
 
 @MainActor
@@ -47,10 +46,69 @@ final class ConversationStoreTests: XCTestCase {
         XCTAssertEqual(snapshot?.id, conversationID)
         XCTAssertEqual(snapshot?.title, "Hello")
         XCTAssertEqual(snapshot?.draftText, "Draft text")
-        XCTAssertEqual(snapshot?.draftAttachments.count, 1)
+        XCTAssertEqual(snapshot?.draftAttachments, [draftAttachment])
         XCTAssertEqual(snapshot?.messages.count, 1)
         XCTAssertEqual(snapshot?.messages.first?.createdAt, createdAt)
         XCTAssertEqual(snapshot?.messages.first?.text, "Hello")
+        XCTAssertEqual(snapshot?.messages.first?.status, .sent)
+        XCTAssertEqual(snapshot?.messages.first?.user, .user)
+        XCTAssertEqual(snapshot?.messages.first?.user.isCurrentUser, true)
+    }
+
+    func testRestoreDecodesCurrentPersistedConversationFormat() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanUp() }
+
+        let conversationID = UUID()
+        let attachmentURL = fixture.storageRoot.appendingPathComponent("existing.png")
+        let conversationDirectory = fixture.storageRoot.appendingPathComponent(
+            conversationID.uuidString,
+            isDirectory: true
+        )
+        try fixture.fileManager.createDirectory(
+            at: conversationDirectory,
+            withIntermediateDirectories: true
+        )
+
+        let persistedPayload: [String: Any] = [
+            "id": conversationID.uuidString,
+            "title": "Existing chat",
+            "createdAt": "2023-11-14T22:13:20Z",
+            "updatedAt": "2023-11-14T22:13:20Z",
+            "messages": [[
+                "id": "existing-message",
+                "user": [
+                    "id": "user",
+                    "name": "You",
+                    "type": 0,
+                ],
+                "status": "error",
+                "createdAt": "2023-11-14T22:13:20Z",
+                "text": "Still here",
+                "attachments": [[
+                    "id": "existing-attachment",
+                    "thumbnail": attachmentURL.absoluteString,
+                    "full": attachmentURL.absoluteString,
+                    "type": "image",
+                ]],
+            ]],
+            "draftText": "",
+            "draftAttachments": [],
+        ]
+        let persistedData = try JSONSerialization.data(withJSONObject: persistedPayload, options: [.sortedKeys])
+        try persistedData.write(to: conversationDirectory.appendingPathComponent("conversation.json"))
+
+        let snapshot = await fixture.makeStore().loadConversationAsync(id: conversationID)
+
+        XCTAssertEqual(snapshot?.id, conversationID)
+        XCTAssertEqual(snapshot?.title, "Existing chat")
+        XCTAssertEqual(snapshot?.messages.first?.id, "existing-message")
+        XCTAssertEqual(snapshot?.messages.first?.status, .error)
+        XCTAssertEqual(snapshot?.messages.first?.user, .user)
+        XCTAssertEqual(snapshot?.messages.first?.isCurrentUser, true)
+        XCTAssertEqual(snapshot?.messages.first?.attachments.first?.thumbnail, attachmentURL)
+        XCTAssertEqual(snapshot?.messages.first?.attachments.first?.full, attachmentURL)
+        XCTAssertEqual(snapshot?.messages.first?.attachments.first?.type, .image)
     }
 
     func testLoadIndexRecoversConversationMetadataFromFilesWhenIndexIsCorrupt() async throws {
@@ -167,11 +225,14 @@ final class ConversationStoreTests: XCTestCase {
     private func makeFixture() throws -> Fixture {
         let identifier = UUID().uuidString
         let defaultsName = "ConversationStoreTests-\(identifier)"
+        let storageBase = try XCTUnwrap(
+            FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+        )
         return Fixture(
             fileManager: .default,
             defaults: try XCTUnwrap(UserDefaults(suiteName: defaultsName)),
             defaultsName: defaultsName,
-            storageRoot: FileManager.default.temporaryDirectory.appendingPathComponent(
+            storageRoot: storageBase.appendingPathComponent(
                 "ConversationStoreTests-\(identifier)",
                 isDirectory: true
             )

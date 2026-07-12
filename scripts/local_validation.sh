@@ -24,3 +24,14 @@ xcodebuild test \
   -destination "platform=iOS Simulator,id=$DEVICE_ID" \
   -derivedDataPath "$DERIVED_DATA_PATH" \
   -quiet
+
+echo "Building unsigned Yemma Release for generic iOS device"
+xcodebuild build \
+  -project "$PROJECT_PATH" \
+  -scheme "$SCHEME" \
+  -configuration Release \
+  -destination "generic/platform=iOS" \
+  -derivedDataPath "$DERIVED_DATA_PATH" \
+  CODE_SIGNING_ALLOWED=NO \
+  CODE_SIGNING_REQUIRED=NO \
+  -quiet

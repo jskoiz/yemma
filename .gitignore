@@ -6,7 +6,6 @@ Dependencies/
 .asc/
 .codex-builds/
 .codex-derived-data-device/
-Package.resolved
 .deriveddata/
 .artifacts/
 .local-models/
@@ -29,7 +28,6 @@ GoogleService-Info.plist
 xcuserdata/
 *.xcworkspace/xcuserdata/
 *.xcodeproj/project.xcworkspace/xcuserdata/
-!Yemma4.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
 *.playground/
 *.swiftmodule
 *.swiftdoc
@@ -37,6 +35,3 @@ xcuserdata/
 *.ipa
 *.dSYM
 *.xcarchive
-Yemma4/ThirdParty/litert_lm/*.a
-Yemma4/ThirdParty/litert_lm/*.dylib
-Yemma4/ThirdParty/litert_lm/include/

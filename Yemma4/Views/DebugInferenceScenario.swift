@@ -1,4 +1,4 @@
-import SwiftUI
+import Foundation
 
 public enum DebugInferenceScenario: String, CaseIterable, Identifiable {
     case rendererCoverage
@@ -170,65 +170,3 @@ public enum DebugInferenceScenario: String, CaseIterable, Identifiable {
         }
     }
 }
-
-public struct SettingsView: View {
-    @Environment(\.dismiss) private var dismiss
-
-    private let onShowOnboarding: () -> Void
-    private let onRunDebugScenario: ((DebugInferenceScenario) -> Void)?
-
-    public init(
-        onShowOnboarding: @escaping () -> Void,
-        onRunDebugScenario: ((DebugInferenceScenario) -> Void)? = nil
-    ) {
-        self.onShowOnboarding = onShowOnboarding
-        self.onRunDebugScenario = onRunDebugScenario
-    }
-
-    public var body: some View {
-        NavigationStack {
-            ChatSidebarView(
-                currentConversationID: nil,
-                title: "Settings",
-                subtitle: "Preferences, privacy, and local model controls",
-                showsChatManagement: false,
-                onSelectConversation: { _ in },
-                onStartFresh: {},
-                onShowOnboarding: {
-                    dismiss()
-                    onShowOnboarding()
-                },
-                onRunDebugScenario: onRunDebugScenario,
-                onOpenArchive: {},
-                onClose: { dismiss() }
-            )
-            .toolbar(.hidden, for: .navigationBar)
-        }
-    }
-}
-
-#if DEBUG
-#Preview("Settings") {
-    SettingsView(onShowOnboarding: {})
-        .environment(ModelDownloader())
-        .environment(LLMService())
-        .environment(ConversationStore.preview())
-}
-
-#Preview("Settings Accessibility") {
-    SettingsView(onShowOnboarding: {})
-        .environment(ModelDownloader())
-        .environment(LLMService())
-        .environment(ConversationStore.preview())
-        .dynamicTypeSize(.accessibility3)
-        .preferredColorScheme(.dark)
-}
-
-#Preview("Settings Compact") {
-    SettingsView(onShowOnboarding: {})
-        .environment(ModelDownloader())
-        .environment(LLMService())
-        .environment(ConversationStore.preview())
-        .preferredColorScheme(.dark)
-}
-#endif

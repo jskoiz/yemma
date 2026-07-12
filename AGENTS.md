@@ -14,11 +14,14 @@ Start from the current implementation in this repo when changing model or runtim
 
 When working on something new in this repo, always use [@build-ios-apps](plugin://build-ios-apps@openai-curated) first for the iOS-oriented workflow, build, simulator, and debugging tools.
 
+`Yemma4.xcodeproj` is the only build graph. SwiftPM dependencies are declared there and pinned by `Yemma4.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`.
+
 ## Current State
 
 - The shipping runtime is MLX, not `llama.cpp`.
 - The app uses one local MLX Gemma 4 bundle instead of separate text GGUF and `mmproj` assets.
 - The old Objective-C++ multimodal bridge and legacy LiteRT/GGUF runtime paths are no longer part of the product build.
+- Chat messages, users, attachments, and the SwiftUI chat surface are owned by Yemma; there is no third-party chat framework.
 - Simulator runs are UI-only with mocked replies. Real inference requires a physical iPhone.
 
 ## Known-Good Upstream Baseline
@@ -28,16 +31,16 @@ Use these repos/commits as the validated baseline:
 - `mlx-swift-lm` at `3.31.3`
 - `mlx-swift-examples` at `31b6cf6`
 
-Do not start by reworking those repos locally inside `yemma-4`.
+Do not start by reworking those repos locally inside `yemma`.
 
 ## Tech Stack
 
-- Language: Swift 6.1
+- Toolchain: Swift 6.1-compatible; app and test targets currently use Swift 5 language mode
 - UI: SwiftUI with `@Observable`
 - Platform: iOS 17+
 - Runtime: `MLX`, `MLXLMCommon`, `MLXVLM`
 - Downloads and tokenization: `swift-transformers` (`Hub`, `Tokenizers`)
-- Chat UI: ExyteChat
+- Chat UI and value types: Yemma-owned SwiftUI and Swift models
 - Markdown: MarkdownUI
 
 ## First Files To Inspect
@@ -62,7 +65,7 @@ Services are `@Observable` and injected through SwiftUI environment:
 ### Multimodal MLX Path
 
 - MLX Swift already provides the general model-loading, tokenizer, and VLM infrastructure; the missing work here was Gemma 4 Swift support plus Yemma-specific integration
-- `ModelDownloader` fetches `mlx-community/gemma-4-e2b-it-4bit` and also recognizes legacy local bundles from `EZCon/gemma-4-E2B-it-4bit-mlx`
+- `ModelDownloader` fetches the single shipped repository, `mlx-community/gemma-4-e2b-it-4bit`
 - `ModelDirectoryValidator` verifies tokenizer/config/processor files and safetensors shards before load
 - `Gemma4MLXSupport` checks the Gemma 4 multimodal asset contract and normalizes known compatibility gaps
 - `LLMService.makeGemma4UserInput(...)` converts turns into structured chat messages and `UserInput` values with optional images
@@ -78,6 +81,16 @@ Services are `@Observable` and injected through SwiftUI environment:
 - Model loading runs on detached background tasks
 
 ## Build And Run
+
+### Local validation
+
+Use:
+
+```bash
+./scripts/local_validation.sh
+```
+
+The harness runs the shared scheme's simulator tests, then compiles an unsigned Release build for a generic iOS device. Both steps reuse one DerivedData path.
 
 ### Device
 
@@ -123,8 +136,7 @@ when you need a clean first-launch timing probe on a physical device.
 
 ## Model Details
 
-- Default repository: `mlx-community/gemma-4-e2b-it-4bit`
-- Legacy-compatible local bundle ID: `EZCon/gemma-4-E2B-it-4bit-mlx`
+- Shipped repository: `mlx-community/gemma-4-e2b-it-4bit`
 - Stored locally as one MLX model directory with safetensors weights and config files
 - Images and text are processed through the same Swift runtime container
 - Default sampling: `top-k=64`, `top-p=0.95`, `temperature=0.7`
@@ -135,6 +147,9 @@ when you need a clean first-launch timing probe on a physical device.
 - `Yemma4/Services/LLMService.swift`: model loading, prompt shaping, multimodal preprocessing, token generation loop, sampler config
 - `Yemma4/Services/MLXModelSupport.swift`: model directory validation and Gemma 4 asset contract checks
 - `Yemma4/Services/ModelDownloader.swift`: bundle download, resume persistence, progress tracking, validation, cleanup
+- `Yemma4/Models/ChatMessage.swift`: app-owned chat message, user, and attachment value types
 - `Yemma4/Views/ChatView.swift`: chat UI, streaming display, image attachments
+- `Yemma4/Views/Chat/ChatTranscriptView.swift`: transcript rendering and message actions
+- `Yemma4/Views/Chat/ChatComposerView.swift`: draft entry and image attachment controls
 - `Yemma4/Views/OnboardingView.swift`: first-launch setup UI and progress states
 - `Yemma4/ContentView.swift`: root onboarding/loading/chat transitions

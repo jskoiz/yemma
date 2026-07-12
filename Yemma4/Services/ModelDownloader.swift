@@ -254,11 +254,6 @@ struct AppSetupSnapshot {
 @MainActor
 @Observable
 public final class ModelDownloader {
-    private struct PersistedState: Codable {
-        let modelSource: Gemma4ModelSource
-        let modelPath: String?
-    }
-
     public var downloadProgress: Double = 0
     public var isDownloading: Bool = false
     public var isDownloaded: Bool = false
@@ -267,28 +262,10 @@ public final class ModelDownloader {
     public var modelPath: String?
     public var estimatedSecondsRemaining: Double?
     public var currentDownloadSpeedBytesPerSecond: Double?
-    var activeModelSource: Gemma4ModelSource = Gemma4MLXSupport.defaultModelSource
-
-    var isUsingDefaultModelSource: Bool {
-        activeModelSource == Gemma4MLXSupport.defaultModelSource
-    }
-
-    var activeModelSourceBoundaryLabel: String {
-        if isUsingDefaultModelSource {
-            return "Shipped default"
-        }
-
-        if activeModelSource.isCustom {
-            return "Custom debug source"
-        }
-
-        return "Experimental preset"
-    }
-
     private var lastSpeedSampleDate: Date?
     private var lastSpeedSampleBytes: Int64 = 0
     private var currentDownloadedBytes: Int64 = 0
-    private var currentEstimatedBytes: Int64 = Gemma4MLXSupport.defaultModelSource.approximateDownloadBytes
+    private var currentEstimatedBytes: Int64 = Gemma4MLXSupport.approximateDownloadBytes
 
     private let fileManager: FileManager
     private let defaults: UserDefaults
@@ -297,7 +274,7 @@ public final class ModelDownloader {
     @ObservationIgnored private var progressMonitorTask: Task<Void, Never>?
     @ObservationIgnored private var isValidatingDownloadedModel = false
 
-    private static let persistedStateKey = "com.avmillabs.yemma4.modelDownloader.state"
+    private static let persistedModelPathKey = "com.avmillabs.yemma4.modelDownloader.modelPath"
 
     public init(
         fileManager: FileManager = .default,
@@ -332,80 +309,34 @@ public final class ModelDownloader {
 
     public var activeDownloadLabel: String {
         if isDownloaded {
-            return isUsingDefaultModelSource ? "Shipped model bundle is ready" : "Experimental model bundle is ready"
+            return "Shipped model bundle is ready"
         }
 
         if isDownloading {
-            return "Downloading \(activeModelSourceBoundaryLabel.lowercased())"
+            return "Downloading shipped model"
         }
 
         if canResumeDownload {
-            return isUsingDefaultModelSource ? "Ready to resume setup" : "Ready to resume debug setup"
+            return "Ready to resume setup"
         }
 
-        return isUsingDefaultModelSource ? "Waiting to download" : "Waiting to download experimental source"
+        return "Waiting to download"
     }
 
     public var activeDownloadDetail: String {
         if isDownloaded {
-            return isUsingDefaultModelSource
-                ? "Everything is saved on this iPhone for the shipped default source."
-                : "Everything is saved on this iPhone for this debug-only source."
+            return "Everything is saved on this iPhone for the shipped model."
         }
 
         if isDownloading {
-            return isUsingDefaultModelSource
-                ? "Downloading the shipped default source from Hugging Face."
-                : "Downloading a debug-only source from Hugging Face."
+            return "Downloading the shipped model from Hugging Face."
         }
 
         if canResumeDownload {
-            return isUsingDefaultModelSource
-                ? "Resume the saved setup progress."
-                : "Resume the saved debug setup progress."
+            return "Resume the saved setup progress."
         }
 
-        return isUsingDefaultModelSource
-            ? "Yemma needs a one-time local model download before chat is ready."
-            : "Yemma needs a one-time local download before this experimental source is ready."
-    }
-
-    func selectModelSource(_ source: Gemma4ModelSource) async {
-        guard activeModelSource != source else {
-            await validateDownloadedModel()
-            return
-        }
-
-        let previousSource = activeModelSource
-        stopProgressMonitor()
-        activeModelSource = source
-        modelPath = nil
-        isDownloaded = false
-        isDownloading = false
-        canResumeDownload = false
-        downloadProgress = 0
-        currentDownloadedBytes = 0
-        currentEstimatedBytes = source.approximateDownloadBytes
-        error = nil
-        resetETA()
-        persistState(modelPath: nil)
-
-        let hub = hubClient()
-        await BackgroundModelDownloadCoordinator.shared.clearState(
-            using: hub,
-            repositoryID: previousSource.repositoryID
-        )
-        await validateDownloadedModel()
-
-        AppDiagnostics.shared.record(
-            "Model source selected for debug flow",
-            category: "download",
-            metadata: [
-                "repository": source.repositoryID,
-                "kind": source.kind.rawValue,
-                "boundary": source == Gemma4MLXSupport.defaultModelSource ? "default" : "experimental"
-            ]
-        )
+        return "Yemma needs a one-time local model download before chat is ready."
     }
 
     public func validateDownloadedModel() async {
@@ -432,12 +363,12 @@ public final class ModelDownloader {
             finishWithCachedDownload(validation)
             await BackgroundModelDownloadCoordinator.shared.clearState(
                 using: hub,
-                repositoryID: activeModelSource.repositoryID
+                repositoryID: Gemma4MLXSupport.repositoryID
             )
         } else {
             let snapshot = await BackgroundModelDownloadCoordinator.shared.snapshot(
                 using: hub,
-                repositoryID: activeModelSource.repositoryID
+                repositoryID: Gemma4MLXSupport.repositoryID
             )
             applyMissingValidatedModelState(snapshot)
         }
@@ -446,7 +377,7 @@ public final class ModelDownloader {
             "Validated local MLX model state",
             category: "download",
             metadata: [
-                "repository": activeModelSource.repositoryID,
+                "repository": Gemma4MLXSupport.repositoryID,
                 "isDownloaded": isDownloaded,
                 "modelPath": modelPath ?? "nil"
             ]
@@ -474,26 +405,22 @@ public final class ModelDownloader {
                 finishWithCachedDownload(cachedDirectory)
                 await BackgroundModelDownloadCoordinator.shared.clearState(
                     using: hub,
-                    repositoryID: activeModelSource.repositoryID
+                    repositoryID: Gemma4MLXSupport.repositoryID
                 )
                 return
             }
 
-            await purgeStaleDownloadDirectories(
-                using: hub,
-                repositoryIDs: Gemma4MLXSupport.legacyRepositoryIDs(for: activeModelSource)
-            )
             prepareForDownload()
 
             AppDiagnostics.shared.record(
                 "Starting MLX model bundle download",
                 category: "download",
-                metadata: ["repository": activeModelSource.repositoryID]
+                metadata: ["repository": Gemma4MLXSupport.repositoryID]
             )
 
             let snapshot = try await BackgroundModelDownloadCoordinator.shared.startDownload(
                 using: hub,
-                repositoryID: activeModelSource.repositoryID,
+                repositoryID: Gemma4MLXSupport.repositoryID,
                 revision: Gemma4MLXSupport.repositoryRevision,
                 matching: Gemma4MLXSupport.downloadPatterns
             )
@@ -525,7 +452,6 @@ public final class ModelDownloader {
 
     public func deleteModel() {
         let hub = hubClient()
-        let source = activeModelSource
         stopProgressMonitor()
 
         Task { @MainActor [weak self] in
@@ -533,13 +459,15 @@ public final class ModelDownloader {
 
             await BackgroundModelDownloadCoordinator.shared.clearState(
                 using: hub,
-                repositoryID: source.repositoryID
+                repositoryID: Gemma4MLXSupport.repositoryID
             )
 
-            let cachedDirectories = self.allKnownModelDirectories(using: hub, source: source)
+            let cachedDirectory = hub.localRepoLocation(
+                Hub.Repo(id: Gemma4MLXSupport.repositoryID)
+            )
 
             do {
-                for cachedDirectory in cachedDirectories where self.fileManager.fileExists(atPath: cachedDirectory.path) {
+                if self.fileManager.fileExists(atPath: cachedDirectory.path) {
                     try self.fileManager.removeItem(at: cachedDirectory)
                 }
 
@@ -549,7 +477,7 @@ public final class ModelDownloader {
                 self.canResumeDownload = false
                 self.downloadProgress = 0
                 self.currentDownloadedBytes = 0
-                self.currentEstimatedBytes = source.approximateDownloadBytes
+                self.currentEstimatedBytes = Gemma4MLXSupport.approximateDownloadBytes
                 self.error = nil
                 self.resetETA()
                 self.persistState(modelPath: nil)
@@ -573,7 +501,7 @@ public final class ModelDownloader {
         downloadProgress = 0
         modelPath = nil
         currentDownloadedBytes = 0
-        currentEstimatedBytes = activeModelSource.approximateDownloadBytes
+        currentEstimatedBytes = Gemma4MLXSupport.approximateDownloadBytes
         estimatedSecondsRemaining = nil
         currentDownloadSpeedBytesPerSecond = nil
         error = Self.unsupportedRuntimeMessage
@@ -588,7 +516,7 @@ public final class ModelDownloader {
         error = nil
         downloadProgress = 0
         currentDownloadedBytes = 0
-        currentEstimatedBytes = activeModelSource.approximateDownloadBytes
+        currentEstimatedBytes = Gemma4MLXSupport.approximateDownloadBytes
         startETA()
     }
 
@@ -661,7 +589,7 @@ public final class ModelDownloader {
 
                 let snapshot = await BackgroundModelDownloadCoordinator.shared.snapshot(
                     using: hub,
-                    repositoryID: await MainActor.run { self.activeModelSource.repositoryID }
+                    repositoryID: Gemma4MLXSupport.repositoryID
                 )
                 guard !Task.isCancelled else {
                     return
@@ -679,60 +607,35 @@ public final class ModelDownloader {
     }
 
     private func firstValidModelDirectoryAsync(using hub: HubApi) async -> (ValidatedModelDirectory, Int64)? {
-        let repositoryIDs = Gemma4MLXSupport.knownRepositoryIDs(for: activeModelSource)
         let validationTask = Task.detached(priority: .utility) { () -> (ValidatedModelDirectory, Int64)? in
-            for repositoryID in repositoryIDs {
-                let location = hub.localRepoLocation(Hub.Repo(id: repositoryID))
-                guard let validatedDirectory = try? ModelDirectoryValidator.validatedDirectory(at: location) else {
-                    continue
-                }
-
-                // A structurally-present bundle is not enough: the Gemma 4 asset
-                // contract (token ids / soft-token budget / pooling) must also hold
-                // so that "downloaded" implies "loadable". This cheaply reads the
-                // processor/config JSON only — full weights are not loaded here.
-                do {
-                    try Gemma4MLXSupport.normalizeAssetContractIfNeeded(validatedDirectory)
-                    try Gemma4MLXSupport.validateAssetContract(validatedDirectory)
-                } catch {
-                    AppDiagnostics.shared.record(
-                        "Rejected downloaded MLX bundle that failed the Gemma 4 asset contract",
-                        category: "download",
-                        metadata: [
-                            "repository": repositoryID,
-                            "error": (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-                        ]
-                    )
-                    continue
-                }
-
-                return (validatedDirectory, Gemma4MLXSupport.directorySize(at: location))
+            let location = hub.localRepoLocation(Hub.Repo(id: Gemma4MLXSupport.repositoryID))
+            guard let validatedDirectory = try? ModelDirectoryValidator.validatedDirectory(at: location) else {
+                return nil
             }
 
-            return nil
+            // A structurally-present bundle is not enough: the Gemma 4 asset
+            // contract (token ids / soft-token budget / pooling) must also hold
+            // so that "downloaded" implies "loadable". This cheaply reads the
+            // processor/config JSON only — full weights are not loaded here.
+            do {
+                try Gemma4MLXSupport.normalizeAssetContractIfNeeded(validatedDirectory)
+                try Gemma4MLXSupport.validateAssetContract(validatedDirectory)
+            } catch {
+                AppDiagnostics.shared.record(
+                    "Rejected downloaded MLX bundle that failed the Gemma 4 asset contract",
+                    category: "download",
+                    metadata: [
+                        "repository": Gemma4MLXSupport.repositoryID,
+                        "error": (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                    ]
+                )
+                return nil
+            }
+
+            return (validatedDirectory, Gemma4MLXSupport.directorySize(at: location))
         }
 
         return await validationTask.value
-    }
-
-    private func allKnownModelDirectories(using hub: HubApi, source: Gemma4ModelSource? = nil) -> [URL] {
-        Gemma4MLXSupport.knownRepositoryIDs(for: source ?? activeModelSource)
-            .map { hub.localRepoLocation(Hub.Repo(id: $0)) }
-    }
-
-    private func purgeStaleDownloadDirectories(
-        using hub: HubApi,
-        repositoryIDs: [String]
-    ) async {
-        let directories = repositoryIDs.map { hub.localRepoLocation(Hub.Repo(id: $0)) }
-
-        await Task.detached(priority: .utility) {
-            let fileManager = FileManager.default
-
-            for cachedDirectory in directories where fileManager.fileExists(atPath: cachedDirectory.path) {
-                try? fileManager.removeItem(at: cachedDirectory)
-            }
-        }.value
     }
 
     private func applyMissingValidatedModelState(_ snapshot: BackgroundModelDownloadSnapshot) {
@@ -755,7 +658,7 @@ public final class ModelDownloader {
         isDownloading = snapshot.hasRunningTasks
         canResumeDownload = snapshot.hasPendingWork && !snapshot.hasRunningTasks
         currentDownloadedBytes = snapshot.completedBytes
-        currentEstimatedBytes = max(snapshot.totalBytes, activeModelSource.approximateDownloadBytes)
+        currentEstimatedBytes = max(snapshot.totalBytes, Gemma4MLXSupport.approximateDownloadBytes)
         downloadProgress = snapshot.progress
         error = snapshot.hasRunningTasks ? nil : snapshot.lastError
         updateSpeedSample(with: snapshot.completedBytes, running: snapshot.hasRunningTasks)
@@ -812,7 +715,7 @@ public final class ModelDownloader {
     private func describe(_ error: Error) -> String {
         if case Hub.HubClientError.authorizationRequired = error {
             return """
-                Yemma could not download the configured Hugging Face model source (\(activeModelSource.repositoryID)) because authentication was required. Provide a valid Hugging Face token or switch back to the shipped default source for first-launch setup.
+                Yemma could not download the shipped Hugging Face model (\(Gemma4MLXSupport.repositoryID)) because authentication was required. Check your connection and try again.
                 """
         }
 
@@ -827,19 +730,7 @@ public final class ModelDownloader {
         "Local MLX downloads are disabled in the iOS Simulator. Run Yemma on a physical iPhone for real on-device inference."
 
     private func restorePersistedState() {
-        guard let persistedData = defaults.data(forKey: Self.persistedStateKey) else {
-            return
-        }
-
-        guard let persistedState = try? JSONDecoder().decode(PersistedState.self, from: persistedData) else {
-            defaults.removeObject(forKey: Self.persistedStateKey)
-            return
-        }
-
-        activeModelSource = persistedState.modelSource
-        currentEstimatedBytes = activeModelSource.approximateDownloadBytes
-
-        guard let persistedModelPath = persistedState.modelPath else {
+        guard let persistedModelPath = defaults.string(forKey: Self.persistedModelPathKey) else {
             return
         }
 
@@ -860,11 +751,11 @@ public final class ModelDownloader {
     }
 
     private func persistState(modelPath: String?) {
-        let state = PersistedState(modelSource: activeModelSource, modelPath: modelPath)
-        guard let data = try? JSONEncoder().encode(state) else {
-            return
+        if let modelPath {
+            defaults.set(modelPath, forKey: Self.persistedModelPathKey)
+        } else {
+            defaults.removeObject(forKey: Self.persistedModelPathKey)
         }
-        defaults.set(data, forKey: Self.persistedStateKey)
     }
 
     private func hubClient() -> HubApi {
