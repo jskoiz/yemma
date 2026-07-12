@@ -74,14 +74,18 @@ struct ChatSidebarView: View {
         ) {
             Button("Delete Model", role: .destructive) {
                 Task {
-                    await llmService.unloadModel()
+                    if llmService.selectedRuntime == .gemma4 {
+                        guard await llmService.unloadModel() else { return }
+                    }
                     modelDownloader.deleteModel()
-                    onShowOnboarding()
+                    if llmService.selectedRuntime == .gemma4 {
+                        onShowOnboarding()
+                    }
                 }
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Yemma will return to setup until the model is downloaded again.")
+            Text("This removes only the optional Gemma 4 files. Apple's built-in model is unaffected.")
         }
         .confirmationDialog(
             "Delete conversation history?",
@@ -292,8 +296,14 @@ struct ChatSidebarView: View {
     private var modelSection: some View {
         UtilitySection("Model & Storage") {
             infoRow(
+                icon: "cpu",
+                title: "Active runtime",
+                detail: llmService.selectedRuntime.runtimeName
+            )
+            UtilitySectionSeparator()
+            infoRow(
                 icon: "shippingbox",
-                title: "Local model",
+                title: "Gemma storage",
                 detail: modelSizeText
             )
             UtilitySectionSeparator()
@@ -303,7 +313,7 @@ struct ChatSidebarView: View {
             destructiveRow(
                 icon: "externaldrive.badge.minus",
                 title: "Delete downloaded model",
-                subtitle: "Remove the local model and send Yemma back to setup.",
+                subtitle: "Remove the optional Gemma 4 files from this iPhone.",
                 isDisabled: modelDownloader.modelPath == nil
             ) {
                 showDeleteModelConfirmation = true

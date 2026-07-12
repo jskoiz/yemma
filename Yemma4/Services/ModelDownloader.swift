@@ -27,6 +27,8 @@ enum SetupRecoveryAction {
 struct AppSetupSnapshot {
     enum OnboardingPhase: String {
         case simulator
+        case appleReady
+        case appleUnavailable
         case intro
         case downloading
         case paused
@@ -38,6 +40,10 @@ struct AppSetupSnapshot {
             switch self {
             case .simulator:
                 return "desktopcomputer"
+            case .appleReady:
+                return "sparkles"
+            case .appleUnavailable:
+                return "exclamationmark.triangle.fill"
             case .intro:
                 return "arrow.down.circle"
             case .downloading:
@@ -55,6 +61,9 @@ struct AppSetupSnapshot {
     }
 
     let supportsLocalModelRuntime: Bool
+    let selectedRuntime: InferenceRuntime
+    let appleFoundationModelAvailability: AppleFoundationModelAvailability
+    let supportsImageInput: Bool
     let isDownloaded: Bool
     let isDownloading: Bool
     let canResumeDownload: Bool
@@ -76,6 +85,9 @@ struct AppSetupSnapshot {
         llmService: LLMService
     ) {
         self.supportsLocalModelRuntime = supportsLocalModelRuntime
+        selectedRuntime = llmService.selectedRuntime
+        appleFoundationModelAvailability = llmService.appleFoundationModelAvailability
+        supportsImageInput = llmService.supportsImageInput
         isDownloaded = modelDownloader.isDownloaded
         isDownloading = modelDownloader.isDownloading
         canResumeDownload = modelDownloader.canResumeDownload
@@ -93,11 +105,19 @@ struct AppSetupSnapshot {
     }
 
     var canOpenChatShell: Bool {
-        supportsLocalModelRuntime && (isDownloaded || isModelLoading || isTextModelReady)
+        guard supportsLocalModelRuntime else { return false }
+
+        switch selectedRuntime {
+        case .appleFoundationModel:
+            return isTextModelReady
+        case .gemma4:
+            return isDownloaded || isModelLoading || isTextModelReady
+        }
     }
 
     var hasModelPreparationError: Bool {
         supportsLocalModelRuntime
+            && selectedRuntime == .gemma4
             && isDownloaded
             && !isTextModelReady
             && !isModelLoading
@@ -105,6 +125,11 @@ struct AppSetupSnapshot {
     }
 
     var visibleErrorMessage: String? {
+        if selectedRuntime == .appleFoundationModel,
+           !appleFoundationModelAvailability.isAvailable {
+            return appleFoundationModelAvailability.detail
+        }
+
         if hasModelPreparationError {
             return modelLoadError
         }
@@ -115,6 +140,10 @@ struct AppSetupSnapshot {
     func onboardingPhase(isStartingDownload: Bool = false) -> OnboardingPhase {
         if !supportsLocalModelRuntime {
             return .simulator
+        }
+
+        if selectedRuntime == .appleFoundationModel {
+            return appleFoundationModelAvailability.isAvailable ? .appleReady : .appleUnavailable
         }
 
         if hasModelPreparationError || downloadError != nil {
@@ -139,6 +168,10 @@ struct AppSetupSnapshot {
     var chatStatusText: String {
         if !supportsLocalModelRuntime {
             return "Simulator mode with mock replies."
+        }
+
+        if selectedRuntime == .appleFoundationModel {
+            return appleFoundationModelAvailability.title
         }
 
         if isDownloading {
@@ -169,6 +202,12 @@ struct AppSetupSnapshot {
             return nil
         }
 
+        if selectedRuntime == .appleFoundationModel {
+            return appleFoundationModelAvailability.isAvailable
+                ? "The built-in model runs locally without a Yemma model download."
+                : appleFoundationModelAvailability.detail
+        }
+
         if isDownloading {
             let percent = Int(downloadProgress * 100)
             if let estimatedSecondsRemaining {
@@ -197,16 +236,26 @@ struct AppSetupSnapshot {
     }
 
     var chatStatusProgress: Double? {
-        guard supportsLocalModelRuntime, isDownloading else { return nil }
+        guard supportsLocalModelRuntime, selectedRuntime == .gemma4, isDownloading else {
+            return nil
+        }
         return downloadProgress
     }
 
     var isShowingChatFailure: Bool {
-        supportsLocalModelRuntime && (downloadError != nil || hasModelPreparationError)
+        guard supportsLocalModelRuntime else { return false }
+
+        if selectedRuntime == .appleFoundationModel {
+            return !appleFoundationModelAvailability.isAvailable
+        }
+
+        return downloadError != nil || hasModelPreparationError
     }
 
     var chatRecoveryAction: SetupRecoveryAction? {
-        guard supportsLocalModelRuntime, !isDownloading else {
+        guard supportsLocalModelRuntime,
+              selectedRuntime == .gemma4,
+              !isDownloading else {
             return nil
         }
 
@@ -227,6 +276,7 @@ struct AppSetupSnapshot {
 
     var shouldShowStartupOverlay: Bool {
         supportsLocalModelRuntime
+            && selectedRuntime == .gemma4
             && isDownloaded
             && !isTextModelReady
             && modelLoadError == nil

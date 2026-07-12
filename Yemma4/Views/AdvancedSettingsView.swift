@@ -10,6 +10,8 @@ struct AdvancedSettingsView: View {
     @State private var diagnosticsCopied = false
     @State private var showDiagnostics = false
     @State private var showEventLog = false
+    @State private var isSelectingRuntime = false
+    @State private var runtimeSelectionError: String?
 
     let onShowSetupPage: (() -> Void)?
     let onRunDebugScenario: ((DebugInferenceScenario) -> Void)?
@@ -35,6 +37,7 @@ struct AdvancedSettingsView: View {
             ) { headerHeight in
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: AppTheme.Layout.sectionSpacing) {
+                        runtimeSection
                         overviewSection
                         modelControlsSection
                         advancedSection
@@ -68,6 +71,19 @@ struct AdvancedSettingsView: View {
         } message: {
             Text("The recent diagnostics log is on the pasteboard.")
         }
+        .alert(
+            "Unable to Switch Models",
+            isPresented: Binding(
+                get: { runtimeSelectionError != nil },
+                set: { if !$0 { runtimeSelectionError = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) {
+                runtimeSelectionError = nil
+            }
+        } message: {
+            Text(runtimeSelectionError ?? "The current model is still stopping.")
+        }
     }
 
     private var header: some View {
@@ -97,6 +113,24 @@ struct AdvancedSettingsView: View {
         .padding(.horizontal, 4)
     }
 
+    private var runtimeSection: some View {
+        UtilitySection("Choose AI model") {
+            ForEach(InferenceRuntime.allCases) { runtime in
+                if runtime != .appleFoundationModel {
+                    UtilitySectionSeparator()
+                }
+
+                Button {
+                    Task { await selectRuntime(runtime) }
+                } label: {
+                    runtimeOptionRow(runtime)
+                }
+                .buttonStyle(.plain)
+                .disabled(isSelectingRuntime)
+            }
+        }
+    }
+
     private var overviewSection: some View {
         UtilitySection("Model at a glance") {
             infoRow(
@@ -108,21 +142,104 @@ struct AdvancedSettingsView: View {
             infoRow(
                 icon: "cube.transparent",
                 title: "Runtime",
-                detail: "Gemma 4 MLX"
+                detail: llmService.selectedRuntime.runtimeName
             )
             UtilitySectionSeparator()
             infoRow(
                 icon: "shippingbox.circle",
                 title: "Model source",
-                detail: Gemma4MLXSupport.repositoryID
+                detail: modelSource
             )
             UtilitySectionSeparator()
             infoRow(
                 icon: "photo.on.rectangle",
-                title: "Prompt route",
-                detail: "Chat multimodal"
+                title: "Input capability",
+                detail: llmService.supportsImageInput ? "Text and images" : "Text only"
             )
+
+            if llmService.selectedRuntime == .appleFoundationModel {
+                UtilitySectionSeparator()
+                infoRow(
+                    icon: "checkmark.circle",
+                    title: "Availability",
+                    detail: llmService.appleFoundationModelAvailability.title
+                )
+            }
         }
+    }
+
+    private var modelSource: String {
+        switch llmService.selectedRuntime {
+        case .appleFoundationModel:
+            return "Built into iOS"
+        case .gemma4:
+            return Gemma4MLXSupport.repositoryID
+        }
+    }
+
+    private func runtimeOptionRow(_ runtime: InferenceRuntime) -> some View {
+        HStack(alignment: .top, spacing: 14) {
+            Image(systemName: runtime == .appleFoundationModel ? "sparkles" : "cube.transparent")
+                .frame(width: AppTheme.Layout.rowIconSize)
+                .foregroundStyle(AppTheme.textPrimary)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(runtime.title)
+                    .font(AppTheme.Typography.utilityRowTitle)
+                    .foregroundStyle(AppTheme.textPrimary)
+
+                Text(runtimeOptionDetail(runtime))
+                    .font(AppTheme.Typography.utilityCaption)
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 8)
+
+            if isSelectingRuntime && runtime != llmService.selectedRuntime {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(AppTheme.accent)
+            } else if runtime == llmService.selectedRuntime {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(AppTheme.accent)
+            }
+        }
+        .utilityRowPadding()
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(runtime == llmService.selectedRuntime ? .isSelected : [])
+    }
+
+    private func runtimeOptionDetail(_ runtime: InferenceRuntime) -> String {
+        switch runtime {
+        case .appleFoundationModel:
+            return llmService.appleFoundationModelAvailability.isAvailable
+                ? runtime.detail
+                : llmService.appleFoundationModelAvailability.detail
+        case .gemma4:
+            return runtime.detail
+        }
+    }
+
+    @MainActor
+    private func selectRuntime(_ runtime: InferenceRuntime) async {
+        guard runtime != llmService.selectedRuntime else { return }
+        guard !isSelectingRuntime else { return }
+
+        isSelectingRuntime = true
+        defer { isSelectingRuntime = false }
+        guard await llmService.selectRuntime(runtime) else {
+            runtimeSelectionError = llmService.lastError
+                ?? "The current model is still stopping. Try again in a moment."
+            return
+        }
+        AppHaptics.selection()
+        diagnostics.record(
+            "Inference runtime selected from settings",
+            category: "settings",
+            metadata: ["runtime": runtime.rawValue]
+        )
     }
 
     private var modelControlsSection: some View {
@@ -178,7 +295,7 @@ struct AdvancedSettingsView: View {
 
                 Spacer()
 
-                Text(tokenLabel(llmService.maxResponseTokens))
+                Text(tokenLabel(llmService.effectiveMaxResponseTokens))
                     .font(AppTheme.Typography.utilityRowDetail)
                     .foregroundStyle(AppTheme.textSecondary)
             }
@@ -198,7 +315,7 @@ struct AdvancedSettingsView: View {
                 }
             } label: {
                 HStack {
-                    Text(tokenLabel(llmService.maxResponseTokens))
+                    Text(tokenLabel(llmService.effectiveMaxResponseTokens))
                         .font(AppTheme.Typography.utilityRowTitle)
                         .foregroundStyle(AppTheme.textPrimary)
 
@@ -259,7 +376,7 @@ struct AdvancedSettingsView: View {
                     utilityActionRow(
                         icon: "sparkles.rectangle.stack",
                         title: "Setup page",
-                        detail: "Go back anytime to view download progress and local setup."
+                        detail: setupPageDetail
                     )
                 }
                 .buttonStyle(.plain)
@@ -283,6 +400,15 @@ struct AdvancedSettingsView: View {
                 UtilitySectionSeparator(leadingInset: AppTheme.Layout.rowHorizontalPadding)
                 diagnosticsContent
             }
+        }
+    }
+
+    private var setupPageDetail: String {
+        switch llmService.selectedRuntime {
+        case .appleFoundationModel:
+            return "View Apple model availability or choose the optional Gemma download."
+        case .gemma4:
+            return "View Gemma download progress and local setup."
         }
     }
 

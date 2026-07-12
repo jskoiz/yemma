@@ -72,8 +72,37 @@ private final class BoundedJoinState: @unchecked Sendable {
     }
 }
 
+private final class GenerationStartGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var isOpen = false
+    private var continuation: CheckedContinuation<Void, Never>?
+
+    func wait() async {
+        await withCheckedContinuation { continuation in
+            lock.lock()
+            if isOpen {
+                lock.unlock()
+                continuation.resume()
+            } else {
+                self.continuation = continuation
+                lock.unlock()
+            }
+        }
+    }
+
+    func open() {
+        lock.lock()
+        isOpen = true
+        let continuation = continuation
+        self.continuation = nil
+        lock.unlock()
+        continuation?.resume()
+    }
+}
+
 enum LLMServiceError: LocalizedError {
     case modelNotLoaded
+    case gemmaRuntimeNotSelected
     case modelLoadFailed(path: String)
     case assetValidationFailed(Error)
     case processorFailed(Error)
@@ -82,6 +111,8 @@ enum LLMServiceError: LocalizedError {
         switch self {
         case .modelNotLoaded:
             return "No MLX model bundle is loaded."
+        case .gemmaRuntimeNotSelected:
+            return "Select Gemma 4 before loading its model bundle."
         case let .modelLoadFailed(path):
             return "Failed to load the MLX model bundle at \(path)."
         case let .assetValidationFailed(error):
@@ -529,10 +560,11 @@ private struct Gemma4ResponseTokenParser {
 final class LLMService: @unchecked Sendable {
     var isModelLoaded = false
     var isModelLoading = false
-    var isVisionReady = false
+    private var isMLXVisionReady = false
     var isGenerating = false
+    private(set) var isSwitchingRuntime = false
     var temperature: Double {
-        didSet { UserDefaults.standard.set(temperature, forKey: Self.temperatureDefaultsKey) }
+        didSet { defaults.set(temperature, forKey: Self.temperatureDefaultsKey) }
     }
     var maxResponseTokens: Int {
         didSet {
@@ -542,15 +574,30 @@ final class LLMService: @unchecked Sendable {
                 return
             }
 
-            UserDefaults.standard.set(maxResponseTokens, forKey: Self.maxTokensDefaultsKey)
+            defaults.set(maxResponseTokens, forKey: Self.maxTokensDefaultsKey)
         }
     }
+    private(set) var selectedRuntime: InferenceRuntime
+    private(set) var appleFoundationModelAvailability: AppleFoundationModelAvailability
     var lastError: String?
     var modelLoadStage: ModelLoadStage = .idle
     var lastGenerationStats: GenerationDebugStats?
 
     var isTextModelReady: Bool {
-        isModelLoaded
+        switch selectedRuntime {
+        case .appleFoundationModel:
+            return appleFoundationModelAvailability.isAvailable
+        case .gemma4:
+            return isModelLoaded
+        }
+    }
+
+    var isVisionReady: Bool {
+        selectedRuntime == .gemma4 && isMLXVisionReady
+    }
+
+    var supportsImageInput: Bool {
+        selectedRuntime.supportsImageInput
     }
 
     static let defaultTemperature: Double = ResponseStylePreset.balanced.temperature
@@ -558,6 +605,7 @@ final class LLMService: @unchecked Sendable {
     static let supportedMaxResponseTokenOptions = [256, 512, 1024, 2048, 4096]
     private static let temperatureDefaultsKey = "llm_temperature"
     private static let maxTokensDefaultsKey = "llm_maxResponseTokens"
+    private static let selectedRuntimeDefaultsKey = "llm_selectedRuntime"
     private static let baseSystemPrompt = """
         You are Yemma, a helpful on-device assistant.
         Be accurate, clear, and direct.
@@ -574,14 +622,25 @@ final class LLMService: @unchecked Sendable {
     @ObservationIgnored private var generationTask: Task<Void, Never>?
     @ObservationIgnored private var activeGenerationID: UUID?
     @ObservationIgnored private var memoryWarningObserver: NSObjectProtocol?
+    @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored private let stateLock = NSLock()
     @ObservationIgnored private let logger = Logger(
         subsystem: Yemma4AppConfiguration.bundleIdentifier,
         category: "LLMService"
     )
 
-    init() {
-        let defaults = UserDefaults.standard
+    init(
+        defaults: UserDefaults = .standard,
+        appleAvailability: AppleFoundationModelAvailability? = nil
+    ) {
+        self.defaults = defaults
+        let resolvedAppleAvailability = appleAvailability
+            ?? AppleFoundationModelRuntime.currentAvailability()
+        appleFoundationModelAvailability = resolvedAppleAvailability
+        selectedRuntime = InferenceRuntime.initialSelection(
+            persistedValue: defaults.string(forKey: Self.selectedRuntimeDefaultsKey),
+            appleAvailability: resolvedAppleAvailability
+        )
         let savedTemperature = defaults.object(forKey: Self.temperatureDefaultsKey) as? Double
         let savedMaxResponseTokens = defaults.object(forKey: Self.maxTokensDefaultsKey) as? Int
 
@@ -653,10 +712,59 @@ final class LLMService: @unchecked Sendable {
         maxResponseTokens = Self.defaultMaxResponseTokens
     }
 
+    @MainActor
+    func refreshAppleFoundationModelAvailability() {
+        let availability = AppleFoundationModelRuntime.currentAvailability()
+        guard availability != appleFoundationModelAvailability else { return }
+
+        appleFoundationModelAvailability = availability
+        AppDiagnostics.shared.record(
+            "Apple Foundation Model availability changed",
+            category: "model",
+            metadata: ["availability": String(describing: availability)]
+        )
+    }
+
+    @MainActor
+    @discardableResult
+    func selectRuntime(_ runtime: InferenceRuntime) async -> Bool {
+        guard runtime != selectedRuntime else { return true }
+        guard !isSwitchingRuntime else { return false }
+
+        isSwitchingRuntime = true
+        defer { isSwitchingRuntime = false }
+
+        await stopGeneration()
+        guard await waitForGenerationToDrain() else {
+            lastError = "The current model is still stopping. Try switching again in a moment."
+            AppDiagnostics.shared.record(
+                "Inference runtime switch deferred",
+                category: "model",
+                metadata: ["runtime": runtime.rawValue]
+            )
+            return false
+        }
+        if runtime == .appleFoundationModel {
+            guard await unloadModel() else { return false }
+            refreshAppleFoundationModelAvailability()
+        }
+
+        selectedRuntime = runtime
+        defaults.set(runtime.rawValue, forKey: Self.selectedRuntimeDefaultsKey)
+        lastError = nil
+
+        AppDiagnostics.shared.record(
+            "Inference runtime selected",
+            category: "model",
+            metadata: ["runtime": runtime.rawValue]
+        )
+        return true
+    }
+
     var activeResponseStylePreset: ResponseStylePreset? {
         ResponseStylePreset.matching(
             temperature: temperature,
-            maxResponseTokens: maxResponseTokens
+            maxResponseTokens: effectiveMaxResponseTokens
         )
     }
 
@@ -665,10 +773,23 @@ final class LLMService: @unchecked Sendable {
     }
 
     var availableMaxResponseTokenOptions: [Int] {
-        Self.availableMaxResponseTokenOptions()
+        if selectedRuntime == .appleFoundationModel {
+            return [256, 512, 1024]
+        }
+        return Self.availableMaxResponseTokenOptions()
+    }
+
+    var effectiveMaxResponseTokens: Int {
+        selectedRuntime == .appleFoundationModel
+            ? min(maxResponseTokens, 1_024)
+            : maxResponseTokens
     }
 
     var maxResponseTokenSafetyNote: String? {
+        if selectedRuntime == .appleFoundationModel {
+            return "Apple's on-device model has a shared 4K-token context, so Yemma caps each reply at 1K tokens."
+        }
+
         let deviceCeiling = Self.maxResponseTokenCeiling()
         let highestOption = Self.supportedMaxResponseTokenOptions.last ?? deviceCeiling
 
@@ -739,6 +860,10 @@ final class LLMService: @unchecked Sendable {
     }
 
     func loadModel(from path: String) async throws {
+        guard selectedRuntime == .gemma4 else {
+            throw LLMServiceError.gemmaRuntimeNotSelected
+        }
+
         let resolvedPath = (path as NSString).expandingTildeInPath
 
         let shouldSkipLoad = withLock {
@@ -795,7 +920,7 @@ final class LLMService: @unchecked Sendable {
             await MainActor.run {
                 isModelLoaded = true
                 isModelLoading = false
-                isVisionReady = true
+                isMLXVisionReady = true
                 modelLoadStage = .ready
                 lastError = nil
             }
@@ -817,6 +942,25 @@ final class LLMService: @unchecked Sendable {
             return makeSimulatorStream(prompt: prompt, history: history)
         }
 
+        guard !isSwitchingRuntime else {
+            Task { @MainActor in
+                self.lastError = "The on-device model is still switching. Try again in a moment."
+            }
+            return Self.finishedStream()
+        }
+
+        switch selectedRuntime {
+        case .appleFoundationModel:
+            return generateWithAppleFoundationModel(prompt: prompt, history: history)
+        case .gemma4:
+            return generateWithGemma4(prompt: prompt, history: history)
+        }
+    }
+
+    private func generateWithGemma4(
+        prompt: PromptMessageInput,
+        history: [PromptMessageInput]
+    ) -> AsyncStream<String> {
         let container = withLock { modelContainer }
         guard let container else {
             // Route the Observable mutation through the main actor like every other
@@ -885,7 +1029,9 @@ final class LLMService: @unchecked Sendable {
         let generationID = UUID()
 
         let stream = AsyncStream<String> { continuation in
+            let startGate = GenerationStartGate()
             let task = Task {
+                await startGate.wait()
                 do {
                     let parameters = self.generationParameters(for: conversation)
                     let rawTokenStream = try await container.perform { context in
@@ -1065,6 +1211,7 @@ final class LLMService: @unchecked Sendable {
                 self?.isGenerating = true
                 self?.lastError = nil
                 self?.lastGenerationStats = nil
+                startGate.open()
             }
 
             continuation.onTermination = { @Sendable _ in
@@ -1073,6 +1220,142 @@ final class LLMService: @unchecked Sendable {
         }
 
         return stream
+    }
+
+    private func generateWithAppleFoundationModel(
+        prompt: PromptMessageInput,
+        history: [PromptMessageInput]
+    ) -> AsyncStream<String> {
+        let availability = appleFoundationModelAvailability
+        guard availability.isAvailable else {
+            let message = AppleFoundationModelRuntimeError.unavailable(availability).localizedDescription
+            Task { @MainActor in
+                self.lastError = message
+            }
+            return Self.finishedStream()
+        }
+
+        guard prompt.images.isEmpty else {
+            let message = AppleFoundationModelRuntimeError.imagesUnsupported.localizedDescription
+            Task { @MainActor in
+                self.lastError = message
+            }
+            return Self.finishedStream()
+        }
+
+        guard history.allSatisfy({ $0.images.isEmpty }) else {
+            let message = AppleFoundationModelRuntimeError.imageHistoryUnsupported.localizedDescription
+            Task { @MainActor in
+                self.lastError = message
+            }
+            return Self.finishedStream()
+        }
+
+        guard #available(iOS 26.0, *) else {
+            let message = AppleFoundationModelRuntimeError
+                .unavailable(.requiresIOS26)
+                .localizedDescription
+            Task { @MainActor in
+                self.lastError = message
+            }
+            return Self.finishedStream()
+        }
+
+        let generationID = UUID()
+        let generationStartUptime = ProcessInfo.processInfo.systemUptime
+        let instructions = appleInstructions(for: prompt)
+
+        AppDiagnostics.shared.record(
+            "Generation requested",
+            category: "generation",
+            metadata: [
+                "historyMessages": history.count,
+                "images": 0,
+                "runtime": selectedRuntime.rawValue,
+                "style": activeResponseStylePreset?.rawValue ?? "custom"
+            ]
+        )
+
+        return AsyncStream { continuation in
+            let startGate = GenerationStartGate()
+            let task = Task {
+                await startGate.wait()
+                do {
+                    try await AppleFoundationModelRuntime.streamResponse(
+                        instructions: instructions,
+                        history: history,
+                        prompt: prompt,
+                        temperature: temperature,
+                        maximumResponseTokens: effectiveMaxResponseTokens
+                    ) { delta in
+                        continuation.yield(delta)
+                    }
+
+                    AppDiagnostics.shared.record(
+                        "Generation finished",
+                        category: "generation",
+                        metadata: [
+                            "elapsedSeconds": String(
+                                format: "%.2f",
+                                max(ProcessInfo.processInfo.systemUptime - generationStartUptime, 0)
+                            ),
+                            "runtime": InferenceRuntime.appleFoundationModel.rawValue
+                        ]
+                    )
+                } catch is CancellationError {
+                    // User-initiated cancellation is an expected terminal state.
+                } catch {
+                    if !Task.isCancelled {
+                        await self.setLastError(error.localizedDescription)
+                        AppDiagnostics.shared.record(
+                            "Generation failed",
+                            category: "generation",
+                            metadata: [
+                                "error": error.localizedDescription,
+                                "runtime": InferenceRuntime.appleFoundationModel.rawValue
+                            ]
+                        )
+                    }
+                }
+
+                await self.finishGeneration(generationID: generationID)
+                continuation.finish()
+            }
+
+            publishGenerationTask(task, generationID: generationID)
+
+            Task { @MainActor [weak self] in
+                self?.isGenerating = true
+                self?.lastError = nil
+                self?.lastGenerationStats = nil
+                startGate.open()
+            }
+
+            continuation.onTermination = { @Sendable _ in
+                task.cancel()
+            }
+        }
+    }
+
+    private func appleInstructions(for prompt: PromptMessageInput) -> String {
+        var instructions = [Self.baseSystemPrompt]
+
+        if let preset = activeResponseStylePreset {
+            instructions.append(preset.instructionPrompt)
+            instructions.append(preset.lengthTargetPrompt)
+        }
+
+        if let taskHint = Self.promptTaskHint(for: prompt.text) {
+            instructions.append(taskHint.instructionPrompt)
+        }
+
+        return instructions.joined(separator: "\n\n")
+    }
+
+    private static func finishedStream() -> AsyncStream<String> {
+        AsyncStream { continuation in
+            continuation.finish()
+        }
     }
 
     func stopGeneration() async {
@@ -1091,6 +1374,24 @@ final class LLMService: @unchecked Sendable {
         await MainActor.run {
             isGenerating = false
         }
+    }
+
+    private func waitForGenerationToDrain() async -> Bool {
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: .seconds(2))
+
+        while withLock({ activeGenerationID != nil }) {
+            if clock.now >= deadline {
+                return false
+            }
+            do {
+                try await Task.sleep(for: .milliseconds(50))
+            } catch {
+                return false
+            }
+        }
+
+        return true
     }
 
     /// Awaits a generation task's completion, but only up to a short bound.
@@ -1135,8 +1436,17 @@ final class LLMService: @unchecked Sendable {
         lastError = nil
     }
 
-    func unloadModel() async {
+    @discardableResult
+    func unloadModel() async -> Bool {
         await stopGeneration()
+        guard await waitForGenerationToDrain() else {
+            await setLastError("The current model is still stopping. Try again in a moment.")
+            AppDiagnostics.shared.record(
+                "MLX model unload deferred",
+                category: "model"
+            )
+            return false
+        }
         withLock {
             modelContainer = nil
             loadedModelPath = nil
@@ -1144,11 +1454,12 @@ final class LLMService: @unchecked Sendable {
         await MainActor.run {
             isModelLoaded = false
             isModelLoading = false
-            isVisionReady = false
+            isMLXVisionReady = false
             modelLoadStage = .idle
             lastError = nil
         }
         AppDiagnostics.shared.record("MLX model unloaded", category: "model")
+        return true
     }
 
     private func finishGeneration(generationID finishedGenerationID: UUID) async {
@@ -1174,7 +1485,7 @@ final class LLMService: @unchecked Sendable {
         await MainActor.run {
             lastError = error.localizedDescription
             isModelLoaded = hasLoadedModel
-            isVisionReady = hasLoadedModel
+            isMLXVisionReady = hasLoadedModel
             isModelLoading = false
             modelLoadStage = hasLoadedModel ? .ready : .failed
         }
@@ -1516,7 +1827,9 @@ private extension LLMService {
         let generationID = UUID()
 
         return AsyncStream { continuation in
+            let startGate = GenerationStartGate()
             let task = Task { [weak self] in
+                await startGate.wait()
                 for chunk in response.map(String.init) {
                     if Task.isCancelled {
                         break
@@ -1536,6 +1849,7 @@ private extension LLMService {
                 self?.isGenerating = true
                 self?.lastError = nil
                 self?.lastGenerationStats = nil
+                startGate.open()
             }
 
             continuation.onTermination = { @Sendable _ in
@@ -1609,7 +1923,7 @@ private extension LLMService {
         }
 
         return """
-        Simulator mode reply: the local UI loop is working, but MLX inference still requires a physical iPhone.
+        Simulator mode reply: the local UI loop is working, but real on-device inference still requires a physical iPhone.
 
         Prompt received: \(promptText.isEmpty ? "[image only]" : promptText)
 

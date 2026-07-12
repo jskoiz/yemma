@@ -13,6 +13,7 @@
 		38135214F3C193EF4A21DDEE /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 53CB1EB0E92750BF686F214C /* LaunchScreen.storyboard */; };
 		8804C30D1CAED09270D51D6D /* LLMService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70EEE36ABE229B869B690BFB /* LLMService.swift */; };
 		8AA2B0C32D410A8900E8C001 /* AppDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AA2B0C22D410A8900E8C001 /* AppDiagnostics.swift */; };
+		A3000001 /* AppleFoundationModelRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3000002 /* AppleFoundationModelRuntime.swift */; };
 		B10000001 /* Yemma4App.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000002 /* Yemma4App.swift */; };
 		B10000003 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000004 /* ContentView.swift */; };
 		B10000005 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B10000006 /* Assets.xcassets */; };
@@ -65,6 +66,7 @@
 		9F1B5296369F631217B7F995 /* ChatMessage.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ChatMessage.swift; sourceTree = "<group>"; };
 		A1000002 /* RichMessageText.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RichMessageText.swift; sourceTree = "<group>"; };
 		A2000002 /* AdvancedSettingsView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AdvancedSettingsView.swift; sourceTree = "<group>"; };
+		A3000002 /* AppleFoundationModelRuntime.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AppleFoundationModelRuntime.swift; sourceTree = "<group>"; };
 		B10000002 /* Yemma4App.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Yemma4App.swift; sourceTree = "<group>"; };
 		B10000004 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		B10000006 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -218,6 +220,7 @@
 			isa = PBXGroup;
 			children = (
 				8AA2B0C22D410A8900E8C001 /* AppDiagnostics.swift */,
+				A3000002 /* AppleFoundationModelRuntime.swift */,
 				F1000002 /* BackgroundModelDownloadCoordinator.swift */,
 				E1000013 /* Gemma4SmokeAutomation.swift */,
 				70EEE36ABE229B869B690BFB /* LLMService.swift */,
@@ -363,6 +366,7 @@
 				B10000003 /* ContentView.swift in Sources */,
 				C18F96B6430B9FFB84F7095B /* ChatMessage.swift in Sources */,
 				8AA2B0C32D410A8900E8C001 /* AppDiagnostics.swift in Sources */,
+				A3000001 /* AppleFoundationModelRuntime.swift in Sources */,
 				F1000001 /* BackgroundModelDownloadCoordinator.swift in Sources */,
 				E1000012 /* Gemma4SmokeAutomation.swift in Sources */,
 				E1000006 /* MLXModelSupport.swift in Sources */,

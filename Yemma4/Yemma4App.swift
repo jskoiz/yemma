@@ -192,7 +192,10 @@ public struct Yemma4App: App {
                         metadata: ["elapsedMs": StartupTiming.elapsedMs()]
                     )
                     Task {
-                        await modelDownloader.appDidBecomeActive()
+                        llmService.refreshAppleFoundationModelAvailability()
+                        if llmService.selectedRuntime == .gemma4 {
+                            await modelDownloader.appDidBecomeActive()
+                        }
                     }
                 }
                 .onChange(of: scenePhase) { _, newPhase in
@@ -208,7 +211,10 @@ public struct Yemma4App: App {
                     switch newPhase {
                     case .active:
                         Task {
-                            await modelDownloader.appDidBecomeActive()
+                            llmService.refreshAppleFoundationModelAvailability()
+                            if llmService.selectedRuntime == .gemma4 {
+                                await modelDownloader.appDidBecomeActive()
+                            }
                         }
                     case .background:
                         modelDownloader.appDidEnterBackground()

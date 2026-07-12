@@ -159,4 +159,4 @@ Representative commits:
 
 ## Current Runtime
 
-Yemma now ships one Swift-native MLX Gemma 4 runtime for text and image prompts. The earlier `llama.cpp` and LiteRT work above is retained as dated project history and is no longer part of the product build.
+Yemma now uses Apple's built-in `SystemLanguageModel.default` for zero-download text chat on eligible iOS 26+ devices. The Swift-native MLX Gemma 4 runtime remains an explicit optional download for text and image prompts and the local choice on older or Apple Intelligence-ineligible devices. The earlier `llama.cpp` and LiteRT work above is retained as dated project history and is no longer part of the product build.
