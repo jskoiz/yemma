@@ -123,6 +123,41 @@ enum LLMServiceError: LocalizedError {
     }
 }
 
+struct ModelLoadTicket: Equatable, Sendable {
+    let revision: UInt64
+    let path: String
+}
+
+struct ModelLoadCoordinator: Sendable {
+    private(set) var revision: UInt64 = 0
+    private(set) var loadingPath: String?
+
+    mutating func begin(path: String) -> ModelLoadTicket? {
+        guard loadingPath == nil else { return nil }
+
+        revision &+= 1
+        loadingPath = path
+        return ModelLoadTicket(revision: revision, path: path)
+    }
+
+    func isCurrent(_ ticket: ModelLoadTicket) -> Bool {
+        revision == ticket.revision && loadingPath == ticket.path
+    }
+
+    @discardableResult
+    mutating func finish(_ ticket: ModelLoadTicket) -> Bool {
+        guard isCurrent(ticket) else { return false }
+
+        loadingPath = nil
+        return true
+    }
+
+    mutating func invalidate() {
+        revision &+= 1
+        loadingPath = nil
+    }
+}
+
 enum ResponseStylePreset: String, CaseIterable, Identifiable, Sendable {
     case focused
     case balanced
@@ -618,7 +653,7 @@ final class LLMService: @unchecked Sendable {
 
     @ObservationIgnored private var modelContainer: ModelContainer?
     @ObservationIgnored private var loadedModelPath: String?
-    @ObservationIgnored private var loadingModelPath: String?
+    @ObservationIgnored private var modelLoadCoordinator = ModelLoadCoordinator()
     @ObservationIgnored private var generationTask: Task<Void, Never>?
     @ObservationIgnored private var activeGenerationID: UUID?
     @ObservationIgnored private var memoryWarningObserver: NSObjectProtocol?
@@ -866,26 +901,18 @@ final class LLMService: @unchecked Sendable {
 
         let resolvedPath = (path as NSString).expandingTildeInPath
 
-        let shouldSkipLoad = withLock {
+        let loadTicket = withLock { () -> ModelLoadTicket? in
             if loadedModelPath == resolvedPath && modelContainer != nil {
-                return true
+                return nil
             }
 
-            if loadingModelPath != nil {
-                return true
-            }
+            return modelLoadCoordinator.begin(path: resolvedPath)
+        }
+        guard let loadTicket else { return }
 
-            loadingModelPath = resolvedPath
-            return false
-        }
-        if shouldSkipLoad {
-            return
-        }
         defer {
-            withLock {
-                if loadingModelPath == resolvedPath {
-                    loadingModelPath = nil
-                }
+            _ = withLock {
+                modelLoadCoordinator.finish(loadTicket)
             }
         }
 
@@ -907,22 +934,49 @@ final class LLMService: @unchecked Sendable {
                 try await Self.loadContainer(at: URL(fileURLWithPath: resolvedPath))
             }.value
 
+            let canActivate = await MainActor.run {
+                selectedRuntime == .gemma4 && withLock {
+                    modelLoadCoordinator.isCurrent(loadTicket)
+                }
+            }
+            guard canActivate else {
+                AppDiagnostics.shared.record(
+                    "Discarded stale MLX model load",
+                    category: "model",
+                    metadata: ["path": resolvedPath]
+                )
+                return
+            }
+
             await MainActor.run {
                 modelLoadStage = .activatingModel
             }
 
-            withLock {
-                modelContainer = loaded
-                loadedModelPath = resolvedPath
-                loadingModelPath = nil
-            }
+            let didActivate = await MainActor.run { () -> Bool in
+                guard selectedRuntime == .gemma4 else { return false }
 
-            await MainActor.run {
+                let installed = withLock { () -> Bool in
+                    guard modelLoadCoordinator.finish(loadTicket) else { return false }
+                    modelContainer = loaded
+                    loadedModelPath = resolvedPath
+                    return true
+                }
+                guard installed else { return false }
+
                 isModelLoaded = true
                 isModelLoading = false
                 isMLXVisionReady = true
                 modelLoadStage = .ready
                 lastError = nil
+                return true
+            }
+            guard didActivate else {
+                AppDiagnostics.shared.record(
+                    "Discarded stale MLX model load",
+                    category: "model",
+                    metadata: ["path": resolvedPath]
+                )
+                return
             }
 
             AppDiagnostics.shared.record(
@@ -931,6 +985,18 @@ final class LLMService: @unchecked Sendable {
                 metadata: ["path": resolvedPath]
             )
         } catch {
+            let shouldPublishFailure = withLock {
+                modelLoadCoordinator.finish(loadTicket)
+            }
+            guard shouldPublishFailure else {
+                AppDiagnostics.shared.record(
+                    "Ignored failure from stale MLX model load",
+                    category: "model",
+                    metadata: ["path": resolvedPath]
+                )
+                return
+            }
+
             logger.error("MLX model load failed: \(error.localizedDescription, privacy: .public)")
             await publishLoadFailure(error)
             throw error
@@ -1448,6 +1514,7 @@ final class LLMService: @unchecked Sendable {
             return false
         }
         withLock {
+            modelLoadCoordinator.invalidate()
             modelContainer = nil
             loadedModelPath = nil
         }

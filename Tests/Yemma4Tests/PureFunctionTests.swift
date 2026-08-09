@@ -294,6 +294,42 @@ final class LLMResponseTokenMathTests: XCTestCase {
     }
 }
 
+// MARK: - Model load coordination
+
+final class ModelLoadCoordinatorTests: XCTestCase {
+    func testInvalidationRejectsInFlightLoad() throws {
+        var coordinator = ModelLoadCoordinator()
+        let ticket = try XCTUnwrap(coordinator.begin(path: "/models/gemma"))
+
+        coordinator.invalidate()
+
+        XCTAssertFalse(coordinator.isCurrent(ticket))
+        XCTAssertFalse(coordinator.finish(ticket))
+        XCTAssertNil(coordinator.loadingPath)
+    }
+
+    func testOlderLoadCannotFinishAfterNewLoadStarts() throws {
+        var coordinator = ModelLoadCoordinator()
+        let olderTicket = try XCTUnwrap(coordinator.begin(path: "/models/older"))
+
+        coordinator.invalidate()
+        let newerTicket = try XCTUnwrap(coordinator.begin(path: "/models/newer"))
+
+        XCTAssertFalse(coordinator.finish(olderTicket))
+        XCTAssertTrue(coordinator.isCurrent(newerTicket))
+        XCTAssertTrue(coordinator.finish(newerTicket))
+        XCTAssertNil(coordinator.loadingPath)
+    }
+
+    func testSecondLoadDoesNotStartWhileCurrentLoadIsActive() throws {
+        var coordinator = ModelLoadCoordinator()
+        let ticket = try XCTUnwrap(coordinator.begin(path: "/models/gemma"))
+
+        XCTAssertNil(coordinator.begin(path: "/models/other"))
+        XCTAssertTrue(coordinator.isCurrent(ticket))
+    }
+}
+
 // MARK: - ModelDownloader ETA formatting
 
 @MainActor
