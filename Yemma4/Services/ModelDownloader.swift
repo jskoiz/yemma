@@ -9,6 +9,7 @@ public struct LocalModelResources: Sendable {
 enum SetupRecoveryAction {
     case resumeDownload
     case retryDownload
+    case retryModelDeletion
     case retryModelLoad
 
     var title: String {
@@ -17,6 +18,8 @@ enum SetupRecoveryAction {
             return "Resume download"
         case .retryDownload:
             return "Retry download"
+        case .retryModelDeletion:
+            return "Retry removal"
         case .retryModelLoad:
             return "Retry model load"
         }
@@ -68,6 +71,7 @@ struct AppSetupSnapshot {
     let isDownloading: Bool
     let isValidatingDownloadedModel: Bool
     let isDeletingModel: Bool
+    let modelDeletionError: String?
     let canResumeDownload: Bool
     let downloadError: String?
     let downloadProgress: Double
@@ -94,6 +98,7 @@ struct AppSetupSnapshot {
         isDownloading = modelDownloader.isDownloading
         isValidatingDownloadedModel = modelDownloader.isValidatingDownloadedModel
         isDeletingModel = modelDownloader.isDeletingModel
+        modelDeletionError = modelDownloader.modelDeletionError
         canResumeDownload = modelDownloader.canResumeDownload
         downloadError = modelDownloader.error
         downloadProgress = modelDownloader.downloadProgress
@@ -136,6 +141,10 @@ struct AppSetupSnapshot {
 
         if hasModelPreparationError {
             return modelLoadError
+        }
+
+        if let modelDeletionError {
+            return modelDeletionError
         }
 
         return downloadError
@@ -287,6 +296,10 @@ struct AppSetupSnapshot {
               !isValidatingDownloadedModel,
               !isDeletingModel else {
             return nil
+        }
+
+        if modelDeletionError != nil {
+            return .retryModelDeletion
         }
 
         if canResumeDownload {

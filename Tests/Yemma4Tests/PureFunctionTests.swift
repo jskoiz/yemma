@@ -465,6 +465,22 @@ final class ModelDownloaderLifecycleTests: XCTestCase {
         XCTAssertNil(downloader.modelPath)
         XCTAssertNotNil(downloader.modelDeletionError)
 
+        let appSetup = AppSetupSnapshot(
+            supportsLocalModelRuntime: true,
+            modelDownloader: downloader,
+            llmService: LLMService(
+                defaults: defaults,
+                appleAvailability: .requiresIOS26
+            )
+        )
+        XCTAssertEqual(appSetup.onboardingPhase(), .failed)
+        XCTAssertEqual(appSetup.visibleErrorMessage, downloader.modelDeletionError)
+        if case .retryModelDeletion? = appSetup.chatRecoveryAction {
+            // The failed-removal route must not fall through to retryDownload.
+        } else {
+            XCTFail("Expected a model-deletion recovery action")
+        }
+
         let retryAttempt = await downloader.deleteModel()
 
         XCTAssertTrue(retryAttempt)

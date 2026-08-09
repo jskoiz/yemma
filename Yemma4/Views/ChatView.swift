@@ -437,6 +437,10 @@ public struct ChatView: View {
             return {
                 Task { await modelDownloader.downloadModel() }
             }
+        case .retryModelDeletion:
+            return {
+                Task { _ = await modelDownloader.deleteModel() }
+            }
         case .retryModelLoad:
             return onRetryModelLoad
         case nil:
