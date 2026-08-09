@@ -437,7 +437,9 @@ struct AdvancedSettingsView: View {
             UtilitySectionSeparator()
 
             Button {
-                diagnostics.clear()
+                Task {
+                    await diagnostics.clear()
+                }
             } label: {
                 utilityActionRow(
                     icon: "trash",

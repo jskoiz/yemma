@@ -388,3 +388,66 @@ final class Yemma4AutomationConfigurationTests: XCTestCase {
         XCTAssertFalse(fromEnvironment.autorunSmokeTest)
     }
 }
+
+// MARK: - Diagnostics persistence ordering
+
+final class DiagnosticsWriterTests: XCTestCase {
+    func testOlderSnapshotCannotOverwriteNewerRevision() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanUp() }
+
+        let writer = DiagnosticsWriter(defaults: fixture.defaults)
+        let olderEvent = DiagnosticEvent(category: "test", message: "older")
+        let newerEvent = DiagnosticEvent(category: "test", message: "newer")
+
+        await writer.write(
+            events: [olderEvent, newerEvent],
+            storageKey: fixture.storageKey,
+            revision: 2
+        )
+        await writer.write(
+            events: [olderEvent],
+            storageKey: fixture.storageKey,
+            revision: 1
+        )
+
+        XCTAssertEqual(try fixture.persistedEvents().map(\.message), ["older", "newer"])
+    }
+
+    func testClearRejectsWriteFromEarlierRevision() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanUp() }
+
+        let writer = DiagnosticsWriter(defaults: fixture.defaults)
+        let event = DiagnosticEvent(category: "test", message: "stale")
+
+        await writer.clear(storageKey: fixture.storageKey, revision: 2)
+        await writer.write(events: [event], storageKey: fixture.storageKey, revision: 1)
+
+        XCTAssertNil(fixture.defaults.data(forKey: fixture.storageKey))
+    }
+
+    private func makeFixture() throws -> Fixture {
+        let suiteName = "DiagnosticsWriterTests-\(UUID().uuidString)"
+        return Fixture(
+            defaults: try XCTUnwrap(UserDefaults(suiteName: suiteName)),
+            suiteName: suiteName,
+            storageKey: "events"
+        )
+    }
+
+    private struct Fixture {
+        let defaults: UserDefaults
+        let suiteName: String
+        let storageKey: String
+
+        func persistedEvents() throws -> [DiagnosticEvent] {
+            let data = try XCTUnwrap(defaults.data(forKey: storageKey))
+            return try JSONDecoder().decode([DiagnosticEvent].self, from: data)
+        }
+
+        func cleanUp() {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+    }
+}
