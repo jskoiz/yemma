@@ -119,9 +119,10 @@ public struct ContentView: View {
             )
         }
         .task(id: llmService.selectedRuntime.rawValue) {
-            if llmService.selectedRuntime == .gemma4 {
+            if supportsLocalModelRuntime {
                 await modelDownloader.validateDownloadedModel()
-            } else {
+            }
+            if llmService.selectedRuntime == .appleFoundationModel {
                 loadedModelSignature = nil
             }
         }

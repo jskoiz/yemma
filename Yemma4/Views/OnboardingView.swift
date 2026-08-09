@@ -201,7 +201,7 @@ public struct OnboardingView: View {
                     .tint(AppTheme.accent)
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(appSetup.modelLoadStage.statusText)
+                    Text(appSetup.preparationStatusText)
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(AppTheme.textPrimary)
 
@@ -310,6 +310,16 @@ public struct OnboardingView: View {
                 actionSubtitle: "Continue from saved progress"
             )
         case .preparing:
+            if appSetup.isValidatingDownloadedModel {
+                return SetupCopy(
+                    badgeText: "Checking model",
+                    title: "Checking your saved model",
+                    message: "Confirming the local files are complete before chat opens.",
+                    note: "This check stays on your iPhone and does not load the full model into memory.",
+                    actionTitle: "Open chat",
+                    actionSubtitle: "Available after the local check finishes"
+                )
+            }
             return SetupCopy(
                 badgeText: "Almost ready",
                 title: "Almost ready",
@@ -414,10 +424,16 @@ public struct OnboardingView: View {
             ]
         case .preparing:
             return [
-                SetupStat(title: "Download", value: "Complete"),
-                SetupStat(title: "Current step", value: appSetup.modelLoadStage.statusText),
+                SetupStat(
+                    title: "Download",
+                    value: appSetup.isValidatingDownloadedModel ? "Checking" : "Complete"
+                ),
+                SetupStat(title: "Current step", value: appSetup.preparationStatusText),
                 SetupStat(title: "Internet", value: "Not needed"),
-                SetupStat(title: "Chat shell", value: "Ready now")
+                SetupStat(
+                    title: "Chat shell",
+                    value: appSetup.isValidatingDownloadedModel ? "Waiting for check" : "Ready now"
+                )
             ]
         case .ready:
             return [

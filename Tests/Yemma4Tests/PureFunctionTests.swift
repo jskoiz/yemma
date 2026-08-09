@@ -1,4 +1,5 @@
 import Foundation
+import Hub
 import XCTest
 @testable import Yemma4
 
@@ -294,6 +295,42 @@ final class LLMResponseTokenMathTests: XCTestCase {
     }
 }
 
+// MARK: - Model load coordination
+
+final class ModelLoadCoordinatorTests: XCTestCase {
+    func testInvalidationRejectsInFlightLoad() throws {
+        var coordinator = ModelLoadCoordinator()
+        let ticket = try XCTUnwrap(coordinator.begin(path: "/models/gemma"))
+
+        coordinator.invalidate()
+
+        XCTAssertFalse(coordinator.isCurrent(ticket))
+        XCTAssertFalse(coordinator.finish(ticket))
+        XCTAssertNil(coordinator.loadingPath)
+    }
+
+    func testOlderLoadCannotFinishAfterNewLoadStarts() throws {
+        var coordinator = ModelLoadCoordinator()
+        let olderTicket = try XCTUnwrap(coordinator.begin(path: "/models/older"))
+
+        coordinator.invalidate()
+        let newerTicket = try XCTUnwrap(coordinator.begin(path: "/models/newer"))
+
+        XCTAssertFalse(coordinator.finish(olderTicket))
+        XCTAssertTrue(coordinator.isCurrent(newerTicket))
+        XCTAssertTrue(coordinator.finish(newerTicket))
+        XCTAssertNil(coordinator.loadingPath)
+    }
+
+    func testSecondLoadDoesNotStartWhileCurrentLoadIsActive() throws {
+        var coordinator = ModelLoadCoordinator()
+        let ticket = try XCTUnwrap(coordinator.begin(path: "/models/gemma"))
+
+        XCTAssertNil(coordinator.begin(path: "/models/other"))
+        XCTAssertTrue(coordinator.isCurrent(ticket))
+    }
+}
+
 // MARK: - ModelDownloader ETA formatting
 
 @MainActor
@@ -321,6 +358,64 @@ final class FormatETATests: XCTestCase {
     func testHoursAndMinutes() {
         XCTAssertEqual(AppSetupSnapshot.formatETA(3660), "1h 1m")
         XCTAssertEqual(AppSetupSnapshot.formatETA(3600 + 90 * 60), "2h 30m")
+    }
+}
+
+@MainActor
+final class ModelDownloaderLifecycleTests: XCTestCase {
+    func testPersistedDirectoryIsOnlyACandidateUntilValidationCompletes() throws {
+        let suiteName = "ModelDownloaderLifecycleTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("yemma-model-candidate-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defaults.set(directory.path, forKey: ModelDownloader.persistedModelPathKey)
+
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: directory)
+        }
+
+        let downloader = ModelDownloader(defaults: defaults)
+
+        XCTAssertTrue(downloader.isValidatingDownloadedModel)
+        XCTAssertFalse(downloader.isDownloaded)
+        XCTAssertNil(downloader.modelPath)
+        XCTAssertNil(downloader.localResources)
+    }
+
+    func testDeleteModelRemovesSyntheticBundleBeforeReturning() async throws {
+        let suiteName = "ModelDownloaderLifecycleTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let downloadRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("yemma-model-delete-\(UUID().uuidString)", isDirectory: true)
+        let hub = HubApi(downloadBase: downloadRoot, useOfflineMode: true)
+        let modelDirectory = hub.localRepoLocation(
+            Hub.Repo(id: Gemma4MLXSupport.repositoryID)
+        )
+        try FileManager.default.createDirectory(at: modelDirectory, withIntermediateDirectories: true)
+        try Data("synthetic model data".utf8).write(
+            to: modelDirectory.appendingPathComponent("weights.safetensors")
+        )
+        defaults.set(modelDirectory.path, forKey: ModelDownloader.persistedModelPathKey)
+
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: downloadRoot)
+        }
+
+        let downloader = ModelDownloader(
+            hubFactory: { hub },
+            defaults: defaults
+        )
+
+        await downloader.deleteModel()
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: modelDirectory.path))
+        XCTAssertFalse(downloader.isValidatingDownloadedModel)
+        XCTAssertFalse(downloader.isDownloaded)
+        XCTAssertNil(downloader.modelPath)
+        XCTAssertNil(defaults.string(forKey: ModelDownloader.persistedModelPathKey))
     }
 }
 
@@ -386,5 +481,88 @@ final class Yemma4AutomationConfigurationTests: XCTestCase {
         )
         XCTAssertTrue(fromEnvironment.multimodalFirstTokenTraceEnabled)
         XCTAssertFalse(fromEnvironment.autorunSmokeTest)
+    }
+}
+
+// MARK: - Diagnostics persistence ordering
+
+final class DiagnosticsWriterTests: XCTestCase {
+    func testOlderSnapshotCannotOverwriteNewerRevision() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanUp() }
+
+        let writer = DiagnosticsWriter(defaults: fixture.defaults)
+        let olderEvent = DiagnosticEvent(category: "test", message: "older")
+        let newerEvent = DiagnosticEvent(category: "test", message: "newer")
+
+        await writer.write(
+            events: [olderEvent, newerEvent],
+            storageKey: fixture.storageKey,
+            revision: 2
+        )
+        await writer.write(
+            events: [olderEvent],
+            storageKey: fixture.storageKey,
+            revision: 1
+        )
+
+        XCTAssertEqual(try fixture.persistedEvents().map(\.message), ["older", "newer"])
+    }
+
+    func testClearRejectsWriteFromEarlierRevision() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanUp() }
+
+        let writer = DiagnosticsWriter(defaults: fixture.defaults)
+        let event = DiagnosticEvent(category: "test", message: "stale")
+
+        await writer.clear(storageKey: fixture.storageKey, revision: 2)
+        await writer.write(events: [event], storageKey: fixture.storageKey, revision: 1)
+
+        XCTAssertNil(fixture.defaults.data(forKey: fixture.storageKey))
+    }
+
+    func testClearPreventsLateStartupLoadFromRestoringEvents() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanUp() }
+
+        let diagnostics = AppDiagnostics(
+            defaults: fixture.defaults,
+            writer: DiagnosticsWriter(defaults: fixture.defaults),
+            storageKey: fixture.storageKey
+        )
+        let staleData = try JSONEncoder().encode([
+            DiagnosticEvent(category: "test", message: "stale")
+        ])
+
+        await diagnostics.clear()
+        fixture.defaults.set(staleData, forKey: fixture.storageKey)
+        await diagnostics.loadPersistedEventsIfNeeded()
+
+        XCTAssertTrue(diagnostics.snapshot().isEmpty)
+    }
+
+    private func makeFixture() throws -> Fixture {
+        let suiteName = "DiagnosticsWriterTests-\(UUID().uuidString)"
+        return Fixture(
+            defaults: try XCTUnwrap(UserDefaults(suiteName: suiteName)),
+            suiteName: suiteName,
+            storageKey: "events"
+        )
+    }
+
+    private struct Fixture {
+        let defaults: UserDefaults
+        let suiteName: String
+        let storageKey: String
+
+        func persistedEvents() throws -> [DiagnosticEvent] {
+            let data = try XCTUnwrap(defaults.data(forKey: storageKey))
+            return try JSONDecoder().decode([DiagnosticEvent].self, from: data)
+        }
+
+        func cleanUp() {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
     }
 }
