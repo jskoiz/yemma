@@ -211,6 +211,34 @@ final class ConversationStoreTests: XCTestCase {
         #endif
     }
 
+    func testRemovingAttachmentFilesIsScopedAndDeduplicated() throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanUp() }
+
+        let attachmentDirectory = try ConversationAttachmentStore.prepareDirectory(
+            fileManager: fixture.fileManager,
+            baseDirectoryOverride: fixture.storageRoot
+        )
+        let removedAttachmentURL = attachmentDirectory.appendingPathComponent("removed.png")
+        let retainedAttachmentURL = attachmentDirectory.appendingPathComponent("retained.png")
+        let outsideURL = fixture.storageRoot.appendingPathComponent("outside.png")
+
+        for url in [removedAttachmentURL, retainedAttachmentURL, outsideURL] {
+            try Data("image".utf8).write(to: url)
+        }
+
+        let removedCount = ConversationAttachmentStore.removeFiles(
+            at: [removedAttachmentURL, removedAttachmentURL, outsideURL],
+            fileManager: fixture.fileManager,
+            baseDirectoryOverride: fixture.storageRoot
+        )
+
+        XCTAssertEqual(removedCount, 1)
+        XCTAssertFalse(fixture.fileManager.fileExists(atPath: removedAttachmentURL.path))
+        XCTAssertTrue(fixture.fileManager.fileExists(atPath: retainedAttachmentURL.path))
+        XCTAssertTrue(fixture.fileManager.fileExists(atPath: outsideURL.path))
+    }
+
     private func makeMessage(text: String) -> ChatMessage {
         ChatMessage(
             id: UUID().uuidString,
