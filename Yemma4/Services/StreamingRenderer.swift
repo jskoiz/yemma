@@ -271,8 +271,16 @@ struct StreamingUpdatePolicy: Sendable {
     private var lastVisibleText = ""
 
     mutating func append(_ token: String, now: ContinuousClock.Instant = ContinuousClock.now) -> StreamingRenderUpdate {
+        // A token boundary is not necessarily a Character boundary. Combining
+        // marks and ZWJ sequences can merge with the previous trailing
+        // Character, so summing token.count would drift from rawText.count.
+        // Recount only that join boundary plus the new token, never rawText.
+        let previousTrailingCharacter = rawText.last.map(String.init) ?? ""
+        let previousBoundaryCount = previousTrailingCharacter.isEmpty ? 0 : 1
+        let appendedCharacterCount = (previousTrailingCharacter + token).count - previousBoundaryCount
+
         rawText.append(token)
-        rawCharacterCount += token.count
+        rawCharacterCount += appendedCharacterCount
 
         let shouldStop = StreamingRenderer.shouldStopStreaming(tailOf: rawText)
         let elapsed = now - lastFlush

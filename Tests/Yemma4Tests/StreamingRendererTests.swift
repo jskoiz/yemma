@@ -29,9 +29,22 @@ final class StreamingRendererTests: XCTestCase {
         )
     }
 
-    func testUpdatePolicyTracksASCIIAndComposedUnicodeIncrementally() {
+    func testUpdatePolicyTracksGraphemesAcrossTokenBoundaries() {
         var policy = StreamingUpdatePolicy()
-        let tokens = ["Hello ", "Cafe\u{301}", " ", "🌺", " ", "👨‍👩‍👧‍👦"]
+        let tokens = [
+            "Hello Cafe",
+            "\u{301}",
+            " ",
+            "🌺",
+            " ",
+            "👨",
+            "\u{200D}",
+            "👩",
+            "\u{200D}",
+            "👧",
+            "\u{200D}",
+            "👦",
+        ]
         let expected = tokens.joined()
         let firstUpdate = ContinuousClock.now.advanced(by: .seconds(1))
 
@@ -51,15 +64,17 @@ final class StreamingRendererTests: XCTestCase {
         var policy = StreamingUpdatePolicy()
         let firstUpdate = ContinuousClock.now.advanced(by: .seconds(1))
 
-        _ = policy.append("Hello 🌺", now: firstUpdate)
+        let initialUpdate = policy.append("Hello 🌺", now: firstUpdate)
         let stopUpdate = policy.append(
             "<|end_of_turn|>",
             now: firstUpdate.advanced(by: .milliseconds(100))
         )
 
+        XCTAssertTrue(initialUpdate.didAdvance)
+        XCTAssertEqual(initialUpdate.visibleText, "Hello 🌺")
         XCTAssertTrue(stopUpdate.shouldStop)
-        XCTAssertTrue(stopUpdate.didAdvance)
-        XCTAssertEqual(stopUpdate.visibleText, "Hello 🌺")
+        XCTAssertFalse(stopUpdate.didAdvance)
+        XCTAssertNil(stopUpdate.visibleText)
         XCTAssertEqual(policy.finalize(), "Hello 🌺")
     }
 }
