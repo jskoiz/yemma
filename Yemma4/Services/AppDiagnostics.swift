@@ -40,14 +40,23 @@ final class AppDiagnostics: @unchecked Sendable {
 
     @ObservationIgnored private let lock = NSLock()
     @ObservationIgnored private let maxEvents = 120
-    @ObservationIgnored private let storageKey = "com.avmillabs.yemma4.diagnostics.events"
+    @ObservationIgnored private let storageKey: String
     @ObservationIgnored private let logger = Logger(subsystem: Yemma4AppConfiguration.bundleIdentifier, category: "Diagnostics")
-    @ObservationIgnored private let decoder = JSONDecoder()
+    @ObservationIgnored private let defaults: UserDefaults
+    @ObservationIgnored private let writer: DiagnosticsWriter
     @ObservationIgnored private var hasLoadedPersistedEvents = false
     @ObservationIgnored private var isLoadingPersistedEvents = false
     @ObservationIgnored private var persistenceRevision: UInt64 = 0
 
-    private init() {}
+    init(
+        defaults: UserDefaults = .standard,
+        writer: DiagnosticsWriter? = nil,
+        storageKey: String = "com.avmillabs.yemma4.diagnostics.events"
+    ) {
+        self.defaults = defaults
+        self.writer = writer ?? DiagnosticsWriter(defaults: defaults)
+        self.storageKey = storageKey
+    }
 
     func record(
         _ message: String,
@@ -88,9 +97,13 @@ final class AppDiagnostics: @unchecked Sendable {
         let revision = withLock { () -> UInt64 in
             recentEvents = []
             persistenceRevision &+= 1
+            // A clear is authoritative for this process. Mark startup loading
+            // complete so a delayed read cannot restore the data just cleared.
+            hasLoadedPersistedEvents = true
+            isLoadingPersistedEvents = false
             return persistenceRevision
         }
-        await DiagnosticsWriter.shared.clear(storageKey: storageKey, revision: revision)
+        await writer.clear(storageKey: storageKey, revision: revision)
         logger.log("diagnostics: cleared")
     }
 
@@ -127,34 +140,39 @@ final class AppDiagnostics: @unchecked Sendable {
     }
 
     func loadPersistedEventsIfNeeded() async {
-        guard !hasLoadedPersistedEvents else { return }
-        guard !isLoadingPersistedEvents else { return }
-        isLoadingPersistedEvents = true
-        let loadRevision = withLock { persistenceRevision }
+        let loadRevision = withLock { () -> UInt64? in
+            guard !hasLoadedPersistedEvents, !isLoadingPersistedEvents else { return nil }
+            isLoadingPersistedEvents = true
+            return persistenceRevision
+        }
+        guard let loadRevision else { return }
 
         let storageKey = self.storageKey
-        let decoder = self.decoder
+        let defaults = self.defaults
         let decoded = await Task.detached(priority: .utility) {
-            guard let data = UserDefaults.standard.data(forKey: storageKey) else {
+            guard let data = defaults.data(forKey: storageKey) else {
                 return [DiagnosticEvent]()
             }
-            return (try? decoder.decode([DiagnosticEvent].self, from: data)) ?? []
+            return (try? JSONDecoder().decode([DiagnosticEvent].self, from: data)) ?? []
         }.value
 
         await MainActor.run {
             withLock {
+                defer {
+                    hasLoadedPersistedEvents = true
+                    isLoadingPersistedEvents = false
+                }
                 guard persistenceRevision == loadRevision else { return }
                 recentEvents = Self.trimmedEvents(decoded + recentEvents, maxEvents: maxEvents)
             }
-            hasLoadedPersistedEvents = true
-            isLoadingPersistedEvents = false
         }
     }
 
     private func persist(_ events: [DiagnosticEvent], revision: UInt64) {
         let key = self.storageKey
+        let writer = self.writer
         Task.detached(priority: .utility) {
-            await DiagnosticsWriter.shared.write(
+            await writer.write(
                 events: events,
                 storageKey: key,
                 revision: revision
@@ -176,8 +194,6 @@ final class AppDiagnostics: @unchecked Sendable {
 
 /// Serial writer actor that keeps UserDefaults I/O off the caller's thread.
 actor DiagnosticsWriter {
-    static let shared = DiagnosticsWriter()
-
     private let defaults: UserDefaults
     private let encoder = JSONEncoder()
     private var latestRevision: UInt64 = 0

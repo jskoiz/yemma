@@ -427,6 +427,26 @@ final class DiagnosticsWriterTests: XCTestCase {
         XCTAssertNil(fixture.defaults.data(forKey: fixture.storageKey))
     }
 
+    func testClearPreventsLateStartupLoadFromRestoringEvents() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanUp() }
+
+        let diagnostics = AppDiagnostics(
+            defaults: fixture.defaults,
+            writer: DiagnosticsWriter(defaults: fixture.defaults),
+            storageKey: fixture.storageKey
+        )
+        let staleData = try JSONEncoder().encode([
+            DiagnosticEvent(category: "test", message: "stale")
+        ])
+
+        await diagnostics.clear()
+        fixture.defaults.set(staleData, forKey: fixture.storageKey)
+        await diagnostics.loadPersistedEventsIfNeeded()
+
+        XCTAssertTrue(diagnostics.snapshot().isEmpty)
+    }
+
     private func makeFixture() throws -> Fixture {
         let suiteName = "DiagnosticsWriterTests-\(UUID().uuidString)"
         return Fixture(
