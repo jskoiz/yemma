@@ -61,13 +61,7 @@ struct StreamingRenderer: Sendable {
     /// Boundary markers are short (<30 chars), so checking the last ~100 chars suffices
     /// for the streaming hot path where tokens are appended incrementally.
     static func shouldStopStreaming(tailOf text: String) -> Bool {
-        let checkLength = 100
-        let tail: Substring
-        if text.count > checkLength {
-            tail = text.suffix(checkLength)
-        } else {
-            tail = text[...]
-        }
+        let tail = text.suffix(100)
         return responseBoundaryMarkers.contains { tail.contains($0) }
     }
 
@@ -270,6 +264,7 @@ struct StreamingUpdatePolicy: Sendable {
     }
 
     private(set) var rawText = ""
+    private(set) var rawCharacterCount = 0
 
     private var lastFlush = ContinuousClock.now
     private var lastRenderedRawCount = 0
@@ -277,11 +272,12 @@ struct StreamingUpdatePolicy: Sendable {
 
     mutating func append(_ token: String, now: ContinuousClock.Instant = ContinuousClock.now) -> StreamingRenderUpdate {
         rawText.append(token)
+        rawCharacterCount += token.count
 
         let shouldStop = StreamingRenderer.shouldStopStreaming(tailOf: rawText)
         let elapsed = now - lastFlush
-        let rawDelta = rawText.count - lastRenderedRawCount
-        let cadence = flushCadence(for: rawText.count)
+        let rawDelta = rawCharacterCount - lastRenderedRawCount
+        let cadence = flushCadence(for: rawCharacterCount)
         let endsClause = token.last.map { ".!?,:;)\n".contains($0) } ?? false
         let atWordBoundary =
             token.last?.isWhitespace == true
@@ -303,7 +299,7 @@ struct StreamingUpdatePolicy: Sendable {
         let didAdvance = visibleText != lastVisibleText
 
         lastFlush = now
-        lastRenderedRawCount = rawText.count
+        lastRenderedRawCount = rawCharacterCount
         lastVisibleText = visibleText
 
         return StreamingRenderUpdate(
