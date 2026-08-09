@@ -40,14 +40,23 @@ final class AppDiagnostics: @unchecked Sendable {
 
     @ObservationIgnored private let lock = NSLock()
     @ObservationIgnored private let maxEvents = 120
-    @ObservationIgnored private let storageKey = "com.avmillabs.yemma4.diagnostics.events"
+    @ObservationIgnored private let storageKey: String
     @ObservationIgnored private let logger = Logger(subsystem: Yemma4AppConfiguration.bundleIdentifier, category: "Diagnostics")
-    @ObservationIgnored private let encoder = JSONEncoder()
-    @ObservationIgnored private let decoder = JSONDecoder()
+    @ObservationIgnored private let defaults: UserDefaults
+    @ObservationIgnored private let writer: DiagnosticsWriter
     @ObservationIgnored private var hasLoadedPersistedEvents = false
     @ObservationIgnored private var isLoadingPersistedEvents = false
+    @ObservationIgnored private var persistenceRevision: UInt64 = 0
 
-    private init() {}
+    init(
+        defaults: UserDefaults = .standard,
+        writer: DiagnosticsWriter? = nil,
+        storageKey: String = "com.avmillabs.yemma4.diagnostics.events"
+    ) {
+        self.defaults = defaults
+        self.writer = writer ?? DiagnosticsWriter(defaults: defaults)
+        self.storageKey = storageKey
+    }
 
     func record(
         _ message: String,
@@ -59,17 +68,18 @@ final class AppDiagnostics: @unchecked Sendable {
         }
         let event = DiagnosticEvent(category: category, message: message, metadata: normalizedMetadata)
 
-        let snapshot = withLock { () -> [DiagnosticEvent] in
+        let persistenceRequest = withLock { () -> (events: [DiagnosticEvent], revision: UInt64) in
             var updated = recentEvents
             updated.append(event)
             if updated.count > maxEvents {
                 updated.removeFirst(updated.count - maxEvents)
             }
             recentEvents = updated
-            return updated
+            persistenceRevision &+= 1
+            return (updated, persistenceRevision)
         }
 
-        persist(snapshot)
+        persist(persistenceRequest.events, revision: persistenceRequest.revision)
         let metadataText = normalizedMetadata
             .sorted { $0.key < $1.key }
             .map { "\($0.key)=\($0.value)" }
@@ -83,11 +93,17 @@ final class AppDiagnostics: @unchecked Sendable {
         }
     }
 
-    func clear() {
-        withLock {
+    func clear() async {
+        let revision = withLock { () -> UInt64 in
             recentEvents = []
+            persistenceRevision &+= 1
+            // A clear is authoritative for this process. Mark startup loading
+            // complete so a delayed read cannot restore the data just cleared.
+            hasLoadedPersistedEvents = true
+            isLoadingPersistedEvents = false
+            return persistenceRevision
         }
-        UserDefaults.standard.removeObject(forKey: storageKey)
+        await writer.clear(storageKey: storageKey, revision: revision)
         logger.log("diagnostics: cleared")
     }
 
@@ -124,32 +140,43 @@ final class AppDiagnostics: @unchecked Sendable {
     }
 
     func loadPersistedEventsIfNeeded() async {
-        guard !hasLoadedPersistedEvents else { return }
-        guard !isLoadingPersistedEvents else { return }
-        isLoadingPersistedEvents = true
+        let loadRevision = withLock { () -> UInt64? in
+            guard !hasLoadedPersistedEvents, !isLoadingPersistedEvents else { return nil }
+            isLoadingPersistedEvents = true
+            return persistenceRevision
+        }
+        guard let loadRevision else { return }
 
         let storageKey = self.storageKey
-        let decoder = self.decoder
+        let defaults = self.defaults
         let decoded = await Task.detached(priority: .utility) {
-            guard let data = UserDefaults.standard.data(forKey: storageKey) else {
+            guard let data = defaults.data(forKey: storageKey) else {
                 return [DiagnosticEvent]()
             }
-            return (try? decoder.decode([DiagnosticEvent].self, from: data)) ?? []
+            return (try? JSONDecoder().decode([DiagnosticEvent].self, from: data)) ?? []
         }.value
 
         await MainActor.run {
-            let combinedEvents = Self.trimmedEvents(decoded + recentEvents, maxEvents: maxEvents)
-            recentEvents = combinedEvents
-            hasLoadedPersistedEvents = true
-            isLoadingPersistedEvents = false
+            withLock {
+                defer {
+                    hasLoadedPersistedEvents = true
+                    isLoadingPersistedEvents = false
+                }
+                guard persistenceRevision == loadRevision else { return }
+                recentEvents = Self.trimmedEvents(decoded + recentEvents, maxEvents: maxEvents)
+            }
         }
     }
 
-    private func persist(_ events: [DiagnosticEvent]) {
-        let encoder = self.encoder
+    private func persist(_ events: [DiagnosticEvent], revision: UInt64) {
         let key = self.storageKey
+        let writer = self.writer
         Task.detached(priority: .utility) {
-            await DiagnosticsWriter.shared.write(events: events, encoder: encoder, storageKey: key)
+            await writer.write(
+                events: events,
+                storageKey: key,
+                revision: revision
+            )
         }
     }
 
@@ -166,11 +193,27 @@ final class AppDiagnostics: @unchecked Sendable {
 }
 
 /// Serial writer actor that keeps UserDefaults I/O off the caller's thread.
-private actor DiagnosticsWriter {
-    static let shared = DiagnosticsWriter()
+actor DiagnosticsWriter {
+    private let defaults: UserDefaults
+    private let encoder = JSONEncoder()
+    private var latestRevision: UInt64 = 0
 
-    func write(events: [DiagnosticEvent], encoder: JSONEncoder, storageKey: String) {
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+    }
+
+    func write(events: [DiagnosticEvent], storageKey: String, revision: UInt64) {
+        guard revision >= latestRevision else { return }
         guard let data = try? encoder.encode(events) else { return }
-        UserDefaults.standard.set(data, forKey: storageKey)
+
+        latestRevision = revision
+        defaults.set(data, forKey: storageKey)
+    }
+
+    func clear(storageKey: String, revision: UInt64) {
+        guard revision >= latestRevision else { return }
+
+        latestRevision = revision
+        defaults.removeObject(forKey: storageKey)
     }
 }
