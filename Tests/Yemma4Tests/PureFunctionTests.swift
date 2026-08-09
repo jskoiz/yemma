@@ -448,8 +448,9 @@ final class ModelDownloaderLifecycleTests: XCTestCase {
             try? FileManager.default.removeItem(at: downloadRoot)
         }
 
+        let fileManager = FailOnceRemovalFileManager()
         let downloader = ModelDownloader(
-            fileManager: FailOnceRemovalFileManager(),
+            fileManager: fileManager,
             hubFactory: { hub },
             defaults: defaults
         )
@@ -464,28 +465,45 @@ final class ModelDownloaderLifecycleTests: XCTestCase {
         XCTAssertFalse(downloader.isDownloaded)
         XCTAssertNil(downloader.modelPath)
         XCTAssertNotNil(downloader.modelDeletionError)
+        XCTAssertTrue(defaults.bool(forKey: ModelDownloader.modelDeletionPendingKey))
+
+        await downloader.appDidBecomeActive()
+
+        XCTAssertFalse(downloader.isDownloaded)
+        XCTAssertNil(downloader.modelPath)
+        XCTAssertNotNil(downloader.modelDeletionError)
+
+        let relaunchedDownloader = ModelDownloader(
+            fileManager: fileManager,
+            hubFactory: { hub },
+            defaults: defaults
+        )
+        XCTAssertFalse(relaunchedDownloader.isDownloaded)
+        XCTAssertNil(relaunchedDownloader.modelPath)
+        XCTAssertNotNil(relaunchedDownloader.modelDeletionError)
 
         let appSetup = AppSetupSnapshot(
             supportsLocalModelRuntime: true,
-            modelDownloader: downloader,
+            modelDownloader: relaunchedDownloader,
             llmService: LLMService(
                 defaults: defaults,
                 appleAvailability: .requiresIOS26
             )
         )
         XCTAssertEqual(appSetup.onboardingPhase(), .failed)
-        XCTAssertEqual(appSetup.visibleErrorMessage, downloader.modelDeletionError)
+        XCTAssertEqual(appSetup.visibleErrorMessage, relaunchedDownloader.modelDeletionError)
         if case .retryModelDeletion? = appSetup.chatRecoveryAction {
             // The failed-removal route must not fall through to retryDownload.
         } else {
             XCTFail("Expected a model-deletion recovery action")
         }
 
-        let retryAttempt = await downloader.deleteModel()
+        let retryAttempt = await relaunchedDownloader.deleteModel()
 
         XCTAssertTrue(retryAttempt)
         XCTAssertFalse(FileManager.default.fileExists(atPath: modelDirectory.path))
-        XCTAssertNil(downloader.modelDeletionError)
+        XCTAssertNil(relaunchedDownloader.modelDeletionError)
+        XCTAssertFalse(defaults.bool(forKey: ModelDownloader.modelDeletionPendingKey))
     }
 
     private final class FailOnceRemovalFileManager: FileManager {

@@ -383,8 +383,10 @@ public final class ModelDownloader {
     @ObservationIgnored private var deletionTask: Task<Bool, Never>?
     @ObservationIgnored private var activeDeletionID: UUID?
     @ObservationIgnored private var modelLifecycleRevision: UInt64 = 0
+    @ObservationIgnored private var isModelDeletionPending = false
 
     static let persistedModelPathKey = "com.avmillabs.yemma4.modelDownloader.modelPath"
+    static let modelDeletionPendingKey = "com.avmillabs.yemma4.modelDownloader.deletionPending"
 
     public init(
         fileManager: FileManager = .default,
@@ -460,6 +462,11 @@ public final class ModelDownloader {
             return
         }
 
+        guard !isModelDeletionPending else {
+            applyPendingModelDeletionState()
+            return
+        }
+
         let validationID = UUID()
         let validationRevision = modelLifecycleRevision
         let hub = hubClient()
@@ -530,6 +537,11 @@ public final class ModelDownloader {
     public func downloadModel() async {
         if let deletionTask {
             _ = await deletionTask.value
+            return
+        }
+
+        guard !isModelDeletionPending else {
+            applyPendingModelDeletionState()
             return
         }
 
@@ -653,6 +665,7 @@ public final class ModelDownloader {
                 }
             }.value
 
+            clearModelDeletionTombstone()
             AppDiagnostics.shared.record("Deleted local MLX model bundle", category: "download")
             return true
         } catch {
@@ -669,6 +682,8 @@ public final class ModelDownloader {
     }
 
     private func unpublishModelForDeletion() {
+        isModelDeletionPending = true
+        defaults.set(true, forKey: Self.modelDeletionPendingKey)
         isDeletingModel = true
         modelPath = nil
         isDownloaded = false
@@ -679,6 +694,31 @@ public final class ModelDownloader {
         currentEstimatedBytes = Gemma4MLXSupport.approximateDownloadBytes
         error = nil
         modelDeletionError = nil
+        resetETA()
+        persistState(modelPath: nil)
+    }
+
+    private func clearModelDeletionTombstone() {
+        isModelDeletionPending = false
+        defaults.removeObject(forKey: Self.modelDeletionPendingKey)
+        modelDeletionError = nil
+        error = nil
+    }
+
+    private func applyPendingModelDeletionState() {
+        let message = modelDeletionError ?? Self.interruptedDeletionMessage
+        isModelDeletionPending = true
+        isDeletingModel = false
+        isValidatingDownloadedModel = false
+        modelPath = nil
+        isDownloaded = false
+        isDownloading = false
+        canResumeDownload = false
+        downloadProgress = 0
+        currentDownloadedBytes = 0
+        currentEstimatedBytes = Gemma4MLXSupport.approximateDownloadBytes
+        modelDeletionError = message
+        error = message
         resetETA()
         persistState(modelPath: nil)
     }
@@ -931,8 +971,15 @@ public final class ModelDownloader {
 
     private static let unsupportedRuntimeMessage =
         "Local MLX downloads are disabled in the iOS Simulator. Run Yemma on a physical iPhone for real on-device inference."
+    private static let interruptedDeletionMessage =
+        "The previous model removal did not finish. Retry removal to clear the optional Gemma files."
 
     private func restorePersistedState() {
+        if defaults.bool(forKey: Self.modelDeletionPendingKey) {
+            applyPendingModelDeletionState()
+            return
+        }
+
         guard let persistedModelPath = defaults.string(forKey: Self.persistedModelPathKey) else {
             return
         }
