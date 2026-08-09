@@ -572,7 +572,21 @@ public struct ChatView: View {
     }
 
     private func removePendingAttachment(_ attachment: Attachment) {
-        pendingAttachments.removeAll { $0.id == attachment.id }
+        guard let attachmentIndex = pendingAttachments.firstIndex(where: { $0.id == attachment.id }) else {
+            return
+        }
+
+        pendingAttachments.remove(at: attachmentIndex)
+        let removedFileCount = ConversationAttachmentStore.removeFiles(
+            at: [attachment.thumbnail, attachment.full]
+        )
+        if removedFileCount > 0 {
+            AppDiagnostics.shared.record(
+                "Removed draft attachment files",
+                category: "storage",
+                metadata: ["files": removedFileCount]
+            )
+        }
         scheduleConversationSave()
     }
 
