@@ -223,11 +223,17 @@ public struct OnboardingView: View {
                 AnimatedProgressBar(progress: appSetup.downloadProgress)
 
                 SetupStatusRow(
-                    systemImage: hasModelPreparationError ? "bolt.slash.fill" : "arrow.clockwise",
-                    title: hasModelPreparationError
-                        ? "Retry local preparation"
-                        : (appSetup.canResumeDownload ? "Resume from saved progress" : "Start setup again"),
-                    trailing: hasModelPreparationError ? "100%" : progressPercentLabel
+                    systemImage: appSetup.modelDeletionError != nil
+                        ? "externaldrive.badge.exclamationmark"
+                        : (hasModelPreparationError ? "bolt.slash.fill" : "arrow.clockwise"),
+                    title: appSetup.modelDeletionError != nil
+                        ? "Retry model removal"
+                        : (hasModelPreparationError
+                            ? "Retry local preparation"
+                            : (appSetup.canResumeDownload ? "Resume from saved progress" : "Start setup again")),
+                    trailing: appSetup.modelDeletionError != nil
+                        ? "Paused"
+                        : (hasModelPreparationError ? "100%" : progressPercentLabel)
                 )
             }
         }
@@ -310,6 +316,16 @@ public struct OnboardingView: View {
                 actionSubtitle: "Continue from saved progress"
             )
         case .preparing:
+            if appSetup.isDeletingModel {
+                return SetupCopy(
+                    badgeText: "Removing model",
+                    title: "Removing the downloaded model",
+                    message: "Yemma is removing the optional Gemma files from this iPhone.",
+                    note: "Apple's built-in model and your conversations are unaffected.",
+                    actionTitle: "Open chat",
+                    actionSubtitle: "Available after removal finishes"
+                )
+            }
             if appSetup.isValidatingDownloadedModel {
                 return SetupCopy(
                     badgeText: "Checking model",
@@ -338,6 +354,16 @@ public struct OnboardingView: View {
                 actionSubtitle: "Everything is ready on this iPhone"
             )
         case .failed:
+            if appSetup.modelDeletionError != nil {
+                return SetupCopy(
+                    badgeText: "Removal paused",
+                    title: "Model removal did not finish",
+                    message: "Yemma kept the model unavailable so partially removed files cannot be loaded.",
+                    note: "Retry removal to finish clearing the optional Gemma files.",
+                    actionTitle: "Retry removal",
+                    actionSubtitle: "Continue removing the local model"
+                )
+            }
             if hasModelPreparationError {
                 return SetupCopy(
                     badgeText: "Setup paused",
@@ -426,13 +452,17 @@ public struct OnboardingView: View {
             return [
                 SetupStat(
                     title: "Download",
-                    value: appSetup.isValidatingDownloadedModel ? "Checking" : "Complete"
+                    value: appSetup.isDeletingModel
+                        ? "Removing"
+                        : (appSetup.isValidatingDownloadedModel ? "Checking" : "Complete")
                 ),
                 SetupStat(title: "Current step", value: appSetup.preparationStatusText),
                 SetupStat(title: "Internet", value: "Not needed"),
                 SetupStat(
                     title: "Chat shell",
-                    value: appSetup.isValidatingDownloadedModel ? "Waiting for check" : "Ready now"
+                    value: appSetup.isDeletingModel
+                        ? "Waiting for removal"
+                        : (appSetup.isValidatingDownloadedModel ? "Waiting for check" : "Ready now")
                 )
             ]
         case .ready:
@@ -443,6 +473,13 @@ public struct OnboardingView: View {
                 SetupStat(title: "Offline", value: "Available")
             ]
         case .failed:
+            if appSetup.modelDeletionError != nil {
+                return [
+                    SetupStat(title: "Removal", value: "Incomplete"),
+                    SetupStat(title: "Model", value: "Unavailable"),
+                    SetupStat(title: "Next step", value: "Retry removal")
+                ]
+            }
             return [
                 SetupStat(title: "Downloaded", value: Self.formatBytes(appSetup.downloadedBytes)),
                 SetupStat(title: "Remaining", value: Self.formatBytes(appSetup.remainingDownloadBytes)),
@@ -542,6 +579,8 @@ public struct OnboardingView: View {
             onContinue?()
         case .appleUnavailable:
             Task { await selectGemmaRuntime() }
+        case .failed where appSetup.modelDeletionError != nil:
+            Task { _ = await modelDownloader.deleteModel() }
         case .failed where hasModelPreparationError:
             onRetryModelLoad?()
         case .intro, .downloading, .paused, .failed:
@@ -554,6 +593,7 @@ public struct OnboardingView: View {
         guard !isStartingDownload else { return }
         guard supportsLocalModelRuntime else { return }
         guard llmService.selectedRuntime == .gemma4 else { return }
+        guard appSetup.modelDeletionError == nil else { return }
         guard !appSetup.hasModelPreparationError else { return }
         guard !modelDownloader.isDownloading else { return }
 

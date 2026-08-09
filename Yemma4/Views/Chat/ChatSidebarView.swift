@@ -77,7 +77,7 @@ struct ChatSidebarView: View {
                     if llmService.selectedRuntime == .gemma4 {
                         guard await llmService.unloadModel() else { return }
                     }
-                    await modelDownloader.deleteModel()
+                    guard await modelDownloader.deleteModel() else { return }
                     if llmService.selectedRuntime == .gemma4 {
                         onShowOnboarding()
                     }
@@ -312,9 +312,14 @@ struct ChatSidebarView: View {
 
             destructiveRow(
                 icon: "externaldrive.badge.minus",
-                title: "Delete downloaded model",
-                subtitle: "Remove the optional Gemma 4 files from this iPhone.",
+                title: modelDownloader.modelDeletionError == nil
+                    ? "Delete downloaded model"
+                    : "Retry model removal",
+                subtitle: modelDownloader.modelDeletionError == nil
+                    ? "Remove the optional Gemma 4 files from this iPhone."
+                    : "The last removal did not finish. Tap to retry.",
                 isDisabled: modelDownloader.modelPath == nil
+                    && modelDownloader.modelDeletionError == nil
             ) {
                 showDeleteModelConfirmation = true
             }
@@ -736,7 +741,9 @@ struct ChatSidebarView: View {
 
     private var modelSizeText: String {
         guard let modelPath = modelDownloader.modelPath else {
-            return "Not downloaded"
+            return modelDownloader.modelDeletionError == nil
+                ? "Not downloaded"
+                : "Removal incomplete"
         }
 
         let totalBytes = Gemma4MLXSupport.directorySize(at: URL(fileURLWithPath: modelPath))

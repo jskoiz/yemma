@@ -26,6 +26,19 @@ struct DiagnosticEvent: Codable, Identifiable, Sendable {
         self.message = message
         self.metadata = metadata
     }
+
+    static func merged(
+        _ persistedEvents: [DiagnosticEvent],
+        with currentEvents: [DiagnosticEvent],
+        limit: Int
+    ) -> [DiagnosticEvent] {
+        var seenIDs = Set<UUID>()
+        let merged = (persistedEvents + currentEvents).filter { event in
+            seenIDs.insert(event.id).inserted
+        }
+        guard merged.count > limit else { return merged }
+        return Array(merged.suffix(limit))
+    }
 }
 
 enum DebugPreferences {
@@ -42,10 +55,10 @@ final class AppDiagnostics: @unchecked Sendable {
     @ObservationIgnored private let maxEvents = 120
     @ObservationIgnored private let storageKey: String
     @ObservationIgnored private let logger = Logger(subsystem: Yemma4AppConfiguration.bundleIdentifier, category: "Diagnostics")
-    @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored private let writer: DiagnosticsWriter
     @ObservationIgnored private var hasLoadedPersistedEvents = false
     @ObservationIgnored private var isLoadingPersistedEvents = false
+    @ObservationIgnored private var activeLoadID: UUID?
     @ObservationIgnored private var persistenceRevision: UInt64 = 0
 
     init(
@@ -53,7 +66,6 @@ final class AppDiagnostics: @unchecked Sendable {
         writer: DiagnosticsWriter? = nil,
         storageKey: String = "com.avmillabs.yemma4.diagnostics.events"
     ) {
-        self.defaults = defaults
         self.writer = writer ?? DiagnosticsWriter(defaults: defaults)
         self.storageKey = storageKey
     }
@@ -101,6 +113,7 @@ final class AppDiagnostics: @unchecked Sendable {
             // complete so a delayed read cannot restore the data just cleared.
             hasLoadedPersistedEvents = true
             isLoadingPersistedEvents = false
+            activeLoadID = nil
             return persistenceRevision
         }
         await writer.clear(storageKey: storageKey, revision: revision)
@@ -140,42 +153,56 @@ final class AppDiagnostics: @unchecked Sendable {
     }
 
     func loadPersistedEventsIfNeeded() async {
-        let loadRevision = withLock { () -> UInt64? in
+        let loadID = withLock { () -> UUID? in
             guard !hasLoadedPersistedEvents, !isLoadingPersistedEvents else { return nil }
+            let loadID = UUID()
             isLoadingPersistedEvents = true
-            return persistenceRevision
+            activeLoadID = loadID
+            return loadID
         }
-        guard let loadRevision else { return }
+        guard let loadID else { return }
 
-        let storageKey = self.storageKey
-        let defaults = self.defaults
-        let decoded = await Task.detached(priority: .utility) {
-            guard let data = defaults.data(forKey: storageKey) else {
-                return [DiagnosticEvent]()
-            }
-            return (try? JSONDecoder().decode([DiagnosticEvent].self, from: data)) ?? []
-        }.value
+        let persistedEvents = await writer.events(
+            storageKey: storageKey,
+            maxEvents: maxEvents
+        )
 
-        await MainActor.run {
-            withLock {
-                defer {
-                    hasLoadedPersistedEvents = true
-                    isLoadingPersistedEvents = false
-                }
-                guard persistenceRevision == loadRevision else { return }
-                recentEvents = Self.trimmedEvents(decoded + recentEvents, maxEvents: maxEvents)
+        let persistenceRequest = await MainActor.run {
+            withLock { () -> (events: [DiagnosticEvent], revision: UInt64)? in
+                guard activeLoadID == loadID else { return nil }
+
+                recentEvents = DiagnosticEvent.merged(
+                    persistedEvents,
+                    with: recentEvents,
+                    limit: maxEvents
+                )
+                persistenceRevision &+= 1
+                hasLoadedPersistedEvents = true
+                isLoadingPersistedEvents = false
+                activeLoadID = nil
+                return (recentEvents, persistenceRevision)
             }
         }
+
+        guard let persistenceRequest else { return }
+        await writer.write(
+            events: persistenceRequest.events,
+            storageKey: storageKey,
+            revision: persistenceRequest.revision,
+            maxEvents: maxEvents
+        )
     }
 
     private func persist(_ events: [DiagnosticEvent], revision: UInt64) {
         let key = self.storageKey
         let writer = self.writer
+        let eventLimit = self.maxEvents
         Task.detached(priority: .utility) {
             await writer.write(
                 events: events,
                 storageKey: key,
-                revision: revision
+                revision: revision,
+                maxEvents: eventLimit
             )
         }
     }
@@ -186,34 +213,71 @@ final class AppDiagnostics: @unchecked Sendable {
         return body()
     }
 
-    private static func trimmedEvents(_ events: [DiagnosticEvent], maxEvents: Int) -> [DiagnosticEvent] {
-        guard events.count > maxEvents else { return events }
-        return Array(events.suffix(maxEvents))
-    }
 }
 
 /// Serial writer actor that keeps UserDefaults I/O off the caller's thread.
 actor DiagnosticsWriter {
     private let defaults: UserDefaults
     private let encoder = JSONEncoder()
-    private var latestRevision: UInt64 = 0
+    private let beforeInitialRead: (@Sendable () async -> Void)?
+    private var latestRevisionByStorageKey: [String: UInt64] = [:]
+    private var cachedEventsByStorageKey: [String: [DiagnosticEvent]] = [:]
 
-    init(defaults: UserDefaults = .standard) {
+    init(
+        defaults: UserDefaults = .standard,
+        beforeInitialRead: (@Sendable () async -> Void)? = nil
+    ) {
         self.defaults = defaults
+        self.beforeInitialRead = beforeInitialRead
     }
 
-    func write(events: [DiagnosticEvent], storageKey: String, revision: UInt64) {
-        guard revision >= latestRevision else { return }
-        guard let data = try? encoder.encode(events) else { return }
+    func events(storageKey: String, maxEvents: Int = 120) async -> [DiagnosticEvent] {
+        if let cachedEvents = cachedEventsByStorageKey[storageKey] {
+            return cachedEvents
+        }
 
-        latestRevision = revision
+        await beforeInitialRead?()
+        if let cachedEvents = cachedEventsByStorageKey[storageKey] {
+            return cachedEvents
+        }
+
+        let decoded: [DiagnosticEvent]
+        if let data = defaults.data(forKey: storageKey),
+           let storedEvents = try? JSONDecoder().decode([DiagnosticEvent].self, from: data) {
+            decoded = Array(storedEvents.suffix(maxEvents))
+        } else {
+            decoded = []
+        }
+        cachedEventsByStorageKey[storageKey] = decoded
+        return decoded
+    }
+
+    func write(
+        events: [DiagnosticEvent],
+        storageKey: String,
+        revision: UInt64,
+        maxEvents: Int = 120
+    ) async {
+        guard revision >= latestRevisionByStorageKey[storageKey, default: 0] else { return }
+        let persistedEvents = await self.events(storageKey: storageKey, maxEvents: maxEvents)
+        guard revision >= latestRevisionByStorageKey[storageKey, default: 0] else { return }
+        let mergedEvents = DiagnosticEvent.merged(
+            persistedEvents,
+            with: events,
+            limit: maxEvents
+        )
+        guard let data = try? encoder.encode(mergedEvents) else { return }
+
+        latestRevisionByStorageKey[storageKey] = revision
+        cachedEventsByStorageKey[storageKey] = mergedEvents
         defaults.set(data, forKey: storageKey)
     }
 
     func clear(storageKey: String, revision: UInt64) {
-        guard revision >= latestRevision else { return }
+        guard revision >= latestRevisionByStorageKey[storageKey, default: 0] else { return }
 
-        latestRevision = revision
+        latestRevisionByStorageKey[storageKey] = revision
+        cachedEventsByStorageKey[storageKey] = []
         defaults.removeObject(forKey: storageKey)
     }
 }

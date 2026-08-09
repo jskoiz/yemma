@@ -305,18 +305,21 @@ final class ModelLoadCoordinatorTests: XCTestCase {
         coordinator.invalidate()
 
         XCTAssertFalse(coordinator.isCurrent(ticket))
+        XCTAssertEqual(coordinator.loadingPath, ticket.path)
         XCTAssertFalse(coordinator.finish(ticket))
         XCTAssertNil(coordinator.loadingPath)
     }
 
-    func testOlderLoadCannotFinishAfterNewLoadStarts() throws {
+    func testReplacementWaitsForInvalidatedPhysicalLoadToSettle() throws {
         var coordinator = ModelLoadCoordinator()
         let olderTicket = try XCTUnwrap(coordinator.begin(path: "/models/older"))
 
         coordinator.invalidate()
+        XCTAssertNil(coordinator.begin(path: "/models/newer"))
+        XCTAssertFalse(coordinator.finish(olderTicket))
+
         let newerTicket = try XCTUnwrap(coordinator.begin(path: "/models/newer"))
 
-        XCTAssertFalse(coordinator.finish(olderTicket))
         XCTAssertTrue(coordinator.isCurrent(newerTicket))
         XCTAssertTrue(coordinator.finish(newerTicket))
         XCTAssertNil(coordinator.loadingPath)
@@ -408,14 +411,118 @@ final class ModelDownloaderLifecycleTests: XCTestCase {
             hubFactory: { hub },
             defaults: defaults
         )
+        downloader.modelPath = modelDirectory.path
+        downloader.isDownloaded = true
 
-        await downloader.deleteModel()
+        XCTAssertEqual(downloader.modelPath, modelDirectory.path)
+        XCTAssertTrue(downloader.isDownloaded)
 
+        let didDelete = await downloader.deleteModel()
+
+        XCTAssertTrue(didDelete)
         XCTAssertFalse(FileManager.default.fileExists(atPath: modelDirectory.path))
+        XCTAssertFalse(downloader.isDeletingModel)
         XCTAssertFalse(downloader.isValidatingDownloadedModel)
         XCTAssertFalse(downloader.isDownloaded)
         XCTAssertNil(downloader.modelPath)
         XCTAssertNil(defaults.string(forKey: ModelDownloader.persistedModelPathKey))
+    }
+
+    func testFailedDeletionRemainsRetryableWithoutRepublishingModel() async throws {
+        let suiteName = "ModelDownloaderLifecycleTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let downloadRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("yemma-model-delete-retry-\(UUID().uuidString)", isDirectory: true)
+        let hub = HubApi(downloadBase: downloadRoot, useOfflineMode: true)
+        let modelDirectory = hub.localRepoLocation(
+            Hub.Repo(id: Gemma4MLXSupport.repositoryID)
+        )
+        try FileManager.default.createDirectory(at: modelDirectory, withIntermediateDirectories: true)
+        try Data("synthetic model data".utf8).write(
+            to: modelDirectory.appendingPathComponent("weights.safetensors")
+        )
+        defaults.set(modelDirectory.path, forKey: ModelDownloader.persistedModelPathKey)
+
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: downloadRoot)
+        }
+
+        let fileManager = FailOnceRemovalFileManager()
+        let downloader = ModelDownloader(
+            fileManager: fileManager,
+            hubFactory: { hub },
+            defaults: defaults
+        )
+        downloader.modelPath = modelDirectory.path
+        downloader.isDownloaded = true
+
+        let firstAttempt = await downloader.deleteModel()
+
+        XCTAssertFalse(firstAttempt)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: modelDirectory.path))
+        XCTAssertFalse(downloader.isDeletingModel)
+        XCTAssertFalse(downloader.isDownloaded)
+        XCTAssertNil(downloader.modelPath)
+        XCTAssertNotNil(downloader.modelDeletionError)
+        XCTAssertTrue(defaults.bool(forKey: ModelDownloader.modelDeletionPendingKey))
+
+        await downloader.appDidBecomeActive()
+
+        XCTAssertFalse(downloader.isDownloaded)
+        XCTAssertNil(downloader.modelPath)
+        XCTAssertNotNil(downloader.modelDeletionError)
+
+        let relaunchedDownloader = ModelDownloader(
+            fileManager: fileManager,
+            hubFactory: { hub },
+            defaults: defaults
+        )
+        XCTAssertFalse(relaunchedDownloader.isDownloaded)
+        XCTAssertNil(relaunchedDownloader.modelPath)
+        XCTAssertNotNil(relaunchedDownloader.modelDeletionError)
+
+        let appSetup = AppSetupSnapshot(
+            supportsLocalModelRuntime: true,
+            modelDownloader: relaunchedDownloader,
+            llmService: LLMService(
+                defaults: defaults,
+                appleAvailability: .requiresIOS26
+            )
+        )
+        XCTAssertEqual(appSetup.onboardingPhase(), .failed)
+        XCTAssertEqual(appSetup.visibleErrorMessage, relaunchedDownloader.modelDeletionError)
+        if case .retryModelDeletion? = appSetup.chatRecoveryAction {
+            // The failed-removal route must not fall through to retryDownload.
+        } else {
+            XCTFail("Expected a model-deletion recovery action")
+        }
+
+        let retryAttempt = await relaunchedDownloader.deleteModel()
+
+        XCTAssertTrue(retryAttempt)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: modelDirectory.path))
+        XCTAssertNil(relaunchedDownloader.modelDeletionError)
+        XCTAssertFalse(defaults.bool(forKey: ModelDownloader.modelDeletionPendingKey))
+    }
+
+    private final class FailOnceRemovalFileManager: FileManager {
+        private let lock = NSLock()
+        private var shouldFail = true
+
+        override func removeItem(at URL: URL) throws {
+            let failThisAttempt = lock.withLock { () -> Bool in
+                defer { shouldFail = false }
+                return shouldFail
+            }
+            if failThisAttempt {
+                throw NSError(
+                    domain: NSCocoaErrorDomain,
+                    code: NSFileWriteNoPermissionError
+                )
+            }
+            try super.removeItem(at: URL)
+        }
     }
 }
 
@@ -522,6 +629,34 @@ final class DiagnosticsWriterTests: XCTestCase {
         XCTAssertNil(fixture.defaults.data(forKey: fixture.storageKey))
     }
 
+    func testClearWinsWhileEarlierWriteIsSuspendedInInitialRead() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanUp() }
+
+        let readGate = DiagnosticsReadGate()
+        let writer = DiagnosticsWriter(
+            defaults: fixture.defaults,
+            beforeInitialRead: {
+                await readGate.suspendRead()
+            }
+        )
+        let staleEvent = DiagnosticEvent(category: "test", message: "stale")
+        let writeTask = Task {
+            await writer.write(
+                events: [staleEvent],
+                storageKey: fixture.storageKey,
+                revision: 1
+            )
+        }
+
+        await readGate.waitUntilReadStarts()
+        await writer.clear(storageKey: fixture.storageKey, revision: 2)
+        await readGate.resumeReads()
+        await writeTask.value
+
+        XCTAssertNil(fixture.defaults.data(forKey: fixture.storageKey))
+    }
+
     func testClearPreventsLateStartupLoadFromRestoringEvents() async throws {
         let fixture = try makeFixture()
         defer { fixture.cleanUp() }
@@ -540,6 +675,67 @@ final class DiagnosticsWriterTests: XCTestCase {
         await diagnostics.loadPersistedEventsIfNeeded()
 
         XCTAssertTrue(diagnostics.snapshot().isEmpty)
+    }
+
+    func testRecordingDuringSuspendedStartupReadPreservesPersistedHistory() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanUp() }
+
+        let persistedEvent = DiagnosticEvent(category: "test", message: "persisted")
+        fixture.defaults.set(
+            try JSONEncoder().encode([persistedEvent]),
+            forKey: fixture.storageKey
+        )
+        let readGate = DiagnosticsReadGate()
+        let writer = DiagnosticsWriter(
+            defaults: fixture.defaults,
+            beforeInitialRead: {
+                await readGate.suspendRead()
+            }
+        )
+        let diagnostics = AppDiagnostics(
+            defaults: fixture.defaults,
+            writer: writer,
+            storageKey: fixture.storageKey
+        )
+
+        let loadTask = Task {
+            await diagnostics.loadPersistedEventsIfNeeded()
+        }
+        await readGate.waitUntilReadStarts()
+        diagnostics.record("current", category: "test")
+        await readGate.resumeReads()
+        await loadTask.value
+
+        XCTAssertEqual(diagnostics.snapshot().map(\.message), ["persisted", "current"])
+        XCTAssertEqual(try fixture.persistedEvents().map(\.message), ["persisted", "current"])
+    }
+
+    private actor DiagnosticsReadGate {
+        private var didStart = false
+        private var isOpen = false
+        private var continuations: [CheckedContinuation<Void, Never>] = []
+
+        func suspendRead() async {
+            didStart = true
+            guard !isOpen else { return }
+            await withCheckedContinuation { continuation in
+                continuations.append(continuation)
+            }
+        }
+
+        func waitUntilReadStarts() async {
+            while !didStart {
+                await Task.yield()
+            }
+        }
+
+        func resumeReads() {
+            isOpen = true
+            let pendingContinuations = continuations
+            continuations.removeAll()
+            pendingContinuations.forEach { $0.resume() }
+        }
     }
 
     private func makeFixture() throws -> Fixture {

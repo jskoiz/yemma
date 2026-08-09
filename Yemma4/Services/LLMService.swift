@@ -130,31 +130,39 @@ struct ModelLoadTicket: Equatable, Sendable {
 
 struct ModelLoadCoordinator: Sendable {
     private(set) var revision: UInt64 = 0
-    private(set) var loadingPath: String?
+    private var physicalLoadTicket: ModelLoadTicket?
+
+    var loadingPath: String? {
+        physicalLoadTicket?.path
+    }
 
     mutating func begin(path: String) -> ModelLoadTicket? {
-        guard loadingPath == nil else { return nil }
+        guard physicalLoadTicket == nil else { return nil }
 
         revision &+= 1
-        loadingPath = path
-        return ModelLoadTicket(revision: revision, path: path)
+        let ticket = ModelLoadTicket(revision: revision, path: path)
+        physicalLoadTicket = ticket
+        return ticket
     }
 
     func isCurrent(_ ticket: ModelLoadTicket) -> Bool {
-        revision == ticket.revision && loadingPath == ticket.path
+        revision == ticket.revision && physicalLoadTicket == ticket
     }
 
     @discardableResult
     mutating func finish(_ ticket: ModelLoadTicket) -> Bool {
-        guard isCurrent(ticket) else { return false }
+        guard physicalLoadTicket == ticket else { return false }
 
-        loadingPath = nil
-        return true
+        let wasCurrent = revision == ticket.revision
+        physicalLoadTicket = nil
+        return wasCurrent
     }
 
     mutating func invalidate() {
         revision &+= 1
-        loadingPath = nil
+        // Keep the physical ticket until its detached load settles. Logical
+        // invalidation prevents activation, while retaining the ticket prevents
+        // a second multi-gigabyte load from starting concurrently.
     }
 }
 
@@ -901,12 +909,40 @@ final class LLMService: @unchecked Sendable {
 
         let resolvedPath = (path as NSString).expandingTildeInPath
 
-        let loadTicket = withLock { () -> ModelLoadTicket? in
-            if loadedModelPath == resolvedPath && modelContainer != nil {
-                return nil
+        var loadTicket: ModelLoadTicket?
+        while loadTicket == nil {
+            let isAlreadyLoaded = withLock { () -> Bool in
+                loadedModelPath == resolvedPath && modelContainer != nil
+            }
+            if isAlreadyLoaded {
+                return
             }
 
-            return modelLoadCoordinator.begin(path: resolvedPath)
+            loadTicket = withLock {
+                modelLoadCoordinator.begin(path: resolvedPath)
+            }
+            if loadTicket != nil {
+                break
+            }
+
+            // Another physical load still owns the MLX loader. Wait for it to
+            // settle before deciding whether this request needs a replacement.
+            // This is especially important after an unload invalidates a load:
+            // the logical state is idle, but the detached 4.2 GB load may still
+            // be consuming memory.
+            while withLock({ modelLoadCoordinator.loadingPath != nil }) {
+                guard !Task.isCancelled else { return }
+                let shouldKeepWaiting = await MainActor.run {
+                    selectedRuntime == .gemma4
+                }
+                guard shouldKeepWaiting else { return }
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+
+            let shouldRetry = await MainActor.run {
+                selectedRuntime == .gemma4 && lastError == nil
+            }
+            guard shouldRetry else { return }
         }
         guard let loadTicket else { return }
 
@@ -956,7 +992,7 @@ final class LLMService: @unchecked Sendable {
                 guard selectedRuntime == .gemma4 else { return false }
 
                 let installed = withLock { () -> Bool in
-                    guard modelLoadCoordinator.finish(loadTicket) else { return false }
+                    guard modelLoadCoordinator.isCurrent(loadTicket) else { return false }
                     modelContainer = loaded
                     loadedModelPath = resolvedPath
                     return true
@@ -986,7 +1022,7 @@ final class LLMService: @unchecked Sendable {
             )
         } catch {
             let shouldPublishFailure = withLock {
-                modelLoadCoordinator.finish(loadTicket)
+                modelLoadCoordinator.isCurrent(loadTicket)
             }
             guard shouldPublishFailure else {
                 AppDiagnostics.shared.record(

@@ -437,6 +437,10 @@ public struct ChatView: View {
             return {
                 Task { await modelDownloader.downloadModel() }
             }
+        case .retryModelDeletion:
+            return {
+                Task { _ = await modelDownloader.deleteModel() }
+            }
         case .retryModelLoad:
             return onRetryModelLoad
         case nil:
@@ -457,6 +461,10 @@ public struct ChatView: View {
     }
 
     private var startupLoadingMessage: String {
+        if appSetup.isDeletingModel {
+            return "Removing the downloaded model from this iPhone."
+        }
+
         switch llmService.modelLoadStage {
         case .idle, .preparingRuntime:
             return "Getting Yemma ready on this iPhone."
@@ -577,6 +585,10 @@ public struct ChatView: View {
         }
 
         pendingAttachments.remove(at: attachmentIndex)
+        // Commit the draft metadata first. If the process is suspended after
+        // the unlink, the next launch must not restore a reference to a file
+        // that has already been removed.
+        persistConversationNow()
         let removedFileCount = ConversationAttachmentStore.removeFiles(
             at: [attachment.thumbnail, attachment.full]
         )
@@ -587,7 +599,6 @@ public struct ChatView: View {
                 metadata: ["files": removedFileCount]
             )
         }
-        scheduleConversationSave()
     }
 
     private func copyMessageText(_ text: String) {
