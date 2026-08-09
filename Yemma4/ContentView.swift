@@ -273,6 +273,15 @@ public struct ContentView: View {
             await Task.yield()
             try await llmService.loadModel(from: modelPath)
 
+            guard llmService.selectedRuntime == .gemma4,
+                  llmService.isModelLoaded else {
+                await MainActor.run {
+                    loadedModelSignature = nil
+                    modelLoadError = nil
+                }
+                return
+            }
+
             await MainActor.run {
                 loadedModelSignature = signature
                 modelLoadError = nil

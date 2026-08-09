@@ -310,6 +310,16 @@ public struct OnboardingView: View {
                 actionSubtitle: "Continue from saved progress"
             )
         case .preparing:
+            if appSetup.isDeletingModel {
+                return SetupCopy(
+                    badgeText: "Removing model",
+                    title: "Removing the downloaded model",
+                    message: "Yemma is removing the optional Gemma files from this iPhone.",
+                    note: "Apple's built-in model and your conversations are unaffected.",
+                    actionTitle: "Open chat",
+                    actionSubtitle: "Available after removal finishes"
+                )
+            }
             if appSetup.isValidatingDownloadedModel {
                 return SetupCopy(
                     badgeText: "Checking model",
@@ -426,13 +436,17 @@ public struct OnboardingView: View {
             return [
                 SetupStat(
                     title: "Download",
-                    value: appSetup.isValidatingDownloadedModel ? "Checking" : "Complete"
+                    value: appSetup.isDeletingModel
+                        ? "Removing"
+                        : (appSetup.isValidatingDownloadedModel ? "Checking" : "Complete")
                 ),
                 SetupStat(title: "Current step", value: appSetup.preparationStatusText),
                 SetupStat(title: "Internet", value: "Not needed"),
                 SetupStat(
                     title: "Chat shell",
-                    value: appSetup.isValidatingDownloadedModel ? "Waiting for check" : "Ready now"
+                    value: appSetup.isDeletingModel
+                        ? "Waiting for removal"
+                        : (appSetup.isValidatingDownloadedModel ? "Waiting for check" : "Ready now")
                 )
             ]
         case .ready:

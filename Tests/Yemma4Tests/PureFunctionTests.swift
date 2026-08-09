@@ -305,18 +305,21 @@ final class ModelLoadCoordinatorTests: XCTestCase {
         coordinator.invalidate()
 
         XCTAssertFalse(coordinator.isCurrent(ticket))
+        XCTAssertEqual(coordinator.loadingPath, ticket.path)
         XCTAssertFalse(coordinator.finish(ticket))
         XCTAssertNil(coordinator.loadingPath)
     }
 
-    func testOlderLoadCannotFinishAfterNewLoadStarts() throws {
+    func testReplacementWaitsForInvalidatedPhysicalLoadToSettle() throws {
         var coordinator = ModelLoadCoordinator()
         let olderTicket = try XCTUnwrap(coordinator.begin(path: "/models/older"))
 
         coordinator.invalidate()
+        XCTAssertNil(coordinator.begin(path: "/models/newer"))
+        XCTAssertFalse(coordinator.finish(olderTicket))
+
         let newerTicket = try XCTUnwrap(coordinator.begin(path: "/models/newer"))
 
-        XCTAssertFalse(coordinator.finish(olderTicket))
         XCTAssertTrue(coordinator.isCurrent(newerTicket))
         XCTAssertTrue(coordinator.finish(newerTicket))
         XCTAssertNil(coordinator.loadingPath)
@@ -408,10 +411,17 @@ final class ModelDownloaderLifecycleTests: XCTestCase {
             hubFactory: { hub },
             defaults: defaults
         )
+        downloader.modelPath = modelDirectory.path
+        downloader.isDownloaded = true
 
-        await downloader.deleteModel()
+        XCTAssertEqual(downloader.modelPath, modelDirectory.path)
+        XCTAssertTrue(downloader.isDownloaded)
 
+        let didDelete = await downloader.deleteModel()
+
+        XCTAssertTrue(didDelete)
         XCTAssertFalse(FileManager.default.fileExists(atPath: modelDirectory.path))
+        XCTAssertFalse(downloader.isDeletingModel)
         XCTAssertFalse(downloader.isValidatingDownloadedModel)
         XCTAssertFalse(downloader.isDownloaded)
         XCTAssertNil(downloader.modelPath)
@@ -522,6 +532,34 @@ final class DiagnosticsWriterTests: XCTestCase {
         XCTAssertNil(fixture.defaults.data(forKey: fixture.storageKey))
     }
 
+    func testClearWinsWhileEarlierWriteIsSuspendedInInitialRead() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanUp() }
+
+        let readGate = DiagnosticsReadGate()
+        let writer = DiagnosticsWriter(
+            defaults: fixture.defaults,
+            beforeInitialRead: {
+                await readGate.suspendRead()
+            }
+        )
+        let staleEvent = DiagnosticEvent(category: "test", message: "stale")
+        let writeTask = Task {
+            await writer.write(
+                events: [staleEvent],
+                storageKey: fixture.storageKey,
+                revision: 1
+            )
+        }
+
+        await readGate.waitUntilReadStarts()
+        await writer.clear(storageKey: fixture.storageKey, revision: 2)
+        await readGate.resumeReads()
+        await writeTask.value
+
+        XCTAssertNil(fixture.defaults.data(forKey: fixture.storageKey))
+    }
+
     func testClearPreventsLateStartupLoadFromRestoringEvents() async throws {
         let fixture = try makeFixture()
         defer { fixture.cleanUp() }
@@ -540,6 +578,67 @@ final class DiagnosticsWriterTests: XCTestCase {
         await diagnostics.loadPersistedEventsIfNeeded()
 
         XCTAssertTrue(diagnostics.snapshot().isEmpty)
+    }
+
+    func testRecordingDuringSuspendedStartupReadPreservesPersistedHistory() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanUp() }
+
+        let persistedEvent = DiagnosticEvent(category: "test", message: "persisted")
+        fixture.defaults.set(
+            try JSONEncoder().encode([persistedEvent]),
+            forKey: fixture.storageKey
+        )
+        let readGate = DiagnosticsReadGate()
+        let writer = DiagnosticsWriter(
+            defaults: fixture.defaults,
+            beforeInitialRead: {
+                await readGate.suspendRead()
+            }
+        )
+        let diagnostics = AppDiagnostics(
+            defaults: fixture.defaults,
+            writer: writer,
+            storageKey: fixture.storageKey
+        )
+
+        let loadTask = Task {
+            await diagnostics.loadPersistedEventsIfNeeded()
+        }
+        await readGate.waitUntilReadStarts()
+        diagnostics.record("current", category: "test")
+        await readGate.resumeReads()
+        await loadTask.value
+
+        XCTAssertEqual(diagnostics.snapshot().map(\.message), ["persisted", "current"])
+        XCTAssertEqual(try fixture.persistedEvents().map(\.message), ["persisted", "current"])
+    }
+
+    private actor DiagnosticsReadGate {
+        private var didStart = false
+        private var isOpen = false
+        private var continuations: [CheckedContinuation<Void, Never>] = []
+
+        func suspendRead() async {
+            didStart = true
+            guard !isOpen else { return }
+            await withCheckedContinuation { continuation in
+                continuations.append(continuation)
+            }
+        }
+
+        func waitUntilReadStarts() async {
+            while !didStart {
+                await Task.yield()
+            }
+        }
+
+        func resumeReads() {
+            isOpen = true
+            let pendingContinuations = continuations
+            continuations.removeAll()
+            pendingContinuations.forEach { $0.resume() }
+        }
     }
 
     private func makeFixture() throws -> Fixture {
