@@ -349,6 +349,7 @@ public final class ModelDownloader {
     public var isDownloaded: Bool = false
     public private(set) var isValidatingDownloadedModel: Bool = false
     public private(set) var isDeletingModel: Bool = false
+    public private(set) var modelDeletionError: String?
     public var canResumeDownload: Bool = false
     public var error: String?
     public var modelPath: String?
@@ -642,11 +643,13 @@ public final class ModelDownloader {
             AppDiagnostics.shared.record("Deleted local MLX model bundle", category: "download")
             return true
         } catch {
-            self.error = describe(error)
+            let message = describe(error)
+            self.error = message
+            modelDeletionError = message
             AppDiagnostics.shared.record(
                 "MLX model delete failed",
                 category: "download",
-                metadata: ["error": self.error ?? "unknown"]
+                metadata: ["error": message]
             )
             return false
         }
@@ -662,6 +665,7 @@ public final class ModelDownloader {
         currentDownloadedBytes = 0
         currentEstimatedBytes = Gemma4MLXSupport.approximateDownloadBytes
         error = nil
+        modelDeletionError = nil
         resetETA()
         persistState(modelPath: nil)
     }
@@ -688,6 +692,7 @@ public final class ModelDownloader {
         estimatedSecondsRemaining = nil
         currentDownloadSpeedBytesPerSecond = nil
         error = Self.unsupportedRuntimeMessage
+        modelDeletionError = nil
         persistState(modelPath: nil)
     }
 
@@ -697,6 +702,7 @@ public final class ModelDownloader {
         isDownloaded = false
         canResumeDownload = false
         error = nil
+        modelDeletionError = nil
         downloadProgress = 0
         currentDownloadedBytes = 0
         currentEstimatedBytes = Gemma4MLXSupport.approximateDownloadBytes
@@ -713,6 +719,7 @@ public final class ModelDownloader {
         currentEstimatedBytes = cachedDirectory.1
         currentDownloadedBytes = currentEstimatedBytes
         error = nil
+        modelDeletionError = nil
         resetETA()
         persistState(modelPath: cachedDirectory.0.location.path)
     }

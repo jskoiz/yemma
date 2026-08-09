@@ -427,6 +427,69 @@ final class ModelDownloaderLifecycleTests: XCTestCase {
         XCTAssertNil(downloader.modelPath)
         XCTAssertNil(defaults.string(forKey: ModelDownloader.persistedModelPathKey))
     }
+
+    func testFailedDeletionRemainsRetryableWithoutRepublishingModel() async throws {
+        let suiteName = "ModelDownloaderLifecycleTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let downloadRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("yemma-model-delete-retry-\(UUID().uuidString)", isDirectory: true)
+        let hub = HubApi(downloadBase: downloadRoot, useOfflineMode: true)
+        let modelDirectory = hub.localRepoLocation(
+            Hub.Repo(id: Gemma4MLXSupport.repositoryID)
+        )
+        try FileManager.default.createDirectory(at: modelDirectory, withIntermediateDirectories: true)
+        try Data("synthetic model data".utf8).write(
+            to: modelDirectory.appendingPathComponent("weights.safetensors")
+        )
+        defaults.set(modelDirectory.path, forKey: ModelDownloader.persistedModelPathKey)
+
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: downloadRoot)
+        }
+
+        let downloader = ModelDownloader(
+            fileManager: FailOnceRemovalFileManager(),
+            hubFactory: { hub },
+            defaults: defaults
+        )
+        downloader.modelPath = modelDirectory.path
+        downloader.isDownloaded = true
+
+        let firstAttempt = await downloader.deleteModel()
+
+        XCTAssertFalse(firstAttempt)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: modelDirectory.path))
+        XCTAssertFalse(downloader.isDeletingModel)
+        XCTAssertFalse(downloader.isDownloaded)
+        XCTAssertNil(downloader.modelPath)
+        XCTAssertNotNil(downloader.modelDeletionError)
+
+        let retryAttempt = await downloader.deleteModel()
+
+        XCTAssertTrue(retryAttempt)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: modelDirectory.path))
+        XCTAssertNil(downloader.modelDeletionError)
+    }
+
+    private final class FailOnceRemovalFileManager: FileManager {
+        private let lock = NSLock()
+        private var shouldFail = true
+
+        override func removeItem(at URL: URL) throws {
+            let failThisAttempt = lock.withLock { () -> Bool in
+                defer { shouldFail = false }
+                return shouldFail
+            }
+            if failThisAttempt {
+                throw NSError(
+                    domain: NSCocoaErrorDomain,
+                    code: NSFileWriteNoPermissionError
+                )
+            }
+            try super.removeItem(at: URL)
+        }
+    }
 }
 
 // MARK: - Automation configuration parsing
