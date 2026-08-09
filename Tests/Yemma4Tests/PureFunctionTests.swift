@@ -1,4 +1,5 @@
 import Foundation
+import Hub
 import XCTest
 @testable import Yemma4
 
@@ -357,6 +358,64 @@ final class FormatETATests: XCTestCase {
     func testHoursAndMinutes() {
         XCTAssertEqual(AppSetupSnapshot.formatETA(3660), "1h 1m")
         XCTAssertEqual(AppSetupSnapshot.formatETA(3600 + 90 * 60), "2h 30m")
+    }
+}
+
+@MainActor
+final class ModelDownloaderLifecycleTests: XCTestCase {
+    func testPersistedDirectoryIsOnlyACandidateUntilValidationCompletes() throws {
+        let suiteName = "ModelDownloaderLifecycleTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("yemma-model-candidate-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defaults.set(directory.path, forKey: ModelDownloader.persistedModelPathKey)
+
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: directory)
+        }
+
+        let downloader = ModelDownloader(defaults: defaults)
+
+        XCTAssertTrue(downloader.isValidatingDownloadedModel)
+        XCTAssertFalse(downloader.isDownloaded)
+        XCTAssertNil(downloader.modelPath)
+        XCTAssertNil(downloader.localResources)
+    }
+
+    func testDeleteModelRemovesSyntheticBundleBeforeReturning() async throws {
+        let suiteName = "ModelDownloaderLifecycleTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let downloadRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("yemma-model-delete-\(UUID().uuidString)", isDirectory: true)
+        let hub = HubApi(downloadBase: downloadRoot, useOfflineMode: true)
+        let modelDirectory = hub.localRepoLocation(
+            Hub.Repo(id: Gemma4MLXSupport.repositoryID)
+        )
+        try FileManager.default.createDirectory(at: modelDirectory, withIntermediateDirectories: true)
+        try Data("synthetic model data".utf8).write(
+            to: modelDirectory.appendingPathComponent("weights.safetensors")
+        )
+        defaults.set(modelDirectory.path, forKey: ModelDownloader.persistedModelPathKey)
+
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: downloadRoot)
+        }
+
+        let downloader = ModelDownloader(
+            hubFactory: { hub },
+            defaults: defaults
+        )
+
+        await downloader.deleteModel()
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: modelDirectory.path))
+        XCTAssertFalse(downloader.isValidatingDownloadedModel)
+        XCTAssertFalse(downloader.isDownloaded)
+        XCTAssertNil(downloader.modelPath)
+        XCTAssertNil(defaults.string(forKey: ModelDownloader.persistedModelPathKey))
     }
 }
 

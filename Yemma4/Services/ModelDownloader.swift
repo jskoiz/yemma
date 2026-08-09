@@ -66,6 +66,7 @@ struct AppSetupSnapshot {
     let supportsImageInput: Bool
     let isDownloaded: Bool
     let isDownloading: Bool
+    let isValidatingDownloadedModel: Bool
     let canResumeDownload: Bool
     let downloadError: String?
     let downloadProgress: Double
@@ -90,6 +91,7 @@ struct AppSetupSnapshot {
         supportsImageInput = llmService.supportsImageInput
         isDownloaded = modelDownloader.isDownloaded
         isDownloading = modelDownloader.isDownloading
+        isValidatingDownloadedModel = modelDownloader.isValidatingDownloadedModel
         canResumeDownload = modelDownloader.canResumeDownload
         downloadError = modelDownloader.error
         downloadProgress = modelDownloader.downloadProgress
@@ -146,6 +148,10 @@ struct AppSetupSnapshot {
             return appleFoundationModelAvailability.isAvailable ? .appleReady : .appleUnavailable
         }
 
+        if isValidatingDownloadedModel {
+            return .preparing
+        }
+
         if hasModelPreparationError || downloadError != nil {
             return .failed
         }
@@ -172,6 +178,10 @@ struct AppSetupSnapshot {
 
         if selectedRuntime == .appleFoundationModel {
             return appleFoundationModelAvailability.title
+        }
+
+        if isValidatingDownloadedModel {
+            return "Checking your saved model."
         }
 
         if isDownloading {
@@ -206,6 +216,10 @@ struct AppSetupSnapshot {
             return appleFoundationModelAvailability.isAvailable
                 ? "The built-in model runs locally without a Yemma model download."
                 : appleFoundationModelAvailability.detail
+        }
+
+        if isValidatingDownloadedModel {
+            return "Confirming the local files are complete before Yemma uses them."
         }
 
         if isDownloading {
@@ -255,7 +269,8 @@ struct AppSetupSnapshot {
     var chatRecoveryAction: SetupRecoveryAction? {
         guard supportsLocalModelRuntime,
               selectedRuntime == .gemma4,
-              !isDownloading else {
+              !isDownloading,
+              !isValidatingDownloadedModel else {
             return nil
         }
 
@@ -277,9 +292,15 @@ struct AppSetupSnapshot {
     var shouldShowStartupOverlay: Bool {
         supportsLocalModelRuntime
             && selectedRuntime == .gemma4
-            && isDownloaded
             && !isTextModelReady
             && modelLoadError == nil
+            && (isDownloaded || isValidatingDownloadedModel)
+    }
+
+    var preparationStatusText: String {
+        isValidatingDownloadedModel
+            ? "Checking your saved model."
+            : modelLoadStage.statusText
     }
 
     static func formatETA(_ seconds: Double) -> String {
@@ -307,6 +328,7 @@ public final class ModelDownloader {
     public var downloadProgress: Double = 0
     public var isDownloading: Bool = false
     public var isDownloaded: Bool = false
+    public private(set) var isValidatingDownloadedModel: Bool = false
     public var canResumeDownload: Bool = false
     public var error: String?
     public var modelPath: String?
@@ -322,9 +344,13 @@ public final class ModelDownloader {
     private let makeHub: @Sendable () -> HubApi
     @ObservationIgnored private var cachedHub: HubApi?
     @ObservationIgnored private var progressMonitorTask: Task<Void, Never>?
-    @ObservationIgnored private var isValidatingDownloadedModel = false
+    @ObservationIgnored private var validationTask: Task<Void, Never>?
+    @ObservationIgnored private var activeValidationID: UUID?
+    @ObservationIgnored private var deletionTask: Task<Void, Never>?
+    @ObservationIgnored private var activeDeletionID: UUID?
+    @ObservationIgnored private var modelLifecycleRevision: UInt64 = 0
 
-    private static let persistedModelPathKey = "com.avmillabs.yemma4.modelDownloader.modelPath"
+    static let persistedModelPathKey = "com.avmillabs.yemma4.modelDownloader.modelPath"
 
     public init(
         fileManager: FileManager = .default,
@@ -390,14 +416,45 @@ public final class ModelDownloader {
     }
 
     public func validateDownloadedModel() async {
-        guard !isValidatingDownloadedModel else {
+        if let validationTask {
+            await validationTask.value
             return
         }
 
-        isValidatingDownloadedModel = true
-        defer { isValidatingDownloadedModel = false }
+        if let deletionTask {
+            await deletionTask.value
+            return
+        }
 
+        let validationID = UUID()
+        let validationRevision = modelLifecycleRevision
+        let hub = hubClient()
+        isValidatingDownloadedModel = true
+        activeValidationID = validationID
+
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.performDownloadedModelValidation(
+                using: hub,
+                revision: validationRevision
+            )
+        }
+        validationTask = task
+
+        await task.value
+        guard activeValidationID == validationID else { return }
+
+        validationTask = nil
+        activeValidationID = nil
+        isValidatingDownloadedModel = false
+    }
+
+    private func performDownloadedModelValidation(
+        using hub: HubApi,
+        revision: UInt64
+    ) async {
         guard Yemma4AppConfiguration.supportsLocalModelRuntime else {
+            guard revision == modelLifecycleRevision else { return }
             resetForUnsupportedRuntime()
             AppDiagnostics.shared.record(
                 "Skipped local MLX model validation on unsupported runtime",
@@ -406,20 +463,22 @@ public final class ModelDownloader {
             return
         }
 
-        let hub = hubClient()
-        let validation: (ValidatedModelDirectory, Int64)? = await firstValidModelDirectoryAsync(using: hub)
+        let validation = await firstValidModelDirectoryAsync(using: hub)
+        guard revision == modelLifecycleRevision else { return }
 
         if let validation {
-            finishWithCachedDownload(validation)
             await BackgroundModelDownloadCoordinator.shared.clearState(
                 using: hub,
                 repositoryID: Gemma4MLXSupport.repositoryID
             )
+            guard revision == modelLifecycleRevision else { return }
+            finishWithCachedDownload(validation)
         } else {
             let snapshot = await BackgroundModelDownloadCoordinator.shared.snapshot(
                 using: hub,
                 repositoryID: Gemma4MLXSupport.repositoryID
             )
+            guard revision == modelLifecycleRevision else { return }
             applyMissingValidatedModelState(snapshot)
         }
 
@@ -500,47 +559,86 @@ public final class ModelDownloader {
         }
     }
 
-    public func deleteModel() {
+    public func deleteModel() async {
+        if let deletionTask {
+            await deletionTask.value
+            return
+        }
+
         let hub = hubClient()
         stopProgressMonitor()
+        let validationToDrain = invalidateValidation()
 
-        Task { @MainActor [weak self] in
+        let deletionID = UUID()
+        activeDeletionID = deletionID
+        let task = Task { @MainActor [weak self] in
             guard let self else { return }
-
-            await BackgroundModelDownloadCoordinator.shared.clearState(
+            await self.performModelDeletion(
                 using: hub,
-                repositoryID: Gemma4MLXSupport.repositoryID
+                after: validationToDrain
             )
-
-            let cachedDirectory = hub.localRepoLocation(
-                Hub.Repo(id: Gemma4MLXSupport.repositoryID)
-            )
-
-            do {
-                if self.fileManager.fileExists(atPath: cachedDirectory.path) {
-                    try self.fileManager.removeItem(at: cachedDirectory)
-                }
-
-                self.modelPath = nil
-                self.isDownloaded = false
-                self.isDownloading = false
-                self.canResumeDownload = false
-                self.downloadProgress = 0
-                self.currentDownloadedBytes = 0
-                self.currentEstimatedBytes = Gemma4MLXSupport.approximateDownloadBytes
-                self.error = nil
-                self.resetETA()
-                self.persistState(modelPath: nil)
-                AppDiagnostics.shared.record("Deleted local MLX model bundle", category: "download")
-            } catch {
-                self.error = self.describe(error)
-                AppDiagnostics.shared.record(
-                    "MLX model delete failed",
-                    category: "download",
-                    metadata: ["error": self.error ?? "unknown"]
-                )
-            }
         }
+        deletionTask = task
+
+        await task.value
+        guard activeDeletionID == deletionID else { return }
+
+        deletionTask = nil
+        activeDeletionID = nil
+    }
+
+    private func performModelDeletion(
+        using hub: HubApi,
+        after validationTask: Task<Void, Never>?
+    ) async {
+        await validationTask?.value
+
+        await BackgroundModelDownloadCoordinator.shared.clearState(
+            using: hub,
+            repositoryID: Gemma4MLXSupport.repositoryID
+        )
+
+        let cachedDirectory = hub.localRepoLocation(
+            Hub.Repo(id: Gemma4MLXSupport.repositoryID)
+        )
+        let fileManager = self.fileManager
+
+        do {
+            try await Task.detached(priority: .utility) {
+                if fileManager.fileExists(atPath: cachedDirectory.path) {
+                    try fileManager.removeItem(at: cachedDirectory)
+                }
+            }.value
+
+            modelPath = nil
+            isDownloaded = false
+            isDownloading = false
+            canResumeDownload = false
+            downloadProgress = 0
+            currentDownloadedBytes = 0
+            currentEstimatedBytes = Gemma4MLXSupport.approximateDownloadBytes
+            error = nil
+            resetETA()
+            persistState(modelPath: nil)
+            AppDiagnostics.shared.record("Deleted local MLX model bundle", category: "download")
+        } catch {
+            self.error = describe(error)
+            AppDiagnostics.shared.record(
+                "MLX model delete failed",
+                category: "download",
+                metadata: ["error": self.error ?? "unknown"]
+            )
+        }
+    }
+
+    private func invalidateValidation() -> Task<Void, Never>? {
+        modelLifecycleRevision &+= 1
+        let task = validationTask
+        task?.cancel()
+        validationTask = nil
+        activeValidationID = nil
+        isValidatingDownloadedModel = false
+        return task
     }
 
     private func resetForUnsupportedRuntime() {
@@ -789,15 +887,10 @@ public final class ModelDownloader {
             return
         }
 
-        modelPath = persistedModelPath
-        isDownloaded = true
+        isValidatingDownloadedModel = true
         canResumeDownload = false
-        downloadProgress = 1
+        downloadProgress = 0
         error = nil
-
-        // Keep launch-time restore cheap. Exact directory sizing is recomputed
-        // asynchronously during validation once the first frame is already up.
-        currentDownloadedBytes = currentEstimatedBytes
     }
 
     private func persistState(modelPath: String?) {
