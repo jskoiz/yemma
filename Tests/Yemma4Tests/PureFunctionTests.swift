@@ -324,6 +324,30 @@ final class FormatETATests: XCTestCase {
     }
 }
 
+@MainActor
+final class ModelDownloaderLifecycleTests: XCTestCase {
+    func testPersistedDirectoryIsOnlyACandidateUntilValidationCompletes() throws {
+        let suiteName = "ModelDownloaderLifecycleTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("yemma-model-candidate-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defaults.set(directory.path, forKey: ModelDownloader.persistedModelPathKey)
+
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: directory)
+        }
+
+        let downloader = ModelDownloader(defaults: defaults)
+
+        XCTAssertTrue(downloader.isValidatingDownloadedModel)
+        XCTAssertFalse(downloader.isDownloaded)
+        XCTAssertNil(downloader.modelPath)
+        XCTAssertNil(downloader.localResources)
+    }
+}
+
 // MARK: - Automation configuration parsing
 
 final class Yemma4AutomationConfigurationTests: XCTestCase {

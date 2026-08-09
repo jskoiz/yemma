@@ -77,7 +77,7 @@ struct ChatSidebarView: View {
                     if llmService.selectedRuntime == .gemma4 {
                         guard await llmService.unloadModel() else { return }
                     }
-                    modelDownloader.deleteModel()
+                    await modelDownloader.deleteModel()
                     if llmService.selectedRuntime == .gemma4 {
                         onShowOnboarding()
                     }
