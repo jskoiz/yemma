@@ -1,0 +1,64 @@
+name: CI
+
+# Builds and tests Yemma4 on every PR and on pushes to main.
+# Note: the build is heavy because it pulls the MLX dependencies (mlx-swift,
+# mlx-swift-lm) and their transitive graph, so SwiftPM caches are used to avoid
+# re-downloading and recompiling everything on every run. The package is
+# iOS-only, so it must build/test against an iOS Simulator destination.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Build & Test (iOS Simulator)
+    runs-on: macos-15
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select latest Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      # Cache the heavy MLX dependency graph so we don't re-download/rebuild it
+      # on every run. Keyed on the resolved package graph.
+      - name: Cache SwiftPM
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/org.swift.swiftpm
+            .build
+          key: ${{ runner.os }}-spm-${{ hashFiles('**/Package.resolved') }}
+          restore-keys: |
+            ${{ runner.os }}-spm-
+
+      - name: Resolve dependencies
+        run: xcodebuild -resolvePackageDependencies -scheme Yemma4
+
+      - name: Build & test (iOS Simulator)
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -scheme Yemma4 \
+            -destination 'platform=iOS Simulator,OS=latest,name=iPhone 16 Pro' \
+            -skipPackagePluginValidation \
+            -resultBundlePath TestResults \
+            2>&1
+
+      - name: Upload test results
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: TestResults
+          path: TestResults
+          if-no-files-found: ignore
