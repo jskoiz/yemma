@@ -3,6 +3,7 @@ import MarkdownUI
 
 #if canImport(UIKit)
 import UIKit
+import UniformTypeIdentifiers
 #endif
 
 struct RichMessageText: View {
@@ -21,13 +22,13 @@ struct RichMessageText: View {
         .text {
             ForegroundColor(nil)
             BackgroundColor(nil)
-            FontSize(16)
+            FontSize(.em(1))
         }
         .heading1 { configuration in
             configuration.label
                 .markdownTextStyle {
                     FontWeight(.semibold)
-                    FontSize(17)
+                    FontSize(.em(1.08))
                 }
                 .markdownMargin(top: 10, bottom: 14)
         }
@@ -35,7 +36,7 @@ struct RichMessageText: View {
             configuration.label
                 .markdownTextStyle {
                     FontWeight(.semibold)
-                    FontSize(16)
+                    FontSize(.em(1))
                 }
                 .markdownMargin(top: 10, bottom: 14)
         }
@@ -43,7 +44,7 @@ struct RichMessageText: View {
             configuration.label
                 .markdownTextStyle {
                     FontWeight(.semibold)
-                    FontSize(15)
+                    FontSize(.em(0.94))
                 }
                 .markdownMargin(top: 8, bottom: 12)
         }
@@ -97,6 +98,7 @@ struct RichMessageText: View {
                         .markdownImageProvider(PrivateChatImageProvider())
                         .markdownInlineImageProvider(PrivateChatImageProvider())
                         .markdownSoftBreakMode(.lineBreak)
+                        .font(AppTheme.Typography.chatAssistantMessage)
                         .foregroundStyle(foregroundColor)
                         .tint(AppTheme.accent)
                         .textSelection(.disabled)
@@ -108,6 +110,7 @@ struct RichMessageText: View {
                         .markdownImageProvider(PrivateChatImageProvider())
                         .markdownInlineImageProvider(PrivateChatImageProvider())
                         .markdownSoftBreakMode(.lineBreak)
+                        .font(AppTheme.Typography.chatAssistantMessage)
                         .foregroundStyle(foregroundColor)
                         .tint(AppTheme.accent)
                         .textSelection(.enabled)
@@ -190,24 +193,16 @@ private struct StreamingRichMessageText: View {
     private let lineSpacing: CGFloat = 8
     private let blankLineHeight: CGFloat = 10
 
-    private var lines: [StreamingTextLine] {
-        Self.lines(from: text)
-    }
-
-    private var animatedSegmentIDs: [Int] {
-        lines.flatMap { line in
-            line.tokens.map(\.id)
-        }
-    }
-
     var body: some View {
+        let content = Self.content(from: text)
+
         VStack(alignment: .leading, spacing: lineSpacing) {
-            if lines.isEmpty {
+            if content.lines.isEmpty {
                 Text(" ")
                     .font(AppTheme.Typography.chatAssistantMessage)
                     .hidden()
             } else {
-                ForEach(lines) { line in
+                ForEach(content.lines) { line in
                     if line.tokens.isEmpty {
                         Color.clear
                             .frame(maxWidth: .infinity, minHeight: blankLineHeight, alignment: .leading)
@@ -219,6 +214,7 @@ private struct StreamingRichMessageText: View {
                             ForEach(line.tokens) { token in
                                 StreamingWordTokenView(
                                     token: token.text,
+                                    isContinuation: token.isContinuation,
                                     foregroundColor: foregroundColor
                                 )
                             }
@@ -228,14 +224,14 @@ private struct StreamingRichMessageText: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: animatedSegmentIDs)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: content.animatedSegmentIDs)
     }
 
-    private static func lines(from text: String) -> [StreamingTextLine] {
+    private static func content(from text: String) -> StreamingTextContent {
         let normalized = text.replacingOccurrences(of: "\r\n", with: "\n")
         var nextTokenID = 0
 
-        return normalized.components(separatedBy: "\n").enumerated().map { lineIndex, rawLine in
+        let lines = normalized.components(separatedBy: "\n").enumerated().map { lineIndex, rawLine in
             let tokens = tokens(
                 from: rawLine,
                 nextTokenID: &nextTokenID
@@ -243,6 +239,11 @@ private struct StreamingRichMessageText: View {
 
             return StreamingTextLine(id: lineIndex, tokens: tokens)
         }
+
+        return StreamingTextContent(
+            lines: lines,
+            animatedSegmentIDs: lines.flatMap { line in line.tokens.map(\.id) }
+        )
     }
 
     private static func tokens(
@@ -256,13 +257,17 @@ private struct StreamingRichMessageText: View {
 
         func appendCurrentToken() {
             guard !current.isEmpty else { return }
-            tokens.append(
-                StreamingWordToken(
-                    id: nextTokenID,
-                    text: current
+            let parts = StreamingRenderer.streamingTokenParts(current)
+            for (partIndex, part) in parts.enumerated() {
+                tokens.append(
+                    StreamingWordToken(
+                        id: nextTokenID,
+                        text: part,
+                        isContinuation: partIndex > 0
+                    )
                 )
-            )
-            nextTokenID += 1
+                nextTokenID += 1
+            }
             current.removeAll(keepingCapacity: true)
         }
 
@@ -292,15 +297,22 @@ private struct StreamingTextLine: Identifiable {
     let tokens: [StreamingWordToken]
 }
 
+private struct StreamingTextContent {
+    let lines: [StreamingTextLine]
+    let animatedSegmentIDs: [Int]
+}
+
 private struct StreamingWordToken: Identifiable {
     let id: Int
     let text: String
+    let isContinuation: Bool
 }
 
 private struct StreamingWordTokenView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     let token: String
+    let isContinuation: Bool
     let foregroundColor: Color
 
     var body: some View {
@@ -309,7 +321,11 @@ private struct StreamingWordTokenView: View {
             .foregroundStyle(foregroundColor)
             .multilineTextAlignment(.leading)
             .allowsTightening(false)
-            .fixedSize()
+            .fixedSize(horizontal: false, vertical: true)
+            .layoutValue(
+                key: StreamingTokenSpacingKey.self,
+                value: isContinuation ? 0 : 4
+            )
             .transition(
                 reduceMotion
                     ? .opacity
@@ -318,18 +334,36 @@ private struct StreamingWordTokenView: View {
     }
 }
 
+private enum StreamingTokenSpacingKey: LayoutValueKey {
+    static let defaultValue: CGFloat = 4
+}
+
 private struct StreamingTokenFlowLayout: Layout {
     var itemSpacing: CGFloat = 4
     var lineSpacing: CGFloat = 8
 
+    struct Cache {
+        var maxWidth: CGFloat?
+        var arrangement: StreamingTokenFlowArrangement?
+    }
+
+    func makeCache(subviews: Subviews) -> Cache {
+        Cache(maxWidth: nil, arrangement: nil)
+    }
+
+    func updateCache(_ cache: inout Cache, subviews: Subviews) {
+        cache = Cache(maxWidth: nil, arrangement: nil)
+    }
+
     func sizeThatFits(
         proposal: ProposedViewSize,
         subviews: Subviews,
-        cache: inout Void
+        cache: inout Cache
     ) -> CGSize {
-        let layout = arrangedRows(
+        let layout = cachedArrangement(
             for: subviews,
-            maxWidth: proposal.width ?? .greatestFiniteMagnitude
+            maxWidth: proposal.width ?? .greatestFiniteMagnitude,
+            cache: &cache
         )
 
         return CGSize(width: layout.width, height: layout.height)
@@ -339,9 +373,13 @@ private struct StreamingTokenFlowLayout: Layout {
         in bounds: CGRect,
         proposal: ProposedViewSize,
         subviews: Subviews,
-        cache: inout Void
+        cache: inout Cache
     ) {
-        let layout = arrangedRows(for: subviews, maxWidth: bounds.width)
+        let layout = cachedArrangement(
+            for: subviews,
+            maxWidth: bounds.width,
+            cache: &cache
+        )
 
         for row in layout.rows {
             for item in row.items {
@@ -355,6 +393,22 @@ private struct StreamingTokenFlowLayout: Layout {
                 )
             }
         }
+    }
+
+    private func cachedArrangement(
+        for subviews: Subviews,
+        maxWidth: CGFloat,
+        cache: inout Cache
+    ) -> StreamingTokenFlowArrangement {
+        let resolvedMaxWidth = max(maxWidth, 1)
+        if cache.maxWidth == resolvedMaxWidth, let arrangement = cache.arrangement {
+            return arrangement
+        }
+
+        let arrangement = arrangedRows(for: subviews, maxWidth: resolvedMaxWidth)
+        cache.maxWidth = resolvedMaxWidth
+        cache.arrangement = arrangement
+        return arrangement
     }
 
     private func arrangedRows(
@@ -386,14 +440,27 @@ private struct StreamingTokenFlowLayout: Layout {
         }
 
         for index in subviews.indices {
-            let size = subviews[index].sizeThatFits(.unspecified)
-            let proposedWidth = currentItems.isEmpty ? size.width : currentRowWidth + itemSpacing + size.width
+            let idealSize = subviews[index].sizeThatFits(.unspecified)
+            let spacingBefore = currentItems.isEmpty
+                ? 0
+                : (subviews[index][StreamingTokenSpacingKey.self] == 0 ? 0 : itemSpacing)
+            let proposedWidth = currentItems.isEmpty
+                ? idealSize.width
+                : currentRowWidth + spacingBefore + idealSize.width
 
             if !currentItems.isEmpty, proposedWidth > resolvedMaxWidth {
                 commitRow()
             }
 
-            let originX = currentItems.isEmpty ? 0 : currentRowWidth + itemSpacing
+            let spacing = currentItems.isEmpty
+                ? 0
+                : (subviews[index][StreamingTokenSpacingKey.self] == 0 ? 0 : itemSpacing)
+            let size = idealSize.width > resolvedMaxWidth
+                ? subviews[index].sizeThatFits(
+                    ProposedViewSize(width: resolvedMaxWidth, height: nil)
+                )
+                : idealSize
+            let originX = currentItems.isEmpty ? 0 : currentRowWidth + spacing
             let originY = currentY
 
             currentItems.append(
@@ -508,10 +575,12 @@ private struct PlainRichMessageText: View {
     }
 }
 
-private enum MarkdownHeuristics {
+enum MarkdownHeuristics {
     static func looksLikeMarkdown(_ text: String) -> Bool {
         let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedText.isEmpty else { return false }
+
+        let lines = trimmedText.components(separatedBy: "\n")
 
         if trimmedText.contains("```")
             || trimmedText.contains("`")
@@ -520,11 +589,14 @@ private enum MarkdownHeuristics {
             || trimmedText.contains("**")
             || trimmedText.contains("__")
             || trimmedText.contains("~~")
+            || containsDelimitedEmphasis(in: trimmedText, marker: "*")
+            || containsDelimitedEmphasis(in: trimmedText, marker: "_")
+            || containsTableSyntax(in: lines)
         {
             return true
         }
 
-        for rawLine in trimmedText.components(separatedBy: "\n") {
+        for rawLine in lines {
             let line = rawLine.trimmingCharacters(in: .whitespaces)
             guard !line.isEmpty else { continue }
 
@@ -537,6 +609,50 @@ private enum MarkdownHeuristics {
                 || line.hasPrefix("* [")
                 || startsWithOrderedListMarker(line)
             {
+                return true
+            }
+        }
+
+        return false
+    }
+
+    private static func containsDelimitedEmphasis(in text: String, marker: Character) -> Bool {
+        let characters = Array(text)
+        var delimiterCount = 0
+
+        for index in characters.indices where characters[index] == marker {
+            let previous = index > characters.startIndex ? characters[index - 1] : nil
+            let nextIndex = characters.index(after: index)
+            let next = nextIndex < characters.endIndex ? characters[nextIndex] : nil
+
+            let canOpen = next?.isWhitespace == false
+            let canClose = previous?.isWhitespace == false
+            guard canOpen || canClose else { continue }
+            delimiterCount += 1
+        }
+
+        return delimiterCount >= 2 && delimiterCount.isMultiple(of: 2)
+    }
+
+    private static func containsTableSyntax(in lines: [String]) -> Bool {
+        guard lines.count >= 2 else { return false }
+
+        for index in 0..<(lines.count - 1) {
+            let header = lines[index].trimmingCharacters(in: .whitespaces)
+            let separator = lines[index + 1].trimmingCharacters(in: .whitespaces)
+            guard header.contains("|") else { continue }
+
+            let separatorCells = separator.split(separator: "|", omittingEmptySubsequences: true)
+            guard !separatorCells.isEmpty else { continue }
+
+            let isDelimiterRow = separatorCells.allSatisfy { cell in
+                let value = cell.trimmingCharacters(in: .whitespaces)
+                let dashCount = value.filter { $0 == "-" }.count
+                let nonDelimiterCharacters = value.filter { $0 != "-" && $0 != ":" && !$0.isWhitespace }
+                return dashCount >= 3 && nonDelimiterCharacters.isEmpty
+            }
+
+            if isDelimiterRow {
                 return true
             }
         }
@@ -565,6 +681,8 @@ private struct ChatCodeBlock: View {
                     .font(.system(.caption, design: .monospaced))
                     .fontWeight(.semibold)
                     .foregroundStyle(AppTheme.assistantLabel)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
 
                 Spacer()
 
@@ -574,11 +692,14 @@ private struct ChatCodeBlock: View {
                     Label(didCopy ? "Copied" : "Copy", systemImage: didCopy ? "checkmark" : "doc.on.doc")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(didCopy ? AppTheme.accent : AppTheme.assistantLabel)
+                        .fixedSize()
+                        .frame(minWidth: 80, minHeight: AppTheme.Layout.minimumControlSize)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }
             .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            .padding(.vertical, 2)
             .background(AppTheme.accentSoft)
 
             Divider()
@@ -606,7 +727,13 @@ private struct ChatCodeBlock: View {
 
     private func copyCode() {
 #if canImport(UIKit)
-        UIPasteboard.general.string = configuration.content
+        UIPasteboard.general.setItems(
+            [[UTType.plainText.identifier: configuration.content]],
+            options: [
+                .localOnly: true,
+                .expirationDate: Date().addingTimeInterval(120)
+            ]
+        )
 #endif
         AppDiagnostics.shared.record(
             "Code block copied",

@@ -148,7 +148,7 @@ final class AppDiagnostics: @unchecked Sendable {
 
     func copyToPasteboard() {
 #if canImport(UIKit)
-        UIPasteboard.general.string = exportText()
+        UIPasteboard.general.setItems([["public.utf8-plain-text": exportText()]], options: [.localOnly: true, .expirationDate: Date().addingTimeInterval(120)])
 #endif
     }
 

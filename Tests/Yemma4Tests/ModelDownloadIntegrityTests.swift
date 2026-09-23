@@ -91,4 +91,82 @@ final class ModelDownloadIntegrityTests: XCTestCase {
 
         XCTAssertEqual(try ModelDownloadIntegrity.sha256Digest(ofFileAt: fileURL), expected)
     }
+
+    func testSameSizeCorruptionFailsStrongETagVerification() throws {
+        let original = Data("same-size model payload".utf8)
+        let fileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("integrity-corrupt-\(UUID().uuidString).bin")
+        try original.write(to: fileURL)
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+
+        let etag = SHA256.hash(data: original)
+            .map { String(format: "%02x", $0) }
+            .joined()
+        var corrupted = original
+        corrupted[corrupted.startIndex] ^= 0x01
+        try corrupted.write(to: fileURL, options: .atomic)
+        let corruptedDigest = SHA256.hash(data: corrupted).map { String(format: "%02x", $0) }.joined()
+
+        XCTAssertThrowsError(
+            try ModelDownloadIntegrity.verify(
+                fileAt: fileURL,
+                expectedBytes: Int64(original.count),
+                etag: etag,
+                revision: "pinned-revision"
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? ModelDownloadIntegrityError,
+                .digestMismatch(expected: etag, actual: corruptedDigest)
+            )
+        }
+    }
+
+    func testVerificationReceiptBindsCachedFileToRevisionAndMetadata() throws {
+        let payload = Data("verified model payload".utf8)
+        let fileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("integrity-receipt-\(UUID().uuidString).bin")
+        try payload.write(to: fileURL)
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+
+        let etag = SHA256.hash(data: payload)
+            .map { String(format: "%02x", $0) }
+            .joined()
+        let receipt = try ModelDownloadIntegrity.verify(
+            fileAt: fileURL,
+            expectedBytes: Int64(payload.count),
+            etag: etag,
+            revision: "revision-a"
+        )
+
+        XCTAssertTrue(
+            ModelDownloadIntegrity.receiptMatches(
+                receipt,
+                fileAt: fileURL,
+                revision: "revision-a",
+                expectedBytes: Int64(payload.count),
+                etag: etag
+            )
+        )
+        XCTAssertFalse(
+            ModelDownloadIntegrity.receiptMatches(
+                receipt,
+                fileAt: fileURL,
+                revision: "revision-b",
+                expectedBytes: Int64(payload.count),
+                etag: etag
+            )
+        )
+    }
+
+    func testInvalidResumeDataFallsBackToFreshTaskButCancellationDoesNot() {
+        let invalidResume = NSError(
+            domain: NSURLErrorDomain,
+            code: NSURLErrorCannotDecodeContentData
+        )
+        let canceled = NSError(domain: NSURLErrorDomain, code: NSURLErrorCancelled)
+
+        XCTAssertTrue(ModelDownloadIntegrity.shouldDiscardResumeData(after: invalidResume))
+        XCTAssertFalse(ModelDownloadIntegrity.shouldDiscardResumeData(after: canceled))
+    }
 }

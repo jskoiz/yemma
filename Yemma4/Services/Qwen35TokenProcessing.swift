@@ -109,12 +109,27 @@ private struct SpecialTokenSkippingDetokenizer {
 
     mutating func next() -> String? {
         let newSegment = tokenizer.decode(tokenIds: segmentTokens, skipSpecialTokens: true)
-        guard newSegment.count >= segment.count else {
+        let previousUTF8 = Array(segment.utf8)
+        let newUTF8 = Array(newSegment.utf8)
+
+        guard newUTF8.count >= previousUTF8.count else {
             segment = newSegment
             return nil
         }
 
-        let new = newSegment.suffix(newSegment.count - segment.count)
+        // String.count measures extended grapheme clusters, not the decoded
+        // byte/scalar prefix. A combining mark or a ZWJ can leave that count
+        // unchanged while still adding visible content. Decode the delta from
+        // the UTF-8 prefix instead, which keeps the operation boundary-safe.
+        guard newUTF8.starts(with: previousUTF8) else {
+            // The tokenizer can occasionally revise an incomplete token. Do
+            // not invent a suffix or duplicate the revised prefix; wait for a
+            // subsequent cumulative decode that is append-only again.
+            segment = newSegment
+            return nil
+        }
+
+        let new = String(decoding: newUTF8.dropFirst(previousUTF8.count), as: UTF8.self)
         if new.last == "\u{fffd}" {
             return nil
         }

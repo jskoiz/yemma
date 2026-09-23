@@ -76,7 +76,8 @@ enum AppTheme {
         static let rowVerticalPadding: CGFloat = 15
         static let rowIconSize: CGFloat = 22
         static let controlIconSize: CGFloat = 34
-        static let composerActionSize: CGFloat = 42
+        static let minimumControlSize: CGFloat = 44
+        static let composerActionSize: CGFloat = 44
         static let sectionSpacing: CGFloat = 24
         static let sectionLabelSpacing: CGFloat = 10
         static let bubbleHorizontalPadding: CGFloat = 16
@@ -421,6 +422,95 @@ struct UtilitySection<Content: View>: View {
             }
             .groupedCard(cornerRadius: AppTheme.Radius.medium)
         }
+    }
+}
+
+/// Keeps related controls equal in width and height. Stack when their ideal
+/// labels cannot fit side by side, including at larger Dynamic Type sizes.
+struct EqualControlRow: Layout {
+    var spacing: CGFloat = 8
+
+    private func metrics(width: CGFloat?, subviews: Subviews) -> (width: CGFloat, height: CGFloat, stacked: Bool) {
+        let idealWidth = subviews.map { $0.sizeThatFits(.unspecified).width }.max() ?? 0
+        let count = CGFloat(subviews.count)
+        let requiredWidth = idealWidth * count + spacing * max(0, count - 1)
+        let availableWidth = max(0, width ?? requiredWidth)
+        let stacked = requiredWidth > availableWidth
+        let cellWidth = stacked ? availableWidth : max(0, (availableWidth - spacing * max(0, count - 1)) / max(1, count))
+        let height = subviews.map { $0.sizeThatFits(ProposedViewSize(width: cellWidth, height: nil)).height }.max() ?? 0
+        return (cellWidth, height, stacked)
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard !subviews.isEmpty else { return .zero }
+        let m = metrics(width: proposal.width, subviews: subviews)
+        let count = CGFloat(subviews.count)
+        return CGSize(
+            width: m.stacked ? m.width : m.width * count + spacing * (count - 1),
+            height: m.stacked ? m.height * count + spacing * (count - 1) : m.height
+        )
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let m = metrics(width: bounds.width, subviews: subviews)
+        for (index, subview) in subviews.enumerated() {
+            subview.place(
+                at: CGPoint(
+                    x: bounds.minX + (m.stacked ? 0 : CGFloat(index) * (m.width + spacing)),
+                    y: bounds.minY + (m.stacked ? CGFloat(index) * (m.height + spacing) : 0)
+                ),
+                anchor: .topLeading,
+                proposal: ProposedViewSize(width: m.width, height: m.height)
+            )
+        }
+    }
+}
+
+/// A long value gets its own line instead of crushing the setting's title.
+struct UtilityValueRow: View {
+    let icon: String
+    let title: String
+    let detail: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 14) {
+            Image(systemName: icon)
+                .frame(width: AppTheme.Layout.rowIconSize)
+                .foregroundStyle(AppTheme.textPrimary)
+                .padding(.top, 2)
+
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .firstTextBaseline, spacing: 16) {
+                    titleLabel
+                        .fixedSize(horizontal: true, vertical: false)
+                    Spacer(minLength: 0)
+                    detailLabel
+                        .fixedSize(horizontal: true, vertical: false)
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    titleLabel
+                    detailLabel
+                }
+                .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .utilityRowPadding()
+        .accessibilityElement(children: .combine)
+    }
+
+    private var titleLabel: some View {
+        Text(title)
+            .font(AppTheme.Typography.utilityRowTitle)
+            .foregroundStyle(AppTheme.textPrimary)
+    }
+
+    private var detailLabel: some View {
+        Text(detail)
+            .font(AppTheme.Typography.utilityRowDetail)
+            .foregroundStyle(AppTheme.textSecondary)
+            .multilineTextAlignment(.leading)
     }
 }
 

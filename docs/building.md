@@ -6,7 +6,7 @@
 
 Use Xcode 26 or newer with an iOS 26 SDK so the compiler can import Apple's `FoundationModels` framework. The deployment target remains iOS 17, and the app and test targets currently compile in Swift 5 language mode.
 
-`FoundationModels` is an Apple system framework, not a Swift package or embedded binary. The Release validation gate confirms it is weak-linked so the app can still launch on iOS 17-25. The MLX packages remain in the project for the explicit optional Gemma 4 runtime.
+`FoundationModels` is an Apple system framework, not a Swift package or embedded binary. The Release validation gate confirms it is weak-linked so the app can still launch on iOS 17-25. The MLX packages remain in the project for the explicit optional Qwen3.5 4B runtime.
 
 ## Resolve Packages
 
@@ -24,4 +24,4 @@ xcodebuild -resolvePackageDependencies -project Yemma4.xcodeproj
 
 The harness first confirms the selected iOS SDK contains `FoundationModels.framework`. It then runs simulator unit tests, compiles an unsigned Release build for a generic iOS device using the same DerivedData path, locates the resulting app executable, and verifies Foundation Models is weak-linked for iOS 17 compatibility.
 
-Simulator replies are mocked. Real Apple Foundation Models and Gemma inference require a physical iPhone.
+Simulator replies are mocked. Real Apple Foundation Models and Qwen3.5 4B inference require a physical iPhone.

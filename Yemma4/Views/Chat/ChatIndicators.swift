@@ -5,7 +5,7 @@ struct ThinkingOrbView: View {
         HStack(spacing: 10) {
             TypingDotsView()
             Text("Thinking")
-                .font(.system(size: 13, weight: .semibold))
+                .font(.caption.weight(.semibold))
                 .foregroundStyle(AppTheme.textSecondary)
         }
         .padding(.horizontal, 14)
@@ -149,11 +149,11 @@ struct ChatStartupLoadingOverlayView: View {
 
                 VStack(spacing: 8) {
                     Text("Loading now")
-                        .font(.system(size: 24, weight: .bold))
+                        .font(.title2.weight(.bold))
                         .foregroundStyle(AppTheme.textPrimary)
 
                     Text(message)
-                        .font(.system(size: 15, weight: .medium))
+                        .font(AppTheme.Typography.utilityRowDetail)
                         .foregroundStyle(AppTheme.textSecondary)
                         .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
@@ -171,5 +171,6 @@ struct ChatStartupLoadingOverlayView: View {
             .accessibilityLabel("Loading now. \(message)")
         }
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: message)
+        .accessibilityAddTraits(.isModal)
     }
 }

@@ -41,6 +41,9 @@
                ReferencedContainer = "container:Yemma4.xcodeproj">
             </BuildableReference>
          </TestableReference>
+         <TestableReference skipped="NO" parallelizable="NO">
+            <BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="U1000005" BuildableName="Yemma4UITests.xctest" BlueprintName="Yemma4UITests" ReferencedContainer="container:Yemma4.xcodeproj"/>
+         </TestableReference>
       </Testables>
    </TestAction>
    <LaunchAction

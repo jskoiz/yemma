@@ -83,4 +83,57 @@ final class StreamingRendererTests: XCTestCase {
         XCTAssertNil(stopUpdate.visibleText)
         XCTAssertEqual(policy.finalize(), "Hello 🌺")
     }
+
+    func testStreamingTokenPartsPreserveLongUnicodeTokens() {
+        let token = String(repeating: "界", count: 73)
+        let parts = StreamingRenderer.streamingTokenParts(token, maxCharacters: 16)
+
+        XCTAssertGreaterThan(parts.count, 1)
+        XCTAssertEqual(parts.joined(), token)
+        XCTAssertTrue(parts.allSatisfy { $0.count <= 16 })
+    }
+
+    func testMarkdownHeuristicsRecognizeTableAndSingleEmphasis() {
+        XCTAssertTrue(
+            MarkdownHeuristics.looksLikeMarkdown(
+                "| Name | Value |\n| --- | --- |\n| A | B |"
+            )
+        )
+        XCTAssertTrue(MarkdownHeuristics.looksLikeMarkdown("*italic only*"))
+        XCTAssertTrue(MarkdownHeuristics.looksLikeMarkdown("_italic only_"))
+        XCTAssertFalse(MarkdownHeuristics.looksLikeMarkdown("A plain sentence with a * stray mark"))
+    }
+
+    func testStreamingPolicyFinalOutputMatchesDirectSanitizer() {
+        let tokens = [
+            "model\n",
+            "<think>",
+            "private reasoning",
+            "</think>",
+            "Visible ",
+            "answer",
+            "<|end_of_turn|>"
+        ]
+        let raw = tokens.joined()
+        var policy = StreamingUpdatePolicy()
+        let firstUpdate = ContinuousClock.now.advanced(by: .seconds(1))
+        var accumulated = ""
+
+        for (index, token) in tokens.enumerated() {
+            accumulated += token
+            let update = policy.append(
+                token,
+                now: firstUpdate.advanced(by: .milliseconds(index * 120))
+            )
+
+            if let visibleText = update.visibleText {
+                let expected = update.shouldStop
+                    ? StreamingRenderer.sanitize(accumulated)
+                    : StreamingRenderer.streamingVisibleText(accumulated)
+                XCTAssertEqual(visibleText, expected)
+            }
+        }
+
+        XCTAssertEqual(policy.finalize(), StreamingRenderer.sanitize(raw))
+    }
 }

@@ -119,6 +119,32 @@ struct StreamingRenderer: Sendable {
         }
     }
 
+    /// Splits an otherwise unbreakable streaming token into grapheme-safe pieces.
+    /// The flow layout can then constrain each piece on narrow or large-text
+    /// layouts without inserting visual whitespace into the original token.
+    static func streamingTokenParts(_ token: String, maxCharacters: Int = 32) -> [String] {
+        guard !token.isEmpty else { return [] }
+        guard maxCharacters > 0, token.count > maxCharacters else { return [token] }
+
+        var parts: [String] = []
+        var current = ""
+        current.reserveCapacity(maxCharacters)
+
+        for character in token {
+            current.append(character)
+            if current.count == maxCharacters {
+                parts.append(current)
+                current.removeAll(keepingCapacity: true)
+            }
+        }
+
+        if !current.isEmpty {
+            parts.append(current)
+        }
+
+        return parts
+    }
+
     // MARK: - Pipeline Steps
 
     /// Repeatedly strips a leading role prefix and trims whitespace until the

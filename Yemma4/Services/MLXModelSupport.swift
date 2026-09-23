@@ -62,8 +62,11 @@ enum Qwen35MLXSupport {
         enum CodingKeys: String, CodingKey { case dataOffsets = "data_offsets" }
     }
 
-    // Read only safetensors headers, not the multi-GB tensors. An index or model
-    // card alone cannot prove that a conversion retained the vision encoder.
+    // Read only safetensors headers, not the multi-GB tensors. The pinned
+    // package has one combined safetensors file and an index that maps every
+    // text and vision tensor into that file. The index is part of the runtime
+    // contract because it is what the MLX loader uses to discover the text
+    // weights.
     private static func validateVisionWeights(in directory: ValidatedModelDirectory) throws {
         var tensorNames = Set<String>()
         for name in directory.weightFileNames {
@@ -90,13 +93,70 @@ enum Qwen35MLXSupport {
                 tensorNames.insert(key)
             }
         }
-        let required = ["vision_tower.patch_embed.proj.weight", "vision_tower.merger.linear_fc1.weight",
-                        "vision_tower.merger.linear_fc2.weight", "language_model.model.embed_tokens.weight"]
+        guard !directory.indexedWeightFileNames.isEmpty,
+              !directory.indexedTensorNames.isEmpty,
+              tensorNames == directory.indexedTensorNames else {
+            throw Qwen35AssetValidationError.invalid(
+                "The combined package has no complete safetensors weight index. Download the complete model again."
+            )
+        }
+
+        let requiredVision = ["vision_tower.patch_embed.proj.weight", "vision_tower.merger.linear_fc1.weight",
+                              "vision_tower.merger.linear_fc2.weight"]
             + (0..<24).map { "vision_tower.blocks.\($0).attn.qkv.weight" }
-        guard required.allSatisfy(tensorNames.contains),
+        guard requiredVision.allSatisfy(tensorNames.contains),
               tensorNames.filter({ $0.hasPrefix("vision_tower.") }).count == 297 else {
             throw Qwen35AssetValidationError.invalid("The combined package is missing language or vision weights. Download the complete model again.")
         }
+
+        guard expectedTextWeightNames.isSubset(of: tensorNames) else {
+            throw Qwen35AssetValidationError.invalid(
+                "The combined package is missing text weights required by Qwen3.5 4B. Download the complete model again."
+            )
+        }
+    }
+
+    private static var expectedTextWeightNames: Set<String> {
+        var names: Set<String> = [
+            "language_model.model.embed_tokens.biases",
+            "language_model.model.embed_tokens.scales",
+            "language_model.model.embed_tokens.weight",
+            "language_model.model.norm.weight"
+        ]
+
+        let quantizedProjectionNames = ["biases", "scales", "weight"]
+        for layer in 0..<32 {
+            let prefix = "language_model.model.layers.\(layer)"
+            names.insert("\(prefix).input_layernorm.weight")
+            names.insert("\(prefix).post_attention_layernorm.weight")
+            for projection in ["down_proj", "gate_proj", "up_proj"] {
+                for suffix in quantizedProjectionNames {
+                    names.insert("\(prefix).mlp.\(projection).\(suffix)")
+                }
+            }
+
+            if layer % 4 == 3 {
+                for projection in ["k_proj", "o_proj", "q_proj", "v_proj"] {
+                    for suffix in quantizedProjectionNames {
+                        names.insert("\(prefix).self_attn.\(projection).\(suffix)")
+                    }
+                }
+                names.insert("\(prefix).self_attn.k_norm.weight")
+                names.insert("\(prefix).self_attn.q_norm.weight")
+            } else {
+                names.insert("\(prefix).linear_attn.A_log")
+                names.insert("\(prefix).linear_attn.conv1d.weight")
+                names.insert("\(prefix).linear_attn.dt_bias")
+                names.insert("\(prefix).linear_attn.norm.weight")
+                for projection in ["in_proj_a", "in_proj_b", "in_proj_qkv", "in_proj_z", "out_proj"] {
+                    for suffix in quantizedProjectionNames {
+                        names.insert("\(prefix).linear_attn.\(projection).\(suffix)")
+                    }
+                }
+            }
+        }
+
+        return names
     }
 
     static func directorySize(at directory: URL, includingHiddenFiles: Bool = false) -> Int64 {
@@ -140,6 +200,7 @@ struct ValidatedModelDirectory: Sendable {
     let processorConfigFileName: String
     let weightFileNames: [String]
     let indexedWeightFileNames: [String]
+    let indexedTensorNames: Set<String>
 }
 
 private struct SafetensorsIndex: Decodable {
@@ -245,6 +306,7 @@ enum ModelDirectoryValidator {
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
 
         var indexedWeightFileNames: [String] = []
+        var indexedTensorNames: Set<String> = []
         for indexFile in indexFiles {
             try validateReadableFile(
                 at: indexFile,
@@ -261,6 +323,7 @@ enum ModelDirectoryValidator {
             }
 
             let shardFileNames = Array(Set(parsedIndex.weightMap.values)).sorted()
+            indexedTensorNames.formUnion(parsedIndex.weightMap.keys)
             for shardFileName in shardFileNames {
                 guard let shardURL = fileMap[shardFileName] else {
                     throw ModelDirectoryValidationError.missingIndexedWeightShard(
@@ -284,7 +347,8 @@ enum ModelDirectoryValidator {
             processorConfigURL: processorConfigURL,
             processorConfigFileName: processorConfigURL.lastPathComponent,
             weightFileNames: weightFiles.map(\.lastPathComponent),
-            indexedWeightFileNames: Array(Set(indexedWeightFileNames)).sorted()
+            indexedWeightFileNames: Array(Set(indexedWeightFileNames)).sorted(),
+            indexedTensorNames: indexedTensorNames
         )
     }
 

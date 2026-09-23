@@ -2,10 +2,6 @@ import Foundation
 import Observation
 @preconcurrency import Hub
 
-public struct LocalModelResources: Sendable {
-    public let modelDirectoryPath: String
-}
-
 enum SetupRecoveryAction {
     case resumeDownload
     case retryDownload
@@ -66,7 +62,6 @@ struct AppSetupSnapshot {
     let supportsLocalModelRuntime: Bool
     let selectedRuntime: InferenceRuntime
     let appleFoundationModelAvailability: AppleFoundationModelAvailability
-    let supportsImageInput: Bool
     let isDownloaded: Bool
     let isDownloading: Bool
     let isValidatingDownloadedModel: Bool
@@ -80,6 +75,9 @@ struct AppSetupSnapshot {
     let remainingDownloadBytes: Int64
     let estimatedSecondsRemaining: Double?
     let currentDownloadSpeedBytesPerSecond: Double?
+    let requiredFreeSpaceBytes: Int64
+    let lastValidationDate: Date?
+    let allowsCellularDownload: Bool
     let isTextModelReady: Bool
     let isModelLoading: Bool
     let modelLoadStage: ModelLoadStage
@@ -93,7 +91,6 @@ struct AppSetupSnapshot {
         self.supportsLocalModelRuntime = supportsLocalModelRuntime
         selectedRuntime = llmService.selectedRuntime
         appleFoundationModelAvailability = llmService.appleFoundationModelAvailability
-        supportsImageInput = llmService.supportsImageInput
         isDownloaded = modelDownloader.isDownloaded
         isDownloading = modelDownloader.isDownloading
         isValidatingDownloadedModel = modelDownloader.isValidatingDownloadedModel
@@ -107,6 +104,9 @@ struct AppSetupSnapshot {
         remainingDownloadBytes = modelDownloader.remainingDownloadBytes
         estimatedSecondsRemaining = modelDownloader.estimatedSecondsRemaining
         currentDownloadSpeedBytesPerSecond = modelDownloader.currentDownloadSpeedBytesPerSecond
+        requiredFreeSpaceBytes = modelDownloader.requiredFreeSpaceBytes
+        lastValidationDate = modelDownloader.lastValidationDate
+        allowsCellularDownload = modelDownloader.allowsCellularDownload
         isTextModelReady = llmService.isTextModelReady
         isModelLoading = llmService.isModelLoading
         modelLoadStage = llmService.modelLoadStage
@@ -368,6 +368,12 @@ public final class ModelDownloader {
     public var modelPath: String?
     public var estimatedSecondsRemaining: Double?
     public var currentDownloadSpeedBytesPerSecond: Double?
+    public var allowsCellularDownload: Bool {
+        didSet {
+            defaults.set(allowsCellularDownload, forKey: Self.allowsCellularDownloadKey)
+        }
+    }
+    public private(set) var lastValidationDate: Date?
     private var lastSpeedSampleDate: Date?
     private var lastSpeedSampleBytes: Int64 = 0
     private var currentDownloadedBytes: Int64 = 0
@@ -390,6 +396,8 @@ public final class ModelDownloader {
 
     static let persistedModelPathKey = "com.avmillabs.yemma4.modelDownloader.modelPath"
     static let modelDeletionPendingKey = "com.avmillabs.yemma4.modelDownloader.deletionPending"
+    static let allowsCellularDownloadKey = "com.avmillabs.yemma4.modelDownloader.allowsCellularDownload"
+    static let lastValidationDateKey = "com.avmillabs.yemma4.modelDownloader.lastValidationDate"
 
     public init(
         fileManager: FileManager = .default,
@@ -399,22 +407,20 @@ public final class ModelDownloader {
         self.fileManager = fileManager
         self.defaults = defaults
         self.makeHub = hubFactory
+        allowsCellularDownload = defaults.object(forKey: Self.allowsCellularDownloadKey) as? Bool ?? false
+        lastValidationDate = defaults.object(forKey: Self.lastValidationDateKey) as? Date
         hasLegacyModelFiles = fileManager.fileExists(atPath: hubClient().localRepoLocation(
             Hub.Repo(id: Self.legacyRepositoryID)
         ).path)
         restorePersistedState()
     }
 
-    public var localResources: LocalModelResources? {
-        guard isDownloaded, let modelPath else {
-            return nil
-        }
-
-        return LocalModelResources(modelDirectoryPath: modelPath)
-    }
-
     public var estimatedDownloadBytes: Int64 {
         max(currentEstimatedBytes, currentDownloadedBytes)
+    }
+
+    public var requiredFreeSpaceBytes: Int64 {
+        ModelDownloadStorageCheck.requiredBytes(forModelBytes: estimatedDownloadBytes)
     }
 
     public var downloadedBytes: Int64 {
@@ -494,6 +500,7 @@ public final class ModelDownloader {
         validationTask = nil
         activeValidationID = nil
         isValidatingDownloadedModel = false
+        markValidationCompleted()
     }
 
     private func performDownloadedModelValidation(
@@ -514,7 +521,7 @@ public final class ModelDownloader {
         guard revision == modelLifecycleRevision else { return }
 
         if let validation {
-            await BackgroundModelDownloadCoordinator.shared.clearState(
+            await BackgroundModelDownloadCoordinator.shared.clearTransientState(
                 using: hub,
                 repositoryID: Qwen35MLXSupport.repositoryID
             )
@@ -569,7 +576,7 @@ public final class ModelDownloader {
         do {
             if let cachedDirectory = await firstValidModelDirectoryAsync(using: hub) {
                 finishWithCachedDownload(cachedDirectory)
-                await BackgroundModelDownloadCoordinator.shared.clearState(
+                await BackgroundModelDownloadCoordinator.shared.clearTransientState(
                     using: hub,
                     repositoryID: Qwen35MLXSupport.repositoryID
                 )
@@ -588,7 +595,8 @@ public final class ModelDownloader {
                 using: hub,
                 repositoryID: Qwen35MLXSupport.repositoryID,
                 revision: Qwen35MLXSupport.repositoryRevision,
-                matching: Qwen35MLXSupport.downloadPatterns
+                matching: Qwen35MLXSupport.downloadPatterns,
+                allowsCellularDownload: allowsCellularDownload
             )
 
             applyBackgroundSnapshot(snapshot)
@@ -597,7 +605,42 @@ public final class ModelDownloader {
             }
         } catch {
             finishFailedDownload(error)
+            let snapshot = await BackgroundModelDownloadCoordinator.shared.snapshot(
+                using: hub,
+                repositoryID: Qwen35MLXSupport.repositoryID
+            )
+            if snapshot.lastError != nil || snapshot.hasPendingWork || snapshot.hasRunningTasks {
+                applyBackgroundSnapshot(snapshot)
+            }
         }
+    }
+
+    /// Pauses active URLSession tasks and preserves resumable data. This does
+    /// not delete verified files that have already completed.
+    public func pauseDownload() async {
+        guard isDownloading else { return }
+        stopProgressMonitor()
+        let hub = hubClient()
+        let snapshot = await BackgroundModelDownloadCoordinator.shared.pauseDownload(
+            using: hub,
+            repositoryID: Qwen35MLXSupport.repositoryID
+        )
+        applyBackgroundSnapshot(snapshot)
+        AppDiagnostics.shared.record("Paused MLX model download", category: "download")
+    }
+
+    /// Cancels active tasks and removes resume blobs while retaining verified
+    /// completed files for a later user-initiated restart.
+    public func cancelDownload() async {
+        guard isDownloading || canResumeDownload else { return }
+        stopProgressMonitor()
+        let hub = hubClient()
+        let snapshot = await BackgroundModelDownloadCoordinator.shared.cancelDownload(
+            using: hub,
+            repositoryID: Qwen35MLXSupport.repositoryID
+        )
+        applyBackgroundSnapshot(snapshot)
+        AppDiagnostics.shared.record("Canceled MLX model download", category: "download")
     }
 
     public func appDidEnterBackground() {
@@ -700,6 +743,8 @@ public final class ModelDownloader {
         downloadProgress = 0
         currentDownloadedBytes = 0
         currentEstimatedBytes = Qwen35MLXSupport.approximateDownloadBytes
+        lastValidationDate = nil
+        defaults.removeObject(forKey: Self.lastValidationDateKey)
         error = nil
         modelDeletionError = nil
         resetETA()
@@ -752,6 +797,8 @@ public final class ModelDownloader {
         currentEstimatedBytes = Qwen35MLXSupport.approximateDownloadBytes
         estimatedSecondsRemaining = nil
         currentDownloadSpeedBytesPerSecond = nil
+        lastValidationDate = nil
+        defaults.removeObject(forKey: Self.lastValidationDateKey)
         error = Self.unsupportedRuntimeMessage
         modelDeletionError = nil
         persistState(modelPath: nil)
@@ -767,6 +814,8 @@ public final class ModelDownloader {
         downloadProgress = 0
         currentDownloadedBytes = 0
         currentEstimatedBytes = Qwen35MLXSupport.approximateDownloadBytes
+        lastValidationDate = nil
+        defaults.removeObject(forKey: Self.lastValidationDateKey)
         startETA()
     }
 
@@ -782,6 +831,7 @@ public final class ModelDownloader {
         error = nil
         modelDeletionError = nil
         resetETA()
+        markValidationCompleted()
         persistState(modelPath: cachedDirectory.0.location.path)
     }
 
@@ -858,7 +908,16 @@ public final class ModelDownloader {
     }
 
     private func firstValidModelDirectoryAsync(using hub: HubApi) async -> (ValidatedModelDirectory, Int64)? {
-        let validationTask = Task.detached(priority: .utility) { () -> (ValidatedModelDirectory, Int64)? in
+        guard await BackgroundModelDownloadCoordinator.shared.verifyCachedFiles(
+            using: hub,
+            repositoryID: Qwen35MLXSupport.repositoryID,
+            revision: Qwen35MLXSupport.repositoryRevision
+        ) else {
+            return nil
+        }
+
+        let validationTask = Task.detached(priority: .utility) {
+            () -> (directory: ValidatedModelDirectory, size: Int64, error: String?)? in
             let location = hub.localRepoLocation(Hub.Repo(id: Qwen35MLXSupport.repositoryID))
             guard let validatedDirectory = try? ModelDirectoryValidator.validatedDirectory(at: location) else {
                 return nil
@@ -877,13 +936,34 @@ public final class ModelDownloader {
                         "error": (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
                     ]
                 )
-                return nil
+                return (
+                    directory: validatedDirectory,
+                    size: Qwen35MLXSupport.directorySize(at: location),
+                    error: (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                )
             }
 
-            return (validatedDirectory, Qwen35MLXSupport.directorySize(at: location))
+            return (
+                directory: validatedDirectory,
+                size: Qwen35MLXSupport.directorySize(at: location),
+                error: nil
+            )
         }
 
-        return await validationTask.value
+        guard let result = await validationTask.value else {
+            return nil
+        }
+
+        if let error = result.error {
+            BackgroundModelDownloadCoordinator.shared.invalidateCachedFiles(
+                using: hub,
+                repositoryID: Qwen35MLXSupport.repositoryID,
+                reason: error
+            )
+            return nil
+        }
+
+        return (result.directory, result.size)
     }
 
     private func applyMissingValidatedModelState(_ snapshot: BackgroundModelDownloadSnapshot) {
@@ -998,6 +1078,12 @@ public final class ModelDownloader {
         canResumeDownload = false
         downloadProgress = 0
         error = nil
+    }
+
+    private func markValidationCompleted() {
+        let date = Date()
+        lastValidationDate = date
+        defaults.set(date, forKey: Self.lastValidationDateKey)
     }
 
     private func persistState(modelPath: String?) {

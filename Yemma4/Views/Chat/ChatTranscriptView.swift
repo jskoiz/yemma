@@ -6,8 +6,10 @@ import UIKit
 
 struct ChatTranscriptView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.chatFeatures) private var features
 
     let messages: [ChatMessage]
+    let conversationID: UUID?
     let appSetup: AppSetupSnapshot
     let taskStarters: [ChatStarter]
     let streamingMessageID: String?
@@ -30,6 +32,64 @@ struct ChatTranscriptView: View {
     let onShareMessageText: (String) -> Void
     let onRetryAssistantResponse: (ChatMessage, Int) -> Void
     let onRefineAssistantResponse: (ChatMessage, AssistantRefinement) -> Void
+    let resumeTitle: String?
+    let onResume: (() -> Void)?
+
+    init(
+        messages: [ChatMessage],
+        conversationID: UUID? = nil,
+        appSetup: AppSetupSnapshot,
+        taskStarters: [ChatStarter],
+        streamingMessageID: String?,
+        isGenerating: Bool,
+        completedAssistantMessageIDs: Set<String>,
+        assistantResponseStats: [String: GenerationDebugStats],
+        showsAssistantResponseStats: Bool,
+        topInset: CGFloat,
+        isPinnedToBottom: Binding<Bool>,
+        scrollViewportHeight: Binding<CGFloat>,
+        latestContentOverflow: Binding<CGFloat>,
+        onTapBackground: @escaping () -> Void,
+        onJumpToLatest: @escaping () -> Void,
+        onSelectStarter: @escaping (ChatStarter) -> Void,
+        primarySetupActionTitle: String?,
+        primarySetupAction: (() -> Void)?,
+        shouldShowMessageActionStrip: @escaping (ChatMessage, Int) -> Bool,
+        canRetryAssistantResponse: @escaping (ChatMessage, Int) -> Bool,
+        onCopyMessageText: @escaping (String) -> Void,
+        onShareMessageText: @escaping (String) -> Void,
+        onRetryAssistantResponse: @escaping (ChatMessage, Int) -> Void,
+        onRefineAssistantResponse: @escaping (ChatMessage, AssistantRefinement) -> Void,
+        resumeTitle: String? = nil,
+        onResume: (() -> Void)? = nil
+    ) {
+        self.messages = messages
+        self.conversationID = conversationID
+        self.appSetup = appSetup
+        self.taskStarters = taskStarters
+        self.streamingMessageID = streamingMessageID
+        self.isGenerating = isGenerating
+        self.completedAssistantMessageIDs = completedAssistantMessageIDs
+        self.assistantResponseStats = assistantResponseStats
+        self.showsAssistantResponseStats = showsAssistantResponseStats
+        self.topInset = topInset
+        self._isPinnedToBottom = isPinnedToBottom
+        self._scrollViewportHeight = scrollViewportHeight
+        self._latestContentOverflow = latestContentOverflow
+        self.onTapBackground = onTapBackground
+        self.onJumpToLatest = onJumpToLatest
+        self.onSelectStarter = onSelectStarter
+        self.primarySetupActionTitle = primarySetupActionTitle
+        self.primarySetupAction = primarySetupAction
+        self.shouldShowMessageActionStrip = shouldShowMessageActionStrip
+        self.canRetryAssistantResponse = canRetryAssistantResponse
+        self.onCopyMessageText = onCopyMessageText
+        self.onShareMessageText = onShareMessageText
+        self.onRetryAssistantResponse = onRetryAssistantResponse
+        self.onRefineAssistantResponse = onRefineAssistantResponse
+        self.resumeTitle = resumeTitle
+        self.onResume = onResume
+    }
 
     var body: some View {
         GeometryReader { geometry in
@@ -62,6 +122,7 @@ struct ChatTranscriptView: View {
                         .padding(.horizontal, 16)
                         .padding(.top, 8)
                         .padding(.bottom, 18)
+                        .frame(maxWidth: 760)
                         .frame(maxWidth: .infinity, minHeight: geometry.size.height, alignment: .top)
                         .animation(
                             reduceMotion
@@ -77,7 +138,17 @@ struct ChatTranscriptView: View {
                     .scrollDismissesKeyboard(.interactively)
                     .contentShape(Rectangle())
                     .onTapGesture(perform: onTapBackground)
-                    .defaultScrollAnchor(.bottom)
+                    .defaultScrollAnchor(messages.isEmpty ? .top : .bottom)
+                    .task(id: searchRequestKey) {
+                        guard let features, let destination = features.destination,
+                              destination.conversationID == conversationID,
+                              messages.contains(where: { $0.id == destination.messageID }) else { return }
+                        await Task.yield()
+                        guard !Task.isCancelled, features.destination == destination else { return }
+                        isPinnedToBottom = false
+                        proxy.scrollTo(destination.messageID, anchor: .center)
+                        features.destination = nil
+                    }
                     .onAppear {
                         scrollViewportHeight = geometry.size.height
                     }
@@ -87,8 +158,12 @@ struct ChatTranscriptView: View {
                     .onPreferenceChange(ConversationBottomOffsetPreferenceKey.self) { bottomMaxY in
                         updatePinnedState(bottomMaxY: bottomMaxY)
                     }
-                    .onChange(of: messages.count) { _, _ in
-                        scrollToBottomIfPinned(proxy: proxy, animated: true)
+                    .onChange(of: transcriptScrollIdentity) { oldValue, newValue in
+                        handleTranscriptChange(
+                            from: oldValue,
+                            to: newValue,
+                            proxy: proxy
+                        )
                     }
 
                     if shouldShowJumpToLatest {
@@ -113,6 +188,20 @@ struct ChatTranscriptView: View {
         )
     }
 
+    private var transcriptScrollIdentity: TranscriptScrollIdentity {
+        TranscriptScrollIdentity(
+            conversationID: conversationID,
+            messageList: messageListIdentity,
+            latestMessageText: messages.last?.text ?? "",
+            latestMessageStatus: messages.last?.status
+        )
+    }
+
+    private var searchRequestKey: String {
+        [features?.destination?.requestID.uuidString ?? "", conversationID?.uuidString ?? "",
+         messages.first?.id ?? "", messages.last?.id ?? ""].joined(separator: "|")
+    }
+
     private var bottomAnchorID: String { "conversation-bottom-anchor" }
     private let scrollCoordinateSpaceName = "conversation-scroll"
     private let pinnedThreshold: CGFloat = 48
@@ -134,7 +223,9 @@ struct ChatTranscriptView: View {
             primarySetupActionTitle: primarySetupActionTitle,
             onPrimarySetupAction: primarySetupAction,
             starters: taskStarters,
-            onSelectStarter: onSelectStarter
+            onSelectStarter: onSelectStarter,
+            resumeTitle: resumeTitle,
+            onResume: onResume
         )
     }
 
@@ -145,6 +236,13 @@ struct ChatTranscriptView: View {
 
                 ChatUserMessageBubble(message: message)
                     .frame(maxWidth: 420, alignment: .trailing)
+                    .contextMenu {
+                        Button("Copy", systemImage: "doc.on.doc") { onCopyMessageText(message.text) }
+                        if let features {
+                            Button("Edit question", systemImage: "pencil") { features.sheet = .edit(message) }
+                                .disabled(isGenerating)
+                        }
+                    }
             } else {
                 let shouldShowActionStrip = shouldShowMessageActionStrip(message, index)
                 let canRetry = canRetryAssistantResponse(message, index)
@@ -198,6 +296,29 @@ struct ChatTranscriptView: View {
     ) {
         guard isPinnedToBottom else { return }
         scrollToBottom(proxy: proxy, animated: animated, animation: animation)
+    }
+
+    private func handleTranscriptChange(
+        from oldValue: TranscriptScrollIdentity,
+        to newValue: TranscriptScrollIdentity,
+        proxy: ScrollViewProxy
+    ) {
+        let conversationChanged = oldValue.conversationID != newValue.conversationID
+            || (
+                newValue.conversationID == nil
+                    && oldValue.messageList != newValue.messageList
+                    && oldValue.messageList.count == newValue.messageList.count
+            )
+
+        if conversationChanged {
+            isPinnedToBottom = true
+            latestContentOverflow = 0
+            scrollToBottom(proxy: proxy, animated: false)
+        } else {
+            // Text growth during streaming must follow only while the user was
+            // already pinned. A manual scroll-away remains untouched.
+            scrollToBottomIfPinned(proxy: proxy, animated: false)
+        }
     }
 
     private func scrollToBottom(
@@ -329,9 +450,23 @@ private struct ChatUserMessageBubble: View {
 
     private func accessibilityLabel(text: String, shouldRenderText: Bool) -> String {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let imageCount = imageAttachments(for: message).count
+        let imageDescription: String? = {
+            guard imageCount > 0 else { return nil }
+            return imageCount == 1 ? "1 attached image" : "\(imageCount) attached images"
+        }()
+
         if shouldRenderText, !trimmed.isEmpty {
+            if let imageDescription {
+                return "You said, \(trimmed), with \(imageDescription)"
+            }
             return "You said, \(trimmed)"
         }
+
+        if let imageDescription {
+            return "You sent \(imageDescription)"
+        }
+
         return "You sent an attachment"
     }
 }
@@ -355,6 +490,8 @@ private struct ChatAssistantMessageBody: View {
         let text = displayText(for: message, isGenerating: isGenerating)
         let shouldRenderText = shouldRenderText(for: message, text: text)
         let isStreaming = message.id == streamingMessageID && isGenerating
+        let isError = message.status == .error
+        let hasMeaningfulText = !message.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let isActionStripVisible = shouldShowMessageActionStrip
 
         VStack(alignment: .leading, spacing: 10) {
@@ -365,11 +502,28 @@ private struct ChatAssistantMessageBody: View {
             if shouldRenderText {
                 if isStreaming {
                     RichMessageText(text: text, isStreaming: true)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("Yemma is responding")
+                        .accessibilityValue(
+                            text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                ? "Preparing response"
+                                : text.trimmingCharacters(in: .whitespacesAndNewlines)
+                        )
+                        .accessibilityAddTraits(.updatesFrequently)
                 } else {
                     RichMessageText(text: text, isStreaming: false)
                         .accessibilityElement(children: .combine)
                         .accessibilityLabel("Yemma said, \(text.trimmingCharacters(in: .whitespacesAndNewlines))")
                 }
+            }
+
+            if isError {
+                Text(hasMeaningfulText ? "Response interrupted." : "Response interrupted. Try again.")
+                    .font(AppTheme.Typography.utilityCaption)
+                    .foregroundStyle(AppTheme.destructive)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("Response interrupted. Retry available.")
             }
 
             if isActionStripVisible {
@@ -408,8 +562,9 @@ private struct ChatAssistantMessageBody: View {
     @ViewBuilder
     private var messageActionMenuItems: some View {
         let trimmedText = message.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let hasMeaningfulText = !trimmedText.isEmpty
 
-        if !trimmedText.isEmpty {
+        if hasMeaningfulText {
             Button {
                 onCopyMessageText(trimmedText)
             } label: {
@@ -427,14 +582,16 @@ private struct ChatAssistantMessageBody: View {
             Button {
                 onRetryAssistantResponse(message, index)
             } label: {
-                Label("Retry", systemImage: "arrow.clockwise")
+                Label("Retry response", systemImage: "arrow.clockwise")
             }
 
-            ForEach([AssistantRefinement.shorter, .moreDetail], id: \.rawValue) { refinement in
-                Button {
-                    onRefineAssistantResponse(message, refinement)
-                } label: {
-                    Label(refinement.title, systemImage: refinement.systemImage)
+            if hasMeaningfulText {
+                ForEach([AssistantRefinement.shorter, .moreDetail], id: \.rawValue) { refinement in
+                    Button {
+                        onRefineAssistantResponse(message, refinement)
+                    } label: {
+                        Label(refinement.title, systemImage: refinement.systemImage)
+                    }
                 }
             }
         }
@@ -447,13 +604,15 @@ private struct ChatAttachmentGrid: View {
     var body: some View {
         if attachments.count == 1, let attachment = attachments.first {
             ChatAttachmentPreviewTile(attachment: attachment, height: 216)
+                .accessibilityLabel("Attached image")
         } else {
             LazyVGrid(columns: [
                 GridItem(.flexible(), spacing: 8),
                 GridItem(.flexible(), spacing: 8)
             ], spacing: 8) {
-                ForEach(attachments, id: \.id) { attachment in
+                ForEach(Array(attachments.enumerated()), id: \.element.id) { index, attachment in
                     ChatAttachmentPreviewTile(attachment: attachment, height: 112)
+                        .accessibilityLabel("Attached image \(index + 1) of \(attachments.count)")
                 }
             }
         }
@@ -491,6 +650,8 @@ struct ChatAttachmentPreviewTile: View {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(AppTheme.assistantBubbleBorder, lineWidth: 1)
         )
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Image attachment")
         .task(id: attachment.thumbnail) {
             await loadThumbnail()
         }
@@ -549,6 +710,13 @@ private struct MessageListIdentity: Equatable {
     let count: Int
     let firstID: String?
     let lastID: String?
+}
+
+private struct TranscriptScrollIdentity: Equatable {
+    let conversationID: UUID?
+    let messageList: MessageListIdentity
+    let latestMessageText: String
+    let latestMessageStatus: ChatMessage.Status?
 }
 
 private struct ConversationBottomOffsetPreferenceKey: PreferenceKey {

@@ -60,6 +60,25 @@ final class Qwen35AssetContractTests: XCTestCase {
         XCTAssertThrowsError(try validate())
     }
 
+    func testMissingWeightIndexRejected() throws {
+        try FileManager.default.removeItem(at: directory.appendingPathComponent("model.safetensors.index.json"))
+        XCTAssertThrowsError(try validate())
+    }
+
+    func testMissingTextLayerWeightRejectedEvenWhenIndexMatchesHeader() throws {
+        let names = Self.tensorNames.filter {
+            $0 != "language_model.model.layers.31.input_layernorm.weight"
+        }
+        try writeWeights(names: names)
+        try writeIndex(names: names)
+        XCTAssertThrowsError(try validate())
+    }
+
+    func testWeightIndexMustCoverEverySafetensorsTensor() throws {
+        try writeIndex(names: Array(Self.tensorNames.dropLast()))
+        XCTAssertThrowsError(try validate())
+    }
+
     func testTruncatedWeightPayloadRejected() throws {
         let handle = try FileHandle(forWritingTo: directory.appendingPathComponent("model.safetensors"))
         let size = try handle.seekToEnd()
@@ -120,6 +139,7 @@ final class Qwen35AssetContractTests: XCTestCase {
         try JSONSerialization.data(withJSONObject: ["chat_template": template]).write(to: directory.appendingPathComponent("tokenizer_config.json"))
         try Data("{}".utf8).write(to: directory.appendingPathComponent("tokenizer.json"))
         try writeWeights(names: Self.tensorNames)
+        try writeIndex(names: Self.tensorNames)
     }
 
     private func writeWeights(names: [String]) throws {
@@ -132,6 +152,16 @@ final class Qwen35AssetContractTests: XCTestCase {
         file.append(header)
         file.append(Data(repeating: 0, count: names.count))
         try file.write(to: directory.appendingPathComponent("model.safetensors"))
+    }
+
+    private func writeIndex(names: [String]) throws {
+        let weightMap = Dictionary(uniqueKeysWithValues: names.map { ($0, "model.safetensors") })
+        let index: [String: Any] = [
+            "metadata": ["total_size": names.count],
+            "weight_map": weightMap,
+        ]
+        let data = try JSONSerialization.data(withJSONObject: index, options: [.sortedKeys])
+        try data.write(to: directory.appendingPathComponent("model.safetensors.index.json"))
     }
 
     // Metadata from the pinned package; fixture payloads above remain tiny.
@@ -301,7 +331,6 @@ final class Qwen35AssetContractTests: XCTestCase {
         "vision_tower.patch_embed.proj.bias",
         "vision_tower.patch_embed.proj.weight",
         "vision_tower.pos_embed.weight",
-        "language_model.model.embed_tokens.weight",
     ] + (0..<24).flatMap { block in
         [
             "attn.proj.bias",
@@ -317,6 +346,49 @@ final class Qwen35AssetContractTests: XCTestCase {
             "norm2.bias",
             "norm2.weight",
         ].map { "vision_tower.blocks.\(block).\($0)" }
+    } + textTensorNames
+
+    private static var textTensorNames: [String] {
+        var names = [
+            "language_model.model.embed_tokens.biases",
+            "language_model.model.embed_tokens.scales",
+            "language_model.model.embed_tokens.weight",
+            "language_model.model.norm.weight",
+        ]
+
+        let quantizedProjectionNames = ["biases", "scales", "weight"]
+        for layer in 0..<32 {
+            let prefix = "language_model.model.layers.\(layer)"
+            names.append("\(prefix).input_layernorm.weight")
+            names.append("\(prefix).post_attention_layernorm.weight")
+            for projection in ["down_proj", "gate_proj", "up_proj"] {
+                for suffix in quantizedProjectionNames {
+                    names.append("\(prefix).mlp.\(projection).\(suffix)")
+                }
+            }
+
+            if layer % 4 == 3 {
+                for projection in ["k_proj", "o_proj", "q_proj", "v_proj"] {
+                    for suffix in quantizedProjectionNames {
+                        names.append("\(prefix).self_attn.\(projection).\(suffix)")
+                    }
+                }
+                names.append("\(prefix).self_attn.k_norm.weight")
+                names.append("\(prefix).self_attn.q_norm.weight")
+            } else {
+                names.append("\(prefix).linear_attn.A_log")
+                names.append("\(prefix).linear_attn.conv1d.weight")
+                names.append("\(prefix).linear_attn.dt_bias")
+                names.append("\(prefix).linear_attn.norm.weight")
+                for projection in ["in_proj_a", "in_proj_b", "in_proj_qkv", "in_proj_z", "out_proj"] {
+                    for suffix in quantizedProjectionNames {
+                        names.append("\(prefix).linear_attn.\(projection).\(suffix)")
+                    }
+                }
+            }
+        }
+
+        return names
     }
 }
 

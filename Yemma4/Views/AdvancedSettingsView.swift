@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct AdvancedSettingsView: View {
+    @Environment(ModelDownloader.self) private var modelDownloader
     @Environment(LLMService.self) private var llmService
     @Environment(AppDiagnostics.self) private var diagnostics
     @Environment(\.dismiss) private var dismiss
@@ -13,13 +14,16 @@ struct AdvancedSettingsView: View {
     @State private var isSelectingRuntime = false
     @State private var runtimeSelectionError: String?
 
+    let onReloadModel: (() -> Void)?
     let onShowSetupPage: (() -> Void)?
     let onRunDebugScenario: ((DebugInferenceScenario) -> Void)?
 
     init(
+        onReloadModel: (() -> Void)? = nil,
         onShowSetupPage: (() -> Void)? = nil,
         onRunDebugScenario: ((DebugInferenceScenario) -> Void)? = nil
     ) {
+        self.onReloadModel = onReloadModel
         self.onShowSetupPage = onShowSetupPage
         self.onRunDebugScenario = onRunDebugScenario
     }
@@ -38,6 +42,7 @@ struct AdvancedSettingsView: View {
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: AppTheme.Layout.sectionSpacing) {
                         runtimeSection
+                        modelHealthSection
                         overviewSection
                         modelControlsSection
                         advancedSection
@@ -87,28 +92,19 @@ struct AdvancedSettingsView: View {
     }
 
     private var header: some View {
-        HStack {
-            Button {
-                dismiss()
-            } label: {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(AppTheme.textPrimary)
-            }
-            .accessibilityLabel("Back")
-            .accessibilityHint("Returns to the previous settings screen.")
-
-            Spacer()
-
+        HStack(spacing: 12) {
+            CircleIconButton(systemName: "chevron.left", action: { dismiss() })
+                .accessibilityLabel("Back")
+                .accessibilityHint("Returns to the previous settings screen.")
+            Spacer(minLength: 0)
             Text("Advanced")
                 .font(AppTheme.Typography.utilityTitle)
                 .foregroundStyle(AppTheme.textPrimary)
-
-            Spacer()
-
-            Image(systemName: "chevron.left")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(.clear)
+                .lineLimit(1)
+            Spacer(minLength: 0)
+            Color.clear
+                .frame(width: AppTheme.Layout.minimumControlSize, height: AppTheme.Layout.minimumControlSize)
+                .accessibilityHidden(true)
         }
         .padding(.horizontal, 4)
     }
@@ -126,7 +122,34 @@ struct AdvancedSettingsView: View {
                     runtimeOptionRow(runtime)
                 }
                 .buttonStyle(.plain)
-                .disabled(isSelectingRuntime)
+                .disabled(isSelectingRuntime || (runtime == .appleFoundationModel && (llmService.appleFoundationModelAvailability == .requiresIOS26 || llmService.appleFoundationModelAvailability == .deviceNotEligible)))
+            }
+        }
+    }
+
+    private var modelHealthSection: some View {
+        UtilitySection("Model health") {
+            infoRow(icon: "checkmark.shield", title: "Status", detail: llmService.isTextModelReady ? "Ready" : (llmService.isModelLoading ? "Preparing" : "Not loaded"))
+            if let error = llmService.lastError {
+                Text(error)
+                    .font(.callout)
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .utilityRowPadding()
+            }
+            if llmService.selectedRuntime == .qwen35 {
+                UtilitySectionSeparator()
+                infoRow(icon: "checkmark.seal", title: "Last verified", detail: modelDownloader.lastValidationDate?.formatted(date: .abbreviated, time: .shortened) ?? "Not yet verified")
+                Text("If iOS frees model memory, reload when you are ready to chat. Closing other apps can help on devices with limited memory.")
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .utilityRowPadding()
+                if let onReloadModel {
+                    Button("Reload Model") { dismiss(); onReloadModel() }
+                        .disabled(llmService.isGenerating || llmService.isModelLoading || !modelDownloader.isDownloaded)
+                        .frame(minHeight: 44)
+                        .utilityRowPadding()
+                }
             }
         }
     }
@@ -564,43 +587,7 @@ struct AdvancedSettingsView: View {
     }
 
     private func infoRow(icon: String, title: String, detail: String) -> some View {
-        ViewThatFits(in: .vertical) {
-            HStack(spacing: 14) {
-                Image(systemName: icon)
-                    .frame(width: AppTheme.Layout.rowIconSize)
-                    .foregroundStyle(AppTheme.textPrimary)
-
-                Text(title)
-                    .font(AppTheme.Typography.utilityRowTitle)
-                    .foregroundStyle(AppTheme.textPrimary)
-
-                Spacer()
-
-                Text(detail)
-                    .font(AppTheme.Typography.utilityRowDetail)
-                    .foregroundStyle(AppTheme.textSecondary)
-                    .multilineTextAlignment(.trailing)
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 14) {
-                    Image(systemName: icon)
-                        .frame(width: AppTheme.Layout.rowIconSize)
-                        .foregroundStyle(AppTheme.textPrimary)
-
-                    Text(title)
-                        .font(AppTheme.Typography.utilityRowTitle)
-                        .foregroundStyle(AppTheme.textPrimary)
-                }
-
-                Text(detail)
-                    .font(AppTheme.Typography.utilityRowDetail)
-                    .foregroundStyle(AppTheme.textSecondary)
-                    .padding(.leading, AppTheme.Layout.rowIconSize + 14)
-            }
-        }
-        .utilityRowPadding()
-        .accessibilityElement(children: .combine)
+        UtilityValueRow(icon: icon, title: title, detail: detail)
     }
 
     private func utilityActionRow(
@@ -610,53 +597,28 @@ struct AdvancedSettingsView: View {
         titleColor: Color = AppTheme.textPrimary,
         chevronColor: Color = AppTheme.textSecondary
     ) -> some View {
-        ViewThatFits(in: .vertical) {
-            HStack(spacing: 14) {
-                Image(systemName: icon)
-                    .frame(width: AppTheme.Layout.rowIconSize)
+        HStack(alignment: .top, spacing: 14) {
+            Image(systemName: icon)
+                .frame(width: AppTheme.Layout.rowIconSize)
+                .foregroundStyle(titleColor)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(AppTheme.Typography.utilityRowTitle)
                     .foregroundStyle(titleColor)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(title)
-                        .font(AppTheme.Typography.utilityRowTitle)
-                        .foregroundStyle(titleColor)
-
-                    Text(detail)
-                        .font(AppTheme.Typography.utilityCaption)
-                        .foregroundStyle(AppTheme.textSecondary)
-                        .multilineTextAlignment(.leading)
-                }
-
-                Spacer()
-
-                Image(systemName: "chevron.right")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(chevronColor)
-            }
-
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 14) {
-                    Image(systemName: icon)
-                        .frame(width: AppTheme.Layout.rowIconSize)
-                        .foregroundStyle(titleColor)
-
-                    Text(title)
-                        .font(AppTheme.Typography.utilityRowTitle)
-                        .foregroundStyle(titleColor)
-                }
 
                 Text(detail)
                     .font(AppTheme.Typography.utilityCaption)
                     .foregroundStyle(AppTheme.textSecondary)
-                    .padding(.leading, AppTheme.Layout.rowIconSize + 14)
-
-                HStack {
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(chevronColor)
-                }
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
             }
+
+            Spacer()
+
+            Image(systemName: "chevron.right")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(chevronColor)
         }
         .utilityRowPadding()
         .accessibilityElement(children: .combine)
@@ -668,53 +630,28 @@ struct AdvancedSettingsView: View {
         detail: String,
         isExpanded: Bool
     ) -> some View {
-        ViewThatFits(in: .vertical) {
-            HStack(spacing: 14) {
-                Image(systemName: icon)
-                    .frame(width: AppTheme.Layout.rowIconSize)
+        HStack(alignment: .top, spacing: 14) {
+            Image(systemName: icon)
+                .frame(width: AppTheme.Layout.rowIconSize)
+                .foregroundStyle(AppTheme.textPrimary)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(AppTheme.Typography.utilityRowTitle)
                     .foregroundStyle(AppTheme.textPrimary)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(title)
-                        .font(AppTheme.Typography.utilityRowTitle)
-                        .foregroundStyle(AppTheme.textPrimary)
-
-                    Text(detail)
-                        .font(AppTheme.Typography.utilityCaption)
-                        .foregroundStyle(AppTheme.textSecondary)
-                        .multilineTextAlignment(.leading)
-                }
-
-                Spacer()
-
-                Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(AppTheme.textSecondary)
-            }
-
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 14) {
-                    Image(systemName: icon)
-                        .frame(width: AppTheme.Layout.rowIconSize)
-                        .foregroundStyle(AppTheme.textPrimary)
-
-                    Text(title)
-                        .font(AppTheme.Typography.utilityRowTitle)
-                        .foregroundStyle(AppTheme.textPrimary)
-                }
 
                 Text(detail)
                     .font(AppTheme.Typography.utilityCaption)
                     .foregroundStyle(AppTheme.textSecondary)
-                    .padding(.leading, AppTheme.Layout.rowIconSize + 14)
-
-                HStack {
-                    Spacer()
-                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(AppTheme.textSecondary)
-                }
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
             }
+
+            Spacer()
+
+            Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(AppTheme.textSecondary)
         }
         .utilityRowPadding()
         .accessibilityElement(children: .combine)
@@ -761,6 +698,7 @@ struct AdvancedSettingsView: View {
     AdvancedSettingsView()
         .environment(ModelDownloader())
         .environment(LLMService())
+        .environment(ModelDownloader())
         .environment(AppDiagnostics.shared)
 }
 
@@ -768,6 +706,7 @@ struct AdvancedSettingsView: View {
     AdvancedSettingsView()
         .environment(ModelDownloader())
         .environment(LLMService())
+        .environment(ModelDownloader())
         .environment(AppDiagnostics.shared)
         .dynamicTypeSize(.accessibility3)
         .preferredColorScheme(.dark)
