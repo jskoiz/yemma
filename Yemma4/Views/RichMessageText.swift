@@ -94,6 +94,8 @@ struct RichMessageText: View {
                 if isStreaming {
                     Markdown(renderedText)
                         .markdownTheme(chatMarkdownTheme)
+                        .markdownImageProvider(PrivateChatImageProvider())
+                        .markdownInlineImageProvider(PrivateChatImageProvider())
                         .markdownSoftBreakMode(.lineBreak)
                         .foregroundStyle(foregroundColor)
                         .tint(AppTheme.accent)
@@ -103,6 +105,8 @@ struct RichMessageText: View {
                 } else {
                     Markdown(renderedText)
                         .markdownTheme(chatMarkdownTheme)
+                        .markdownImageProvider(PrivateChatImageProvider())
+                        .markdownInlineImageProvider(PrivateChatImageProvider())
                         .markdownSoftBreakMode(.lineBreak)
                         .foregroundStyle(foregroundColor)
                         .tint(AppTheme.accent)
@@ -675,3 +679,16 @@ private struct ChatCodeBlock: View {
     .preferredColorScheme(.dark)
 }
 #endif
+
+/// Model-generated Markdown must never fetch an image, including inline images.
+/// User-selected photos are rendered separately from their local attachments.
+struct PrivateChatImageProvider: ImageProvider, InlineImageProvider {
+    func makeImage(url: URL?) -> some View {
+        Image(systemName: "photo")
+            .accessibilityLabel("Remote image blocked")
+    }
+
+    func image(with url: URL, label: String) async throws -> Image {
+        Image(systemName: "photo")
+    }
+}
