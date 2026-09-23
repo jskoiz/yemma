@@ -44,11 +44,51 @@ enum ConversationAttachmentStore {
             return baseDirectoryOverride.appendingPathComponent(directoryName, isDirectory: true)
         }
 
-        guard let cachesDirectory = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first else {
-            fatalError("Unable to locate the caches directory for attachment storage.")
+        guard let supportDirectory = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+            fatalError("Unable to locate application support for attachment storage.")
         }
 
-        return cachesDirectory.appendingPathComponent(directoryName, isDirectory: true)
+        return supportDirectory.appendingPathComponent(directoryName, isDirectory: true)
+    }
+
+    static func legacyDirectoryURL(fileManager: FileManager = .default) -> URL {
+        fileManager.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent(directoryName, isDirectory: true)
+    }
+
+    /// Move existing images without rewriting every conversation. Old URLs are
+    /// resolved by filename when a conversation is decoded. A failed move leaves
+    /// the original available, and the next launch retries remaining files.
+    static func migrateLegacyFiles(
+        fileManager: FileManager = .default,
+        legacyDirectory: URL? = nil,
+        baseDirectoryOverride: URL? = nil
+    ) throws {
+        let source = legacyDirectory ?? legacyDirectoryURL(fileManager: fileManager)
+        guard fileManager.fileExists(atPath: source.path) else { return }
+        let destination = try prepareDirectory(
+            fileManager: fileManager, baseDirectoryOverride: baseDirectoryOverride
+        )
+        for file in try fileManager.contentsOfDirectory(
+            at: source, includingPropertiesForKeys: [.isRegularFileKey]
+        ) {
+            guard try file.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true else { continue }
+            let target = destination.appendingPathComponent(file.lastPathComponent)
+            // Do not replace an existing image or delete an unresolved collision.
+            guard !fileManager.fileExists(atPath: target.path) else { continue }
+            try fileManager.moveItem(at: file, to: target)
+            try fileManager.setAttributes([.protectionKey: fileProtection], ofItemAtPath: target.path)
+        }
+    }
+
+    static func restoredURL(_ url: URL, baseDirectoryOverride: URL? = nil) -> URL {
+        guard url.isFileURL,
+              url.deletingLastPathComponent().lastPathComponent == directoryName else { return url }
+        let target = directoryURL(baseDirectoryOverride: baseDirectoryOverride)
+            .appendingPathComponent(url.lastPathComponent)
+        // Prefer an existing original if migration did not finish.
+        if FileManager.default.fileExists(atPath: url.path) { return url }
+        return FileManager.default.fileExists(atPath: target.path) ? target : url
     }
 
     /// Creates the attachment directory (if needed) with data protection applied,
@@ -95,7 +135,7 @@ enum ConversationAttachmentStore {
         let directoryPath = directory.standardizedFileURL.path + "/"
         var removedCount = 0
 
-        for url in Set(urls.map(\.standardizedFileURL)) where url.path.hasPrefix(directoryPath) {
+        for url in Set(urls.map { restoredURL($0, baseDirectoryOverride: baseDirectoryOverride).standardizedFileURL }) where url.path.hasPrefix(directoryPath) {
             guard fileManager.fileExists(atPath: url.path) else { continue }
             do {
                 try fileManager.removeItem(at: url)
@@ -175,7 +215,7 @@ private struct PersistedMessage: Codable, Sendable {
         attachments = message.attachments
     }
 
-    func makeMessage() -> ChatMessage {
+    func makeMessage(baseDirectoryOverride: URL? = nil) -> ChatMessage {
         let messageStatus: ChatMessage.Status? = switch status {
         case .sending:
             .sending
@@ -197,7 +237,21 @@ private struct PersistedMessage: Codable, Sendable {
             status: messageStatus,
             createdAt: createdAt,
             text: text,
-            attachments: attachments
+            attachments: attachments.map { $0.restored(baseDirectoryOverride: baseDirectoryOverride) }
+        )
+    }
+}
+
+private extension Attachment {
+    func restored(baseDirectoryOverride: URL?) -> Attachment {
+        Attachment(
+            id: id,
+            thumbnail: ConversationAttachmentStore.restoredURL(thumbnail, baseDirectoryOverride: baseDirectoryOverride),
+            full: ConversationAttachmentStore.restoredURL(full, baseDirectoryOverride: baseDirectoryOverride),
+            type: type,
+            thumbnailCacheKey: thumbnailCacheKey,
+            fullCacheKey: fullCacheKey,
+            fullUploadStatus: fullUploadStatus
         )
     }
 }
@@ -207,6 +261,7 @@ private struct PersistedMessage: Codable, Sendable {
 final class ConversationStore {
     var conversations: [ConversationMetadata] = []
     var currentConversationID: UUID?
+    var storageError: String?
 
     private let fileManager: FileManager
     private let defaults: UserDefaults
@@ -234,16 +289,16 @@ final class ConversationStore {
         }
     }
 
-    func ensureCurrentConversation() -> UUID {
+    func ensureCurrentConversation() throws -> UUID {
         if let currentConversationID {
             return currentConversationID
         }
 
-        return startFreshConversation()
+        return try startFreshConversation()
     }
 
     @discardableResult
-    func startFreshConversation(title: String? = nil) -> UUID {
+    func startFreshConversation(title: String? = nil) throws -> UUID {
         let conversationID = UUID()
         let createdAt = Date()
         let resolvedTitle = cleanedTitle(title) ?? "New chat"
@@ -268,7 +323,7 @@ final class ConversationStore {
             draftAttachments: []
         )
 
-        persist(conversation: conversation, metadata: metadata)
+        try persist(conversation: conversation, metadata: metadata)
         setCurrentConversation(id: conversationID)
         return conversationID
     }
@@ -311,16 +366,17 @@ final class ConversationStore {
         return ConversationSnapshot(
             id: conversation.id,
             title: conversation.title,
-            messages: conversation.messages.map { $0.makeMessage() },
+            messages: conversation.messages.map { $0.makeMessage(baseDirectoryOverride: storageRootOverride) },
             draftText: conversation.draftText,
-            draftAttachments: conversation.draftAttachments
+            draftAttachments: conversation.draftAttachments.map { $0.restored(baseDirectoryOverride: storageRootOverride) }
         )
     }
 
     func loadConversationAsync(id: UUID) async -> ConversationSnapshot? {
         let conversationURL = conversationURL(for: id)
+        let rootOverride = storageRootOverride
         return await Task.detached(priority: .utility) {
-            ConversationSnapshotLoader.load(from: conversationURL)
+            ConversationSnapshotLoader.load(from: conversationURL, storageRootOverride: rootOverride)
         }.value
     }
 
@@ -328,6 +384,13 @@ final class ConversationStore {
         guard !hasLoadedConversationIndex else { return }
         guard !isLoadingConversationIndex else { return }
         isLoadingConversationIndex = true
+        if storageRootOverride == nil {
+            do {
+                try ConversationAttachmentStore.migrateLegacyFiles(fileManager: fileManager)
+            } catch {
+                reportStorageError(error)
+            }
+        }
         await loadIndexAsync()
     }
 
@@ -337,8 +400,8 @@ final class ConversationStore {
         messages: [ChatMessage],
         draftText: String,
         draftAttachments: [Attachment]
-    ) -> UUID {
-        let conversationID = id ?? currentConversationID ?? startFreshConversation()
+    ) throws -> UUID {
+        let conversationID = id ?? currentConversationID ?? UUID()
         let existingMetadata = conversations.first(where: { $0.id == conversationID })
         let existingConversation = readConversation(id: conversationID)
         let createdAt = existingMetadata?.createdAt ?? existingConversation?.createdAt ?? Date()
@@ -369,7 +432,7 @@ final class ConversationStore {
             draftAttachments: draftAttachments
         )
 
-        persist(conversation: conversation, metadata: metadata)
+        try persist(conversation: conversation, metadata: metadata)
         if currentConversationID == nil {
             setCurrentConversation(id: conversationID)
         }
@@ -387,14 +450,22 @@ final class ConversationStore {
         let updatedAt = Date()
         conversation.title = trimmedTitle
         conversation.updatedAt = updatedAt
-        conversations[metadataIndex].title = trimmedTitle
-        conversations[metadataIndex].updatedAt = updatedAt
-        conversations[metadataIndex].isCustomTitle = true
+        var metadata = conversations[metadataIndex]
+        metadata.title = trimmedTitle
+        metadata.updatedAt = updatedAt
+        metadata.isCustomTitle = true
 
-        ensureRootDirectoryLocked()
-        ensureConversationDirectoryLocked(id: conversation.id)
-        writeConversationLocked(conversation)
-        writeIndexLocked()
+        do {
+            try ensureRootDirectoryLocked()
+            try ensureConversationDirectoryLocked(id: conversation.id)
+            try writeConversationLocked(conversation)
+            var updated = conversations
+            updated[metadataIndex] = metadata
+            try writeIndexLocked(updated)
+            conversations = updated
+        } catch {
+            reportStorageError(error)
+        }
     }
 
     func deleteConversation(id: UUID) {
@@ -432,7 +503,7 @@ final class ConversationStore {
 
         conversations.removeAll { ids.contains($0.id) }
         conversations.sort(by: Self.sortConversations)
-        writeIndexLocked()
+        do { try writeIndexLocked() } catch { reportStorageError(error) }
 
         if let currentID = currentConversationID, ids.contains(currentID) {
             if let nextConversation = conversations.first {
@@ -523,13 +594,17 @@ final class ConversationStore {
             conversations = result.conversations.sorted(by: Self.sortConversations)
             repairCurrentConversationSelectionLocked()
             if result.recoveredFromConversationFiles {
-                ensureRootDirectoryLocked()
-                writeIndexLocked()
-                AppDiagnostics.shared.record(
-                    "Conversation index recovered",
-                    category: "storage",
-                    metadata: ["conversations": conversations.count]
-                )
+                do {
+                    try ensureRootDirectoryLocked()
+                    try writeIndexLocked()
+                    AppDiagnostics.shared.record(
+                        "Conversation index recovered",
+                        category: "storage",
+                        metadata: ["conversations": conversations.count]
+                    )
+                } catch {
+                    reportStorageError(error)
+                }
             }
             hasLoadedConversationIndex = true
             isLoadingConversationIndex = false
@@ -612,21 +687,28 @@ final class ConversationStore {
         )
     }
 
-    private func persist(conversation: PersistedConversation, metadata: ConversationMetadata) {
+    private func persist(conversation: PersistedConversation, metadata: ConversationMetadata) throws {
         ioLock.lock()
         defer { ioLock.unlock() }
 
-        ensureRootDirectoryLocked()
-        ensureConversationDirectoryLocked(id: conversation.id)
-        writeConversationLocked(conversation)
+        try ensureRootDirectoryLocked()
+        try ensureConversationDirectoryLocked(id: conversation.id)
+        try writeConversationLocked(conversation)
 
-        if let index = conversations.firstIndex(where: { $0.id == metadata.id }) {
-            conversations[index] = metadata
+        var updated = conversations
+        if let index = updated.firstIndex(where: { $0.id == metadata.id }) {
+            updated[index] = metadata
         } else {
-            conversations.append(metadata)
+            updated.append(metadata)
         }
-        conversations.sort(by: Self.sortConversations)
-        writeIndexLocked()
+        updated.sort(by: Self.sortConversations)
+        try writeIndexLocked(updated)
+        conversations = updated
+    }
+
+    func reportStorageError(_ error: Error) {
+        storageError = "Your latest changes could not be saved. Keep this chat open and try again. "
+            + error.localizedDescription
     }
 
     private func readConversation(id: UUID) -> PersistedConversation? {
@@ -645,35 +727,35 @@ final class ConversationStore {
         return try? Self.decoder.decode(PersistedConversation.self, from: data)
     }
 
-    private func writeConversationLocked(_ conversation: PersistedConversation) {
-        guard let data = try? Self.encoder.encode(conversation) else { return }
-        try? data.write(to: conversationURL(for: conversation.id), options: Self.fileWriteOptions)
+    private func writeConversationLocked(_ conversation: PersistedConversation) throws {
+        let data = try Self.encoder.encode(conversation)
+        try data.write(to: conversationURL(for: conversation.id), options: Self.fileWriteOptions)
     }
 
-    private func writeIndexLocked() {
-        guard let data = try? Self.encoder.encode(conversations) else { return }
-        try? data.write(to: indexURL, options: Self.fileWriteOptions)
+    private func writeIndexLocked(_ entries: [ConversationMetadata]? = nil) throws {
+        let data = try Self.encoder.encode(entries ?? conversations)
+        try data.write(to: indexURL, options: Self.fileWriteOptions)
     }
 
-    private func ensureRootDirectoryLocked() {
-        ensureProtectedDirectory(at: rootDirectory)
+    private func ensureRootDirectoryLocked() throws {
+        try ensureProtectedDirectory(at: rootDirectory)
     }
 
-    private func ensureConversationDirectoryLocked(id: UUID) {
-        ensureProtectedDirectory(at: conversationDirectory(for: id))
+    private func ensureConversationDirectoryLocked(id: UUID) throws {
+        try ensureProtectedDirectory(at: conversationDirectory(for: id))
     }
 
     /// Creates `directory` (if needed) with data protection applied and ensures the
     /// protection attribute is set so chat history is encrypted at rest.
-    private func ensureProtectedDirectory(at directory: URL) {
+    private func ensureProtectedDirectory(at directory: URL) throws {
         if !fileManager.fileExists(atPath: directory.path) {
-            try? fileManager.createDirectory(
+            try fileManager.createDirectory(
                 at: directory,
                 withIntermediateDirectories: true,
                 attributes: [.protectionKey: Self.fileProtection]
             )
         }
-        try? fileManager.setAttributes([.protectionKey: Self.fileProtection], ofItemAtPath: directory.path)
+        try fileManager.setAttributes([.protectionKey: Self.fileProtection], ofItemAtPath: directory.path)
     }
 
     private func cleanedTitle(_ title: String?) -> String? {
@@ -765,7 +847,7 @@ final class ConversationStore {
 }
 
 private enum ConversationSnapshotLoader {
-    static func load(from conversationURL: URL) -> ConversationSnapshot? {
+    static func load(from conversationURL: URL, storageRootOverride: URL?) -> ConversationSnapshot? {
         guard let data = try? Data(contentsOf: conversationURL) else {
             return nil
         }
@@ -779,9 +861,9 @@ private enum ConversationSnapshotLoader {
         return ConversationSnapshot(
             id: conversation.id,
             title: conversation.title,
-            messages: conversation.messages.map { $0.makeMessage() },
+            messages: conversation.messages.map { $0.makeMessage(baseDirectoryOverride: storageRootOverride) },
             draftText: conversation.draftText,
-            draftAttachments: conversation.draftAttachments
+            draftAttachments: conversation.draftAttachments.map { $0.restored(baseDirectoryOverride: storageRootOverride) }
         )
     }
 }
@@ -800,7 +882,7 @@ extension ConversationStore {
         )
         store.deleteAllConversations()
         if conversations.isEmpty {
-            let newID = store.startFreshConversation()
+            guard let newID = try? store.startFreshConversation() else { return store }
             if let currentConversationID {
                 store.setCurrentConversation(id: currentConversationID)
             } else {
@@ -811,12 +893,12 @@ extension ConversationStore {
 
         var selectedID: UUID?
         for snapshot in conversations {
-            let savedID = store.saveConversation(
+            guard let savedID = try? store.saveConversation(
                 id: snapshot.id,
                 messages: snapshot.messages,
                 draftText: snapshot.draftText,
                 draftAttachments: snapshot.draftAttachments
-            )
+            ) else { continue }
             let trimmedTitle = snapshot.title.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmedTitle.isEmpty {
                 store.renameConversation(id: savedID, title: trimmedTitle)

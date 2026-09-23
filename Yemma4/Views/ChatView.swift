@@ -195,6 +195,18 @@ public struct ChatView: View {
                 scheduleConversationSave()
             }
             .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: toastMessage)
+            .alert("Chat Could Not Be Saved", isPresented: Binding(
+                get: { conversationStore.storageError != nil },
+                set: { if !$0 { conversationStore.storageError = nil } }
+            )) {
+                Button("Try Again") {
+                    conversationStore.storageError = nil
+                    persistConversationNow()
+                }
+                Button("OK", role: .cancel) { conversationStore.storageError = nil }
+            } message: {
+                Text(conversationStore.storageError ?? "Please try saving again.")
+            }
             .alert(
                 "Generation Failed",
                 isPresented: Binding(
@@ -588,7 +600,10 @@ public struct ChatView: View {
         // Commit the draft metadata first. If the process is suspended after
         // the unlink, the next launch must not restore a reference to a file
         // that has already been removed.
-        persistConversationNow()
+        guard persistConversationNow() else {
+            pendingAttachments.insert(attachment, at: attachmentIndex)
+            return
+        }
         let removedFileCount = ConversationAttachmentStore.removeFiles(
             at: [attachment.thumbnail, attachment.full]
         )
@@ -684,7 +699,13 @@ public struct ChatView: View {
 
     @MainActor
     private func restoreConversationIfNeeded(force: Bool = false) async {
-        let targetConversationID = conversationStore.currentConversationID ?? conversationStore.ensureCurrentConversation()
+        let targetConversationID: UUID
+        do {
+            targetConversationID = try conversationStore.ensureCurrentConversation()
+        } catch {
+            conversationStore.reportStorageError(error)
+            return
+        }
         guard force || loadedConversationID != targetConversationID else { return }
 
         conversationSaveTask?.cancel()
@@ -692,7 +713,14 @@ public struct ChatView: View {
         await stopGeneration()
 
         guard let snapshot = await conversationStore.loadConversationAsync(id: targetConversationID) else {
-            let newConversationID = conversationStore.startFreshConversation()
+            let newConversationID: UUID
+            do {
+                newConversationID = try conversationStore.startFreshConversation()
+            } catch {
+                conversationStore.reportStorageError(error)
+                isRestoringConversation = false
+                return
+            }
             guard let fallbackSnapshot = await conversationStore.loadConversationAsync(id: newConversationID) else {
                 isRestoringConversation = false
                 return
@@ -726,7 +754,7 @@ public struct ChatView: View {
 
     @MainActor
     private func switchConversation(to conversationID: UUID) async {
-        persistConversationNow()
+        guard persistConversationNow() else { return }
         guard conversationStore.currentConversationID != conversationID else { return }
         await stopGeneration()
         conversationStore.setCurrentConversation(id: conversationID)
@@ -739,9 +767,15 @@ public struct ChatView: View {
 
     @MainActor
     private func startFreshConversation() async {
-        persistConversationNow()
+        guard persistConversationNow() else { return }
         await stopGeneration()
-        let conversationID = conversationStore.startFreshConversation()
+        let conversationID: UUID
+        do {
+            conversationID = try conversationStore.startFreshConversation()
+        } catch {
+            conversationStore.reportStorageError(error)
+            return
+        }
         conversationSaveTask?.cancel()
         applyConversationSnapshot(
             ConversationSnapshot(
@@ -848,18 +882,24 @@ public struct ChatView: View {
         }
     }
 
-    private func persistConversationNow() {
-        guard !isRestoringConversation else { return }
-
-        let conversationID = conversationStore.saveConversation(
-            id: loadedConversationID,
-            messages: messages,
-            draftText: draft,
-            draftAttachments: pendingAttachments
-        )
-        loadedConversationID = conversationID
-        if conversationStore.currentConversationID == nil {
-            conversationStore.setCurrentConversation(id: conversationID)
+    @discardableResult
+    private func persistConversationNow() -> Bool {
+        guard !isRestoringConversation else { return false }
+        do {
+            let conversationID = try conversationStore.saveConversation(
+                id: loadedConversationID,
+                messages: messages,
+                draftText: draft,
+                draftAttachments: pendingAttachments
+            )
+            loadedConversationID = conversationID
+            if conversationStore.currentConversationID == nil {
+                conversationStore.setCurrentConversation(id: conversationID)
+            }
+            return true
+        } catch {
+            conversationStore.reportStorageError(error)
+            return false
         }
     }
 

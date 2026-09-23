@@ -4,6 +4,76 @@ import XCTest
 
 @MainActor
 final class ConversationStoreTests: XCTestCase {
+    func testFailedSaveDoesNotPublishConversationOrSelection() throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanUp() }
+        // A regular file in place of the storage directory deterministically fails writes.
+        try fixture.fileManager.createDirectory(
+            at: fixture.storageRoot.deletingLastPathComponent(), withIntermediateDirectories: true
+        )
+        try Data("blocked".utf8).write(to: fixture.storageRoot)
+        let store = fixture.makeStore()
+        XCTAssertThrowsError(try store.saveConversation(
+            id: nil, messages: [makeMessage(text: "Unsaved")], draftText: "", draftAttachments: []
+        ))
+        XCTAssertTrue(store.conversations.isEmpty)
+        XCTAssertNil(store.currentConversationID)
+        XCTAssertThrowsError(try store.startFreshConversation())
+        XCTAssertNil(store.currentConversationID)
+    }
+
+    func testFailedIndexWriteDoesNotPublishNewMetadata() throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanUp() }
+        let store = fixture.makeStore()
+        let id = try store.saveConversation(
+            id: nil, messages: [makeMessage(text: "Original")], draftText: "", draftAttachments: []
+        )
+        let index = fixture.storageRoot.appendingPathComponent("index.json")
+        try fixture.fileManager.removeItem(at: index)
+        try fixture.fileManager.createDirectory(at: index, withIntermediateDirectories: true)
+        XCTAssertThrowsError(try store.saveConversation(
+            id: id, messages: [makeMessage(text: "Changed")], draftText: "", draftAttachments: []
+        ))
+        XCTAssertEqual(store.conversations.first?.title, "Original")
+    }
+
+    func testLegacyAttachmentMigrationPreservesImageAndResolvesSavedURL() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanUp() }
+        let legacy = fixture.storageRoot.appendingPathComponent("Caches/chat-attachments")
+        try fixture.fileManager.createDirectory(at: legacy, withIntermediateDirectories: true)
+        let oldURL = legacy.appendingPathComponent("retained.jpg")
+        let imageData = Data([1, 2, 3])
+        try imageData.write(to: oldURL)
+        let attachment = Attachment(id: "image", url: oldURL, type: .image)
+        let store = fixture.makeStore()
+        let id = try store.saveConversation(
+            id: nil, messages: [ChatMessage(id: "message", user: .user, attachments: [attachment])],
+            draftText: "", draftAttachments: [attachment]
+        )
+        try ConversationAttachmentStore.migrateLegacyFiles(
+            legacyDirectory: legacy, baseDirectoryOverride: fixture.storageRoot
+        )
+        let newURL = ConversationAttachmentStore.directoryURL(baseDirectoryOverride: fixture.storageRoot)
+            .appendingPathComponent("retained.jpg")
+        XCTAssertEqual(try Data(contentsOf: newURL), imageData)
+        XCTAssertFalse(fixture.fileManager.fileExists(atPath: oldURL.path))
+        let snapshot = await store.loadConversationAsync(id: id)
+        XCTAssertEqual(snapshot?.messages.first?.attachments.first?.full, newURL)
+        XCTAssertEqual(snapshot?.draftAttachments.first?.full, newURL)
+        XCTAssertEqual(store.loadConversation(id: id)?.draftAttachments.first?.full, newURL)
+        XCTAssertEqual(ConversationAttachmentStore.removeFiles(
+            at: [oldURL], baseDirectoryOverride: fixture.storageRoot
+        ), 1)
+        XCTAssertFalse(fixture.fileManager.fileExists(atPath: newURL.path))
+    }
+
+    func testAttachmentDirectoryUsesDurableApplicationSupport() {
+        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        XCTAssertEqual(ConversationAttachmentStore.directoryURL().deletingLastPathComponent(), support)
+    }
+
     func testAsyncRestoreDecodesIso8601DatesFromPersistedConversation() async throws {
         let fixture = try makeFixture()
         defer { fixture.cleanUp() }
@@ -24,7 +94,7 @@ final class ConversationStoreTests: XCTestCase {
             type: .image
         )
 
-        let conversationID = store.saveConversation(
+        let conversationID = try store.saveConversation(
             id: nil,
             messages: [message],
             draftText: "Draft text",
@@ -116,7 +186,7 @@ final class ConversationStoreTests: XCTestCase {
         defer { fixture.cleanUp() }
 
         let store = fixture.makeStore()
-        let conversationID = store.saveConversation(
+        let conversationID = try store.saveConversation(
             id: nil,
             messages: [makeMessage(text: "Plan a quiet weekend")],
             draftText: "Include a beach walk",
@@ -144,7 +214,7 @@ final class ConversationStoreTests: XCTestCase {
         defer { fixture.cleanUp() }
 
         let store = fixture.makeStore()
-        let conversationID = store.saveConversation(
+        let conversationID = try store.saveConversation(
             id: nil,
             messages: [makeMessage(text: "Keep this chat")],
             draftText: "",
@@ -181,7 +251,7 @@ final class ConversationStoreTests: XCTestCase {
         let fixture = try makeFixture()
         defer { fixture.cleanUp() }
 
-        let conversationID = fixture.makeStore().saveConversation(
+        let conversationID = try fixture.makeStore().saveConversation(
             id: nil,
             messages: [makeMessage(text: "Hello")],
             draftText: "",
