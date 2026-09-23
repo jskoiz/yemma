@@ -196,17 +196,9 @@ private struct PersistedConversation: Codable, Sendable {
 }
 
 private struct PersistedMessage: Codable, Sendable {
-    enum Status: String, Codable, Sendable {
-        case sending
-        case sent
-        case delivered
-        case read
-        case error
-    }
-
     let id: String
     let user: User
-    let status: Status?
+    let status: ChatMessage.Status?
     let createdAt: Date
     let text: String
     let attachments: [Attachment]
@@ -214,45 +206,17 @@ private struct PersistedMessage: Codable, Sendable {
     init(message: ChatMessage) {
         id = message.id
         user = message.user
-        status = switch message.status {
-        case .sending:
-            .sending
-        case .sent:
-            .sent
-        case .delivered:
-            .delivered
-        case .read:
-            .read
-        case .error:
-            .error
-        case nil:
-            nil
-        }
+        status = message.status
         createdAt = message.createdAt
         text = message.text
         attachments = message.attachments
     }
 
     func makeMessage(baseDirectoryOverride: URL? = nil) -> ChatMessage {
-        let messageStatus: ChatMessage.Status? = switch status {
-        case .sending:
-            .sending
-        case .sent:
-            .sent
-        case .delivered:
-            .delivered
-        case .read:
-            .read
-        case .error:
-            .error
-        case nil:
-            nil
-        }
-
         return ChatMessage(
             id: id,
             user: user,
-            status: messageStatus,
+            status: status,
             createdAt: createdAt,
             text: text,
             attachments: attachments.map { $0.restored(baseDirectoryOverride: baseDirectoryOverride) }
@@ -266,10 +230,7 @@ private extension Attachment {
             id: id,
             thumbnail: ConversationAttachmentStore.restoredURL(thumbnail, baseDirectoryOverride: baseDirectoryOverride),
             full: ConversationAttachmentStore.restoredURL(full, baseDirectoryOverride: baseDirectoryOverride),
-            type: type,
-            thumbnailCacheKey: thumbnailCacheKey,
-            fullCacheKey: fullCacheKey,
-            fullUploadStatus: fullUploadStatus
+            type: type
         )
     }
 }

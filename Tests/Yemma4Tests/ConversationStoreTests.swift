@@ -4,6 +4,15 @@ import XCTest
 
 @MainActor
 final class ConversationStoreTests: XCTestCase {
+    func testMessageStatusRetainsPersistedStringRepresentation() throws {
+        let statuses: [ChatMessage.Status] = [.sending, .sent, .delivered, .read, .error]
+        for status in statuses {
+            let data = try JSONEncoder().encode(status)
+            XCTAssertEqual(String(decoding: data, as: UTF8.self), "\"\(status.rawValue)\"")
+            XCTAssertEqual(try JSONDecoder().decode(ChatMessage.Status.self, from: data), status)
+        }
+    }
+
     func testInitialRestoreMigratesAttachmentsBeforeSidebarLoadsIndex() async throws {
         let fixture = try makeFixture()
         defer { fixture.cleanUp() }
@@ -275,6 +284,8 @@ final class ConversationStoreTests: XCTestCase {
                     "id": "user",
                     "name": "You",
                     "type": 0,
+                    "avatarURL": "https://example.invalid/avatar.png",
+                    "avatarCacheKey": "legacy-avatar",
                 ],
                 "status": "error",
                 "createdAt": "2023-11-14T22:13:20Z",
@@ -284,6 +295,9 @@ final class ConversationStoreTests: XCTestCase {
                     "thumbnail": attachmentURL.absoluteString,
                     "full": attachmentURL.absoluteString,
                     "type": "image",
+                    "thumbnailCacheKey": "legacy-thumbnail",
+                    "fullCacheKey": "legacy-full",
+                    "fullUploadStatus": ["complete": [:]],
                 ]],
             ]],
             "draftText": "",

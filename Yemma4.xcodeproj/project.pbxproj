@@ -52,6 +52,16 @@
 		F1000005 /* ModelDownloadIntegrity.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1000006 /* ModelDownloadIntegrity.swift */; };
 		F1000003 /* Yemma4AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1000004 /* Yemma4AppDelegate.swift */; };
 
+		A99AA232E97D1E6B3675F3D1 /* InferenceTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A38BE3B08F3B50EFFB7042BA /* InferenceTypes.swift */; };
+		A6FDF382786B0404D37A6CDA /* ResponseStylePreset.swift in Sources */ = {isa = PBXBuildFile; fileRef = C16DB7E2130CABADE863ADA9 /* ResponseStylePreset.swift */; };
+		BA365CB7647CA171861E4E2A /* PromptTaskHint.swift in Sources */ = {isa = PBXBuildFile; fileRef = A32300F9A8E5CA293EA0FF7C /* PromptTaskHint.swift */; };
+		CC76BB276B940BFAA8E4C036 /* Gemma4TokenProcessing.swift in Sources */ = {isa = PBXBuildFile; fileRef = FFA0EF6719DEBFEAD0D0A02E /* Gemma4TokenProcessing.swift */; };
+		5FAE20BF03652835D89CAC39 /* Gemma4TokenDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97CAAF37DD55AE78E45211A4 /* Gemma4TokenDiagnostics.swift */; };
+		BFC8E1E3FB5D71C058B5FB8C /* Gemma4ModelLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00D9D1E6901B9C5CD37BE50 /* Gemma4ModelLoader.swift */; };
+		38C0066CC06C55B493C535BD /* ChatAttachmentImagePipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02F3DB87BA9086E340527903 /* ChatAttachmentImagePipeline.swift */; };
+		B74400F1CD903CB4036D1EAD /* ChatPreviews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 093343F714720EF797FF7B45 /* ChatPreviews.swift */; };
+		9585CA550B85CE1F30C961F2 /* ChatNavigationShell.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1B77AA568F5164C9940ED0A /* ChatNavigationShell.swift */; };
+		F0AEC40C2C878BCEC10A854D /* ChatChrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = A46F14C5CA565E5449C0D884 /* ChatChrome.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -97,6 +107,16 @@
 		T200000C /* StreamingRendererTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamingRendererTests.swift; sourceTree = "<group>"; };
 		T200000D /* Yemma4Tests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = Yemma4Tests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 
+		A38BE3B08F3B50EFFB7042BA /* InferenceTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InferenceTypes.swift; sourceTree = "<group>"; };
+		C16DB7E2130CABADE863ADA9 /* ResponseStylePreset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResponseStylePreset.swift; sourceTree = "<group>"; };
+		A32300F9A8E5CA293EA0FF7C /* PromptTaskHint.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromptTaskHint.swift; sourceTree = "<group>"; };
+		FFA0EF6719DEBFEAD0D0A02E /* Gemma4TokenProcessing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Gemma4TokenProcessing.swift; sourceTree = "<group>"; };
+		97CAAF37DD55AE78E45211A4 /* Gemma4TokenDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Gemma4TokenDiagnostics.swift; sourceTree = "<group>"; };
+		C00D9D1E6901B9C5CD37BE50 /* Gemma4ModelLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Gemma4ModelLoader.swift; sourceTree = "<group>"; };
+		02F3DB87BA9086E340527903 /* ChatAttachmentImagePipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatAttachmentImagePipeline.swift; sourceTree = "<group>"; };
+		093343F714720EF797FF7B45 /* ChatPreviews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatPreviews.swift; sourceTree = "<group>"; };
+		B1B77AA568F5164C9940ED0A /* ChatNavigationShell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatNavigationShell.swift; sourceTree = "<group>"; };
+		A46F14C5CA565E5449C0D884 /* ChatChrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatChrome.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -148,6 +168,9 @@
 			isa = PBXGroup;
 			children = (
 				D4000002 /* ChatComposerView.swift */,
+				A46F14C5CA565E5449C0D884 /* ChatChrome.swift */,
+				B1B77AA568F5164C9940ED0A /* ChatNavigationShell.swift */,
+				093343F714720EF797FF7B45 /* ChatPreviews.swift */,
 				D4000004 /* ChatIndicators.swift */,
 				D4000006 /* ChatMessageActions.swift */,
 				D4000008 /* ChatShareSheet.swift */,
@@ -224,6 +247,13 @@
 				F1000002 /* BackgroundModelDownloadCoordinator.swift */,
 				E1000013 /* Gemma4SmokeAutomation.swift */,
 				70EEE36ABE229B869B690BFB /* LLMService.swift */,
+				02F3DB87BA9086E340527903 /* ChatAttachmentImagePipeline.swift */,
+				C00D9D1E6901B9C5CD37BE50 /* Gemma4ModelLoader.swift */,
+				97CAAF37DD55AE78E45211A4 /* Gemma4TokenDiagnostics.swift */,
+				FFA0EF6719DEBFEAD0D0A02E /* Gemma4TokenProcessing.swift */,
+				A32300F9A8E5CA293EA0FF7C /* PromptTaskHint.swift */,
+				C16DB7E2130CABADE863ADA9 /* ResponseStylePreset.swift */,
+				A38BE3B08F3B50EFFB7042BA /* InferenceTypes.swift */,
 				E1000007 /* MLXModelSupport.swift */,
 				F1000006 /* ModelDownloadIntegrity.swift */,
 				11FB93FF040AF083B453837C /* ModelDownloader.swift */,
@@ -372,6 +402,16 @@
 				E1000006 /* MLXModelSupport.swift in Sources */,
 				F1000005 /* ModelDownloadIntegrity.swift in Sources */,
 				8804C30D1CAED09270D51D6D /* LLMService.swift in Sources */,
+				F0AEC40C2C878BCEC10A854D /* ChatChrome.swift in Sources */,
+				9585CA550B85CE1F30C961F2 /* ChatNavigationShell.swift in Sources */,
+				B74400F1CD903CB4036D1EAD /* ChatPreviews.swift in Sources */,
+				38C0066CC06C55B493C535BD /* ChatAttachmentImagePipeline.swift in Sources */,
+				BFC8E1E3FB5D71C058B5FB8C /* Gemma4ModelLoader.swift in Sources */,
+				5FAE20BF03652835D89CAC39 /* Gemma4TokenDiagnostics.swift in Sources */,
+				CC76BB276B940BFAA8E4C036 /* Gemma4TokenProcessing.swift in Sources */,
+				BA365CB7647CA171861E4E2A /* PromptTaskHint.swift in Sources */,
+				A6FDF382786B0404D37A6CDA /* ResponseStylePreset.swift in Sources */,
+				A99AA232E97D1E6B3675F3D1 /* InferenceTypes.swift in Sources */,
 				F6A19338069476EC14B97082 /* ModelDownloader.swift in Sources */,
 				DF571A73493F2913161C6971 /* ChatView.swift in Sources */,
 				A1000001 /* RichMessageText.swift in Sources */,
