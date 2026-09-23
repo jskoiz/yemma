@@ -74,18 +74,18 @@ struct ChatSidebarView: View {
         ) {
             Button("Delete Model", role: .destructive) {
                 Task {
-                    if llmService.selectedRuntime == .gemma4 {
+                    if llmService.selectedRuntime == .qwen35 {
                         guard await llmService.unloadModel() else { return }
                     }
                     guard await modelDownloader.deleteModel() else { return }
-                    if llmService.selectedRuntime == .gemma4 {
+                    if llmService.selectedRuntime == .qwen35 {
                         onShowOnboarding()
                     }
                 }
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This removes only the optional Gemma 4 files. Apple's built-in model is unaffected.")
+            Text("This removes downloaded Qwen files and any previous Gemma files. Apple's built-in model is unaffected.")
         }
         .confirmationDialog(
             "Delete conversation history?",
@@ -311,7 +311,7 @@ struct ChatSidebarView: View {
             UtilitySectionSeparator()
             infoRow(
                 icon: "shippingbox",
-                title: "Gemma storage",
+                title: "Qwen storage",
                 detail: modelSizeText
             )
             UtilitySectionSeparator()
@@ -324,10 +324,11 @@ struct ChatSidebarView: View {
                     ? "Delete downloaded model"
                     : "Retry model removal",
                 subtitle: modelDownloader.modelDeletionError == nil
-                    ? "Remove the optional Gemma 4 files from this iPhone."
+                    ? "Remove downloaded model files, including any previous Gemma model."
                     : "The last removal did not finish. Tap to retry.",
                 isDisabled: modelDownloader.modelPath == nil
                     && modelDownloader.modelDeletionError == nil
+                    && !modelDownloader.hasLegacyModelFiles
             ) {
                 showDeleteModelConfirmation = true
             }
@@ -754,7 +755,7 @@ struct ChatSidebarView: View {
                 : "Removal incomplete"
         }
 
-        let totalBytes = Gemma4MLXSupport.directorySize(at: URL(fileURLWithPath: modelPath))
+        let totalBytes = Qwen35MLXSupport.directorySize(at: URL(fileURLWithPath: modelPath))
         guard totalBytes > 0 else {
             return "Unknown"
         }

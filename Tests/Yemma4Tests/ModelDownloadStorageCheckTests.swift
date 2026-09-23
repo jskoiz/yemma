@@ -17,7 +17,7 @@ final class ModelDownloadStorageCheckTests: XCTestCase {
     }
 
     func testRequiredBytesUsesProportionalHeadroomForLargeModels() {
-        // ~4.2 GB model: 10% (~430 MB) is below 500 MB, so flat headroom still wins.
+        // ~3.05 GB model: 10% (~430 MB) is below 500 MB, so flat headroom still wins.
         let modelBytes: Int64 = Int64(4.2 * Double(gigabyte))
         let expected = modelBytes + ModelDownloadStorageCheck.minimumHeadroomBytes
         XCTAssertEqual(

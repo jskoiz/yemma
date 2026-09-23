@@ -2,209 +2,101 @@ import Foundation
 import MLXLMCommon
 import MLXVLM
 
-enum Gemma4MLXSupport {
-    static let repositoryID = "mlx-community/gemma-4-e2b-it-4bit"
+enum Qwen35MLXSupport {
+    // One immutable, combined language + vision package. No separate projector download.
+    static let repositoryID = "dream-vault-community/Qwen3.5-4B-4bit-Abliterated"
+    static let repositoryRevision = "a40c9a8d5c6f6f70d678120ccb46a3f6456c727c"
     static let sourceURL = URL(string: "https://huggingface.co/\(repositoryID)")!
-    // Immutable Hugging Face snapshot for mlx-community/gemma-4-e2b-it-4bit.
-    static let repositoryRevision = "2c3e507453b4f218d05fe3cc97bea5c5a654257e"
-    static let approximateDownloadBytes: Int64 = 4_200_000_000
+    static let approximateDownloadBytes: Int64 = 3_054_414_391
     static let defaultImagePrompt = "Describe the scene in this image in one short paragraph."
-    static let automatedSmokeImageAssetName = "Gemma4SmokeImage"
+    static let automatedSmokeImageAssetName = "Qwen35SmokeImage"
     static let templateContext: [String: any Sendable] = ["enable_thinking": false]
-    static let downloadPatterns = ["*.safetensors", "*.json", "*.jinja"]
+    static let downloadPatterns = [
+        "model.safetensors", "model.safetensors.index.json", "config.json",
+        "preprocessor_config.json", "processor_config.json", "tokenizer.json",
+        "tokenizer_config.json", "chat_template.jinja", "LICENSE", "PROVENANCE.json"
+    ]
 
-    @discardableResult
-    static func normalizeAssetContractIfNeeded(_ validatedDirectory: ValidatedModelDirectory) throws -> Bool {
-        try normalizeConfigIfNeeded(at: validatedDirectory.configURL)
-    }
-
-    static func validateAssetContract(_ validatedDirectory: ValidatedModelDirectory) throws {
+    static func validateAssetContract(_ directory: ValidatedModelDirectory) throws {
         let decoder = JSONDecoder.json5()
-        let modelConfiguration = try decodeJSON(
-            Gemma4Configuration.self,
-            from: validatedDirectory.configURL,
-            fileName: validatedDirectory.configURL.lastPathComponent,
-            using: decoder
+        let configData = try Data(contentsOf: directory.configURL)
+        let config = try decoder.decode(Qwen35Configuration.self, from: configData)
+        guard config.modelType == "qwen3_5", config.textConfiguration.hiddenLayers == 32,
+              config.textConfiguration.hiddenSize == 2560,
+              config.imageTokenId == 248056, config.visionStartTokenId == 248053,
+              config.visionEndTokenId == 248054,
+              config.visionConfiguration.depth == 24, config.visionConfiguration.patchSize == 16,
+              config.visionConfiguration.spatialMergeSize == 2,
+              config.visionConfiguration.temporalPatchSize == 2 else {
+            throw Qwen35AssetValidationError.invalid("Expected the Qwen3.5 4B vision-language configuration.")
+        }
+        guard directory.processorConfigFileName == "preprocessor_config.json" else {
+            throw Qwen35AssetValidationError.invalid("The flat vision preprocessor configuration is missing.")
+        }
+        let processor = try decoder.decode(
+            Qwen3VLProcessorConfiguration.self,
+            from: Data(contentsOf: directory.processorConfigURL)
         )
-        let processorConfiguration = try decodeJSON(
-            Gemma4ProcessorConfiguration.self,
-            from: validatedDirectory.processorConfigURL,
-            fileName: validatedDirectory.processorConfigURL.lastPathComponent,
-            using: decoder
-        )
-
-        try validateAssetContract(
-            modelConfiguration: modelConfiguration,
-            processorConfiguration: processorConfiguration
-        )
+        guard processor.patchSize == 16, processor.mergeSize == 2,
+              processor.temporalPatchSize == 2,
+              processor.imageMean == [0.5, 0.5, 0.5], processor.imageStd == [0.5, 0.5, 0.5] else {
+            throw Qwen35AssetValidationError.invalid("The vision preprocessor does not match this model.")
+        }
+        // Swift Tokenizers can read the template embedded in tokenizer_config.json.
+        // Validate both copies so the actual loader cannot silently select a text-only template.
+        let template = try String(contentsOf: directory.location.appendingPathComponent("chat_template.jinja"), encoding: .utf8)
+        let tokenizerConfig = try JSONSerialization.jsonObject(
+            with: Data(contentsOf: directory.location.appendingPathComponent("tokenizer_config.json"))
+        ) as? [String: Any]
+        guard let embedded = tokenizerConfig?["chat_template"] as? String,
+              embedded == template,
+              template.contains("<|vision_start|><|image_pad|><|vision_end|>"),
+              template.contains("item.type == 'image'"), template.contains("enable_thinking") else {
+            throw Qwen35AssetValidationError.invalid("The image-aware chat template is missing or inconsistent.")
+        }
+        try validateVisionWeights(in: directory)
     }
 
-    static func validateAssetContract(
-        modelConfiguration: Gemma4Configuration,
-        processorConfiguration: Gemma4ProcessorConfiguration
-    ) throws {
-        let processorSoftTokens = processorConfiguration.imageSeqLength
-        let modelSoftTokens = modelConfiguration.visionSoftTokensPerImage
-        let modelVisionDefault = modelConfiguration.visionConfiguration.defaultOutputLength
-
-        guard processorSoftTokens == modelSoftTokens else {
-            throw Gemma4AssetValidationError.mismatch(
-                key: "vision soft tokens per image",
-                expected: String(modelSoftTokens),
-                actual: String(processorSoftTokens)
-            )
-        }
-
-        guard processorSoftTokens == modelVisionDefault else {
-            throw Gemma4AssetValidationError.mismatch(
-                key: "vision default output length",
-                expected: String(modelVisionDefault),
-                actual: String(processorSoftTokens)
-            )
-        }
-
-        guard
-            processorConfiguration.imageTokenId == modelConfiguration.imageTokenId
-        else {
-            throw Gemma4AssetValidationError.mismatch(
-                key: "image token id",
-                expected: String(modelConfiguration.imageTokenId),
-                actual: String(processorConfiguration.imageTokenId)
-            )
-        }
-
-        guard
-            processorConfiguration.boiTokenId == modelConfiguration.boiTokenId
-        else {
-            throw Gemma4AssetValidationError.mismatch(
-                key: "begin-image token id",
-                expected: String(modelConfiguration.boiTokenId),
-                actual: String(processorConfiguration.boiTokenId)
-            )
-        }
-
-        guard processorConfiguration.eoiTokenId == modelConfiguration.eoiTokenId else {
-            throw Gemma4AssetValidationError.mismatch(
-                key: "end-image token id",
-                expected: String(describing: modelConfiguration.eoiTokenId),
-                actual: String(describing: processorConfiguration.eoiTokenId)
-            )
-        }
+    private struct TensorDescriptor: Decodable {
+        let dataOffsets: [UInt64]
+        enum CodingKeys: String, CodingKey { case dataOffsets = "data_offsets" }
     }
 
-    private static func decodeJSON<T: Decodable>(
-        _ type: T.Type,
-        from fileURL: URL,
-        fileName: String,
-        using decoder: JSONDecoder
-    ) throws -> T {
-        let data = try readValidatedFile(at: fileURL, fileName: fileName)
-
-        do {
-            return try decoder.decode(type, from: data)
-        } catch let error as DecodingError {
-            throw Gemma4AssetValidationError.invalidJSON(
-                fileName: fileName,
-                reason: describe(decodingError: error)
-            )
-        } catch {
-            throw Gemma4AssetValidationError.invalidJSON(
-                fileName: fileName,
-                reason: error.localizedDescription
-            )
-        }
-    }
-
-    private static func readValidatedFile(at fileURL: URL, fileName: String) throws -> Data {
-        do {
-            return try Data(contentsOf: fileURL, options: [.mappedIfSafe])
-        } catch {
-            throw Gemma4AssetValidationError.unreadableFile(
-                fileName: fileName,
-                reason: error.localizedDescription
-            )
-        }
-    }
-
-    private static func normalizeConfigIfNeeded(at configURL: URL) throws -> Bool {
-        let fileName = configURL.lastPathComponent
-        let data = try readValidatedFile(at: configURL, fileName: fileName)
-
-        let jsonObject: Any
-        do {
-            jsonObject = try JSONSerialization.jsonObject(with: data)
-        } catch {
-            throw Gemma4AssetValidationError.invalidJSON(
-                fileName: fileName,
-                reason: error.localizedDescription
-            )
-        }
-
-        guard var config = jsonObject as? [String: Any] else {
-            throw Gemma4AssetValidationError.invalidJSON(
-                fileName: fileName,
-                reason: "Top-level JSON object is not a dictionary."
-            )
-        }
-
-        guard config["pad_token_id"] == nil else {
-            return false
-        }
-
-        let fallbackPadTokenID: Int
-        if let textConfig = config["text_config"] as? [String: Any],
-            let nestedPadTokenID = (textConfig["pad_token_id"] as? NSNumber)?.intValue
-        {
-            fallbackPadTokenID = nestedPadTokenID
-        } else {
-            fallbackPadTokenID = 0
-        }
-
-        config["pad_token_id"] = fallbackPadTokenID
-
-        let normalizedData: Data
-        do {
-            normalizedData = try JSONSerialization.data(withJSONObject: config, options: [.prettyPrinted, .sortedKeys])
-        } catch {
-            throw Gemma4AssetValidationError.invalidJSON(
-                fileName: fileName,
-                reason: "Could not serialize normalized config: \(error.localizedDescription)"
-            )
-        }
-
-        do {
-            try normalizedData.write(to: configURL, options: .atomic)
-        } catch {
-            throw Gemma4AssetValidationError.unreadableFile(
-                fileName: fileName,
-                reason: "Could not write normalized config: \(error.localizedDescription)"
-            )
-        }
-
-        return true
-    }
-
-    private static func describe(decodingError: DecodingError) -> String {
-        switch decodingError {
-        case let .keyNotFound(key, context):
-            return "Missing key `\(codingPathString(context.codingPath + [key]))`."
-        case let .valueNotFound(_, context):
-            return "Missing value at `\(codingPathString(context.codingPath))`."
-        case let .typeMismatch(_, context):
-            return "Type mismatch at `\(codingPathString(context.codingPath))`: \(context.debugDescription)"
-        case let .dataCorrupted(context):
-            let codingPath = codingPathString(context.codingPath)
-            if codingPath.isEmpty {
-                return context.debugDescription
+    // Read only safetensors headers, not the multi-GB tensors. An index or model
+    // card alone cannot prove that a conversion retained the vision encoder.
+    private static func validateVisionWeights(in directory: ValidatedModelDirectory) throws {
+        var tensorNames = Set<String>()
+        for name in directory.weightFileNames {
+            let url = directory.location.appendingPathComponent(name)
+            let handle = try FileHandle(forReadingFrom: url)
+            defer { try? handle.close() }
+            guard let prefix = try handle.read(upToCount: 8), prefix.count == 8 else {
+                throw Qwen35AssetValidationError.invalid("Invalid safetensors header in \(name).")
             }
-            return "Invalid data at `\(codingPath)`: \(context.debugDescription)"
-        @unknown default:
-            return decodingError.localizedDescription
+            let headerLength = prefix.enumerated().reduce(UInt64(0)) { $0 | (UInt64($1.element) << ($1.offset * 8)) }
+            guard headerLength > 0, headerLength <= 16 * 1024 * 1024,
+                  let header = try handle.read(upToCount: Int(headerLength)), header.count == Int(headerLength),
+                  let entries = try JSONSerialization.jsonObject(with: header) as? [String: Any] else {
+                throw Qwen35AssetValidationError.invalid("Invalid safetensors header in \(name).")
+            }
+            let fileSize = try handle.seekToEnd()
+            let payloadSize = fileSize - 8 - headerLength
+            for (key, value) in entries where key != "__metadata__" {
+                let tensor = try JSONDecoder().decode(TensorDescriptor.self, from: JSONSerialization.data(withJSONObject: value))
+                guard tensor.dataOffsets.count == 2, tensor.dataOffsets[0] < tensor.dataOffsets[1],
+                      tensor.dataOffsets[1] <= payloadSize else {
+                    throw Qwen35AssetValidationError.invalid("Truncated tensor \(key) in \(name).")
+                }
+                tensorNames.insert(key)
+            }
         }
-    }
-
-    private static func codingPathString(_ codingPath: [any CodingKey]) -> String {
-        codingPath.map(\.stringValue).joined(separator: ".")
+        let required = ["vision_tower.patch_embed.proj.weight", "vision_tower.merger.linear_fc1.weight",
+                        "vision_tower.merger.linear_fc2.weight", "language_model.model.embed_tokens.weight"]
+            + (0..<24).map { "vision_tower.blocks.\($0).attn.qkv.weight" }
+        guard required.allSatisfy(tensorNames.contains),
+              tensorNames.filter({ $0.hasPrefix("vision_tower.") }).count == 297 else {
+            throw Qwen35AssetValidationError.invalid("The combined package is missing language or vision weights. Download the complete model again.")
+        }
     }
 
     static func directorySize(at directory: URL, includingHiddenFiles: Bool = false) -> Int64 {
@@ -234,20 +126,10 @@ enum Gemma4MLXSupport {
     }
 }
 
-private enum Gemma4AssetValidationError: LocalizedError {
-    case unreadableFile(fileName: String, reason: String)
-    case invalidJSON(fileName: String, reason: String)
-    case mismatch(key: String, expected: String, actual: String)
-
+private enum Qwen35AssetValidationError: LocalizedError {
+    case invalid(String)
     var errorDescription: String? {
-        switch self {
-        case let .unreadableFile(fileName, reason):
-            return "Could not read \(fileName). \(reason)"
-        case let .invalidJSON(fileName, reason):
-            return "Could not decode \(fileName). \(reason)"
-        case let .mismatch(key, expected, actual):
-            return "Gemma 4 asset mismatch for \(key). Expected \(expected) but found \(actual)."
-        }
+        switch self { case .invalid(let message): return "Qwen model validation failed. " + message }
     }
 }
 

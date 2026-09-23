@@ -16,7 +16,7 @@ struct FirstTokenTrace: Sendable {
     let candidates: [FirstTokenCandidate]
 }
 
-enum Gemma4TokenDiagnostics {
+enum Qwen35TokenDiagnostics {
     static func formatLogit(_ value: Float) -> String {
         String(format: "%.3f", value)
     }

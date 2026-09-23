@@ -38,7 +38,7 @@ struct Yemma4AutomationConfiguration: Sendable, Equatable {
     }
 }
 
-struct Gemma4SmokeReport: Codable, Sendable, Equatable {
+struct Qwen35SmokeReport: Codable, Sendable, Equatable {
     enum Status: String, Codable, Sendable {
         case passed
         case failed
@@ -80,7 +80,7 @@ struct Gemma4SmokeReport: Codable, Sendable, Equatable {
 
 @Observable
 @MainActor
-final class Gemma4SmokeAutomation {
+final class Qwen35SmokeAutomation {
     private enum SmokeCaseName {
         static let appShaped = "app-shaped"
         static let parity = "parity"
@@ -122,7 +122,7 @@ final class Gemma4SmokeAutomation {
         hasRunAutomatedSmokeTest = true
         let createdAt = Date()
         var setupError: String?
-        var caseReports: [Gemma4SmokeReport.CaseReport] = []
+        var caseReports: [Qwen35SmokeReport.CaseReport] = []
 
         do {
             let smokeImageURL = try bundledSmokeImageURL()
@@ -137,7 +137,7 @@ final class Gemma4SmokeAutomation {
                     metadata: [
                         "case": plan.name,
                         "prompt": plan.prompt,
-                        "imageAsset": Gemma4MLXSupport.automatedSmokeImageAssetName
+                        "imageAsset": Qwen35MLXSupport.automatedSmokeImageAssetName
                     ]
                 )
 
@@ -170,7 +170,7 @@ final class Gemma4SmokeAutomation {
     }
 
     private func automatedSmokeCasePlans() -> [SmokeCasePlan] {
-        let prompt = Gemma4MLXSupport.defaultImagePrompt
+        let prompt = Qwen35MLXSupport.defaultImagePrompt
         return [
             SmokeCasePlan(
                 name: SmokeCaseName.appShaped,
@@ -239,14 +239,14 @@ final class Gemma4SmokeAutomation {
 
     private func bundledSmokeImageURL() throws -> URL {
 #if canImport(UIKit)
-        guard let image = UIImage(named: Gemma4MLXSupport.automatedSmokeImageAssetName),
+        guard let image = UIImage(named: Qwen35MLXSupport.automatedSmokeImageAssetName),
             let imageData = image.jpegData(compressionQuality: 0.9)
         else {
             throw CocoaError(
                 .fileReadNoSuchFile,
                 userInfo: [
                     NSLocalizedDescriptionKey:
-                        "Bundled smoke image '\(Gemma4MLXSupport.automatedSmokeImageAssetName)' is missing."
+                        "Bundled smoke image '\(Qwen35MLXSupport.automatedSmokeImageAssetName)' is missing."
                 ]
             )
         }
@@ -260,7 +260,7 @@ final class Gemma4SmokeAutomation {
     private func persistSmokeImage(_ imageData: Data) throws -> URL {
         let directory = try ConversationAttachmentStore.prepareDirectory()
 
-        let fileURL = directory.appendingPathComponent("gemma4-smoke-image.jpg")
+        let fileURL = directory.appendingPathComponent("qwen35-smoke-image.jpg")
         try imageData.write(to: fileURL, options: ConversationAttachmentStore.writeOptions)
         return fileURL
     }
@@ -279,12 +279,12 @@ final class Gemma4SmokeAutomation {
         plan: SmokeCasePlan,
         result: SmokeCaseResult,
         events: [DiagnosticEvent]
-    ) -> Gemma4SmokeReport.CaseReport {
+    ) -> Qwen35SmokeReport.CaseReport {
         let responseText = result.response.trimmingCharacters(in: .whitespacesAndNewlines)
-        let status: Gemma4SmokeReport.Status =
+        let status: Qwen35SmokeReport.Status =
             responseText.isEmpty || result.errorMessage != nil ? .failed : .passed
 
-        return Gemma4SmokeReport.CaseReport(
+        return Qwen35SmokeReport.CaseReport(
             name: plan.name,
             prompt: plan.prompt,
             baseRoles: plan.baseRoles,
@@ -309,20 +309,20 @@ final class Gemma4SmokeAutomation {
 
     private func persistSmokeReport(
         createdAt: Date,
-        caseReports: [Gemma4SmokeReport.CaseReport],
+        caseReports: [Qwen35SmokeReport.CaseReport],
         setupError: String?
     ) throws {
         let artifactFileName = "\(Self.smokeReportID(for: createdAt)).json"
         let primaryCase = caseReports.first(where: { $0.name == SmokeCaseName.appShaped })
             ?? caseReports.first
-        let status: Gemma4SmokeReport.Status =
+        let status: Qwen35SmokeReport.Status =
             setupError == nil && caseReports.allSatisfy { $0.status == .passed } ? .passed : .failed
-        let report = Gemma4SmokeReport(
+        let report = Qwen35SmokeReport(
             id: Self.smokeReportID(for: createdAt),
             createdAt: createdAt,
             status: status,
-            prompt: primaryCase?.prompt ?? Gemma4MLXSupport.defaultImagePrompt,
-            imageAssetName: Gemma4MLXSupport.automatedSmokeImageAssetName,
+            prompt: primaryCase?.prompt ?? Qwen35MLXSupport.defaultImagePrompt,
+            imageAssetName: Qwen35MLXSupport.automatedSmokeImageAssetName,
             response: primaryCase?.response ?? "",
             errorMessage: setupError ?? primaryCase?.errorMessage,
             inferenceSummary: primaryCase?.inferenceSummary,
@@ -372,7 +372,7 @@ final class Gemma4SmokeAutomation {
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = .current
         formatter.dateFormat = "yyyyMMdd-HHmmss"
-        return "gemma4-smoke-\(formatter.string(from: date))"
+        return "qwen35-smoke-\(formatter.string(from: date))"
     }
 
     private static func promptRouteSummary(from events: [DiagnosticEvent]) -> String? {

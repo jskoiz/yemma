@@ -193,7 +193,7 @@ public struct Yemma4App: App {
                     )
                     Task {
                         llmService.refreshAppleFoundationModelAvailability()
-                        if llmService.selectedRuntime == .gemma4 {
+                        if llmService.selectedRuntime == .qwen35 {
                             await modelDownloader.appDidBecomeActive()
                         }
                     }
@@ -212,7 +212,7 @@ public struct Yemma4App: App {
                     case .active:
                         Task {
                             llmService.refreshAppleFoundationModelAvailability()
-                            if llmService.selectedRuntime == .gemma4 {
+                            if llmService.selectedRuntime == .qwen35 {
                                 await modelDownloader.appDidBecomeActive()
                             }
                         }

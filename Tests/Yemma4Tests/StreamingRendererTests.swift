@@ -2,6 +2,12 @@ import XCTest
 @testable import Yemma4
 
 final class StreamingRendererTests: XCTestCase {
+    func testQwenThinkingAndTurnBoundaries() {
+        XCTAssertEqual(StreamingRenderer.sanitize("<think>hidden reasoning</think>Hello<|im_end|>"), "Hello")
+        XCTAssertEqual(StreamingRenderer.sanitize("<think>unfinished reasoning"), "")
+        XCTAssertTrue(StreamingRenderer.shouldStopStreaming(tailOf: "Hello<|im_end|>"))
+    }
+
     func testSanitizeRemovesControlMarkersAndThinkingBlocks() {
         let raw = "<start_of_turn>model\n<|channel>thinking<channel|>Hello<end_of_turn>user"
 

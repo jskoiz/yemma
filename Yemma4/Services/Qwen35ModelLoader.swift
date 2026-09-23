@@ -9,7 +9,7 @@ private enum MLXRuntimeEnvironment {
     nonisolated(unsafe) static var didPrepare = false
 }
 
-enum Gemma4ModelLoader {
+enum Qwen35ModelLoader {
     static func loadContainer(at modelDirectory: URL) async throws -> ModelContainer {
         try await prepareMLXRuntimeInBackground()
         Memory.cacheLimit = 20 * 1024 * 1024
@@ -26,17 +26,7 @@ enum Gemma4ModelLoader {
                     "indexedWeightFiles": validatedDirectory.indexedWeightFileNames.count
                 ]
             )
-            if try Gemma4MLXSupport.normalizeAssetContractIfNeeded(validatedDirectory) {
-                AppDiagnostics.shared.record(
-                    "Normalized Gemma 4 config for compatibility",
-                    category: "model",
-                    metadata: [
-                        "path": validatedDirectory.configURL.path,
-                        "injectedKey": "pad_token_id"
-                    ]
-                )
-            }
-            try Gemma4MLXSupport.validateAssetContract(validatedDirectory)
+            try Qwen35MLXSupport.validateAssetContract(validatedDirectory)
         } catch {
             throw LLMServiceError.assetValidationFailed(error)
         }
@@ -50,8 +40,10 @@ enum Gemma4ModelLoader {
             }
         )
 
+        var configuration = ResolvedModelConfiguration(directory: modelDirectory)
+        configuration.extraEOSTokens = ["<|im_end|>", "<|endoftext|>"]
         let context = try await VLMModelFactory.shared._load(
-            configuration: .init(directory: modelDirectory),
+            configuration: configuration,
             tokenizerLoader: tokenizerLoader
         )
         return ModelContainer(context: context)

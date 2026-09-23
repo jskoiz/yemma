@@ -3,9 +3,9 @@ import Hub
 import XCTest
 @testable import Yemma4
 
-// MARK: - Gemma 4 prompt shaping
+// MARK: - Qwen3.5 4B prompt shaping
 
-final class Gemma4PromptMessageTests: XCTestCase {
+final class Qwen35PromptMessageTests: XCTestCase {
     func testPromptMessagesPreserveHistoryAndEveryAttachedImage() {
         let firstImage = PromptImageAsset(id: "first", filePath: "/tmp/first.jpg")
         let secondImage = PromptImageAsset(id: "second", filePath: "/tmp/second.jpg")
@@ -18,7 +18,7 @@ final class Gemma4PromptMessageTests: XCTestCase {
             PromptMessageInput(role: "user", text: "Compare these", images: [secondImage, thirdImage]),
         ]
 
-        let shaped = LLMService.promptMessagesForGemma4(from: messages)
+        let shaped = LLMService.promptMessagesForQwen35(from: messages)
 
         XCTAssertEqual(shaped.map(\.content), messages.map(\.text))
         XCTAssertEqual(shaped.map(\.imageURLs.count), [0, 0, 1, 0, 2])
@@ -37,10 +37,10 @@ final class Gemma4PromptMessageTests: XCTestCase {
             PromptMessageInput(role: "user", text: "", images: []),
         ]
 
-        let shaped = LLMService.promptMessagesForGemma4(from: messages)
+        let shaped = LLMService.promptMessagesForQwen35(from: messages)
 
         XCTAssertEqual(shaped.count, 2)
-        XCTAssertEqual(shaped[0].content, Gemma4MLXSupport.defaultImagePrompt)
+        XCTAssertEqual(shaped[0].content, Qwen35MLXSupport.defaultImagePrompt)
         XCTAssertEqual(shaped[1].content, "")
         XCTAssertEqual(shaped.map(\.imageURLs.count), [1, 1])
     }
@@ -52,10 +52,10 @@ final class AppleFoundationModelRuntimeTests: XCTestCase {
     func testInitialRuntimeSelectionHonorsPersistenceAndDeviceEligibility() {
         XCTAssertEqual(
             InferenceRuntime.initialSelection(
-                persistedValue: InferenceRuntime.gemma4.rawValue,
+                persistedValue: InferenceRuntime.qwen35.rawValue,
                 appleAvailability: .available
             ),
-            .gemma4
+            .qwen35
         )
         XCTAssertEqual(
             InferenceRuntime.initialSelection(
@@ -76,14 +76,14 @@ final class AppleFoundationModelRuntimeTests: XCTestCase {
                 persistedValue: nil,
                 appleAvailability: .requiresIOS26
             ),
-            .gemma4
+            .qwen35
         )
         XCTAssertEqual(
             InferenceRuntime.initialSelection(
                 persistedValue: nil,
                 appleAvailability: .deviceNotEligible
             ),
-            .gemma4
+            .qwen35
         )
         XCTAssertEqual(
             InferenceRuntime.initialSelection(
@@ -394,12 +394,15 @@ final class ModelDownloaderLifecycleTests: XCTestCase {
             .appendingPathComponent("yemma-model-delete-\(UUID().uuidString)", isDirectory: true)
         let hub = HubApi(downloadBase: downloadRoot, useOfflineMode: true)
         let modelDirectory = hub.localRepoLocation(
-            Hub.Repo(id: Gemma4MLXSupport.repositoryID)
+            Hub.Repo(id: Qwen35MLXSupport.repositoryID)
         )
         try FileManager.default.createDirectory(at: modelDirectory, withIntermediateDirectories: true)
         try Data("synthetic model data".utf8).write(
             to: modelDirectory.appendingPathComponent("weights.safetensors")
         )
+        let legacyDirectory = hub.localRepoLocation(Hub.Repo(id: "mlx-community/gemma-4-e2b-it-4bit"))
+        try FileManager.default.createDirectory(at: legacyDirectory, withIntermediateDirectories: true)
+        try Data("old model".utf8).write(to: legacyDirectory.appendingPathComponent("model.safetensors"))
         defaults.set(modelDirectory.path, forKey: ModelDownloader.persistedModelPathKey)
 
         defer {
@@ -417,8 +420,12 @@ final class ModelDownloaderLifecycleTests: XCTestCase {
         XCTAssertEqual(downloader.modelPath, modelDirectory.path)
         XCTAssertTrue(downloader.isDownloaded)
 
+        XCTAssertTrue(downloader.hasLegacyModelFiles)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: legacyDirectory.path))
         let didDelete = await downloader.deleteModel()
 
+        XCTAssertFalse(FileManager.default.fileExists(atPath: legacyDirectory.path))
+        XCTAssertFalse(downloader.hasLegacyModelFiles)
         XCTAssertTrue(didDelete)
         XCTAssertFalse(FileManager.default.fileExists(atPath: modelDirectory.path))
         XCTAssertFalse(downloader.isDeletingModel)
@@ -435,7 +442,7 @@ final class ModelDownloaderLifecycleTests: XCTestCase {
             .appendingPathComponent("yemma-model-delete-retry-\(UUID().uuidString)", isDirectory: true)
         let hub = HubApi(downloadBase: downloadRoot, useOfflineMode: true)
         let modelDirectory = hub.localRepoLocation(
-            Hub.Repo(id: Gemma4MLXSupport.repositoryID)
+            Hub.Repo(id: Qwen35MLXSupport.repositoryID)
         )
         try FileManager.default.createDirectory(at: modelDirectory, withIntermediateDirectories: true)
         try Data("synthetic model data".utf8).write(

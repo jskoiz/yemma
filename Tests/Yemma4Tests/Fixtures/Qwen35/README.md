@@ -1,0 +1,1 @@
+Template copied unchanged from dream-vault-community/Qwen3.5-4B-4bit-Abliterated at a40c9a8d5c6f6f70d678120ccb46a3f6456c727c. Original template: Qwen/Qwen3.5-4B at 851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a. Apache-2.0; see LICENSE. This fixture verifies rendering with the app's pinned Swift Jinja version.

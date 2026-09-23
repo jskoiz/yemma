@@ -252,7 +252,7 @@ struct ChatComposerView: View {
         .accessibilityHint(
             supportsImageInput
                 ? "Attach up to four images to your next message."
-                : "Image chat requires the optional Gemma 4 model."
+                : "Image chat requires the optional Qwen3.5 4B model."
         )
     }
 

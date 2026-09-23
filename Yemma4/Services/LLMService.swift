@@ -50,7 +50,7 @@ private final class GenerationStartGate: @unchecked Sendable {
     }
 }
 
-private enum Gemma4InputRoute: String, Sendable {
+private enum Qwen35InputRoute: String, Sendable {
     case chat
 }
 
@@ -85,13 +85,13 @@ final class LLMService: @unchecked Sendable {
         switch selectedRuntime {
         case .appleFoundationModel:
             return appleFoundationModelAvailability.isAvailable
-        case .gemma4:
+        case .qwen35:
             return isModelLoaded
         }
     }
 
     var isVisionReady: Bool {
-        selectedRuntime == .gemma4 && isMLXVisionReady
+        selectedRuntime == .qwen35 && isMLXVisionReady
     }
 
     var supportsImageInput: Bool {
@@ -358,8 +358,8 @@ final class LLMService: @unchecked Sendable {
     }
 
     func loadModel(from path: String) async throws {
-        guard selectedRuntime == .gemma4 else {
-            throw LLMServiceError.gemmaRuntimeNotSelected
+        guard selectedRuntime == .qwen35 else {
+            throw LLMServiceError.qwenRuntimeNotSelected
         }
 
         let resolvedPath = (path as NSString).expandingTildeInPath
@@ -383,19 +383,19 @@ final class LLMService: @unchecked Sendable {
             // Another physical load still owns the MLX loader. Wait for it to
             // settle before deciding whether this request needs a replacement.
             // This is especially important after an unload invalidates a load:
-            // the logical state is idle, but the detached 4.2 GB load may still
+            // the logical state is idle, but the detached 3.05 GB load may still
             // be consuming memory.
             while withLock({ modelLoadCoordinator.loadingPath != nil }) {
                 guard !Task.isCancelled else { return }
                 let shouldKeepWaiting = await MainActor.run {
-                    selectedRuntime == .gemma4
+                    selectedRuntime == .qwen35
                 }
                 guard shouldKeepWaiting else { return }
                 try? await Task.sleep(for: .milliseconds(50))
             }
 
             let shouldRetry = await MainActor.run {
-                selectedRuntime == .gemma4 && lastError == nil
+                selectedRuntime == .qwen35 && lastError == nil
             }
             guard shouldRetry else { return }
         }
@@ -422,11 +422,11 @@ final class LLMService: @unchecked Sendable {
 
         do {
             let loaded = try await Task.detached(priority: .userInitiated) {
-                try await Gemma4ModelLoader.loadContainer(at: URL(fileURLWithPath: resolvedPath))
+                try await Qwen35ModelLoader.loadContainer(at: URL(fileURLWithPath: resolvedPath))
             }.value
 
             let canActivate = await MainActor.run {
-                selectedRuntime == .gemma4 && withLock {
+                selectedRuntime == .qwen35 && withLock {
                     modelLoadCoordinator.isCurrent(loadTicket)
                 }
             }
@@ -444,7 +444,7 @@ final class LLMService: @unchecked Sendable {
             }
 
             let didActivate = await MainActor.run { () -> Bool in
-                guard selectedRuntime == .gemma4 else { return false }
+                guard selectedRuntime == .qwen35 else { return false }
 
                 let installed = withLock { () -> Bool in
                     guard modelLoadCoordinator.isCurrent(loadTicket) else { return false }
@@ -509,12 +509,12 @@ final class LLMService: @unchecked Sendable {
         switch selectedRuntime {
         case .appleFoundationModel:
             return generateWithAppleFoundationModel(prompt: prompt, history: history)
-        case .gemma4:
-            return generateWithGemma4(prompt: prompt, history: history)
+        case .qwen35:
+            return generateWithQwen35(prompt: prompt, history: history)
         }
     }
 
-    private func generateWithGemma4(
+    private func generateWithQwen35(
         prompt: PromptMessageInput,
         history: [PromptMessageInput]
     ) -> AsyncStream<String> {
@@ -531,8 +531,8 @@ final class LLMService: @unchecked Sendable {
             }
         }
 
-        let conversation = Self.promptMessagesForGemma4(from: history + [prompt])
-        let promptRoute: Gemma4InputRoute = .chat
+        let conversation = Self.promptMessagesForQwen35(from: history + [prompt])
+        let promptRoute: Qwen35InputRoute = .chat
         let promptMode = conversation.contains { !$0.imageURLs.isEmpty } ? "multimodal" : "text-only"
         let conversationImageCount = conversation.reduce(into: 0) { $0 += $1.imageURLs.count }
         let roleSummary = "[\(conversation.map(\.role).joined(separator: ","))]"
@@ -594,7 +594,7 @@ final class LLMService: @unchecked Sendable {
                     let rawTokenStream = try await container.perform { context in
                         let lmInput: LMInput
                         do {
-                            let userInput = self.makeGemma4UserInput(from: conversation)
+                            let userInput = self.makeQwen35UserInput(from: conversation)
                             lmInput = try await context.processor.prepare(input: userInput)
                         } catch {
                             throw LLMServiceError.processorFailed(error)
@@ -615,7 +615,7 @@ final class LLMService: @unchecked Sendable {
                             && Yemma4AutomationConfiguration.current.multimodalFirstTokenTraceEnabled
                         {
                             do {
-                                let firstTokenTrace = try Gemma4TokenDiagnostics.computeFirstTokenTrace(
+                                let firstTokenTrace = try Qwen35TokenDiagnostics.computeFirstTokenTrace(
                                     context: context,
                                     input: lmInput,
                                     parameters: parameters,
@@ -629,7 +629,7 @@ final class LLMService: @unchecked Sendable {
                                     "Multimodal first-token trace",
                                     category: "generation",
                                     metadata: [
-                                        "summary": Gemma4TokenDiagnostics.summarizeFirstTokenTrace(firstTokenTrace)
+                                        "summary": Qwen35TokenDiagnostics.summarizeFirstTokenTrace(firstTokenTrace)
                                     ]
                                 )
                             } catch {
@@ -667,7 +667,7 @@ final class LLMService: @unchecked Sendable {
 
                     let tokenStream = rawTokenStream.0
                     let completionTask = rawTokenStream.1
-                    var parser: Gemma4ResponseTokenParser? = nil
+                    var parser: Qwen35ResponseTokenParser? = nil
 
                     for await generation in tokenStream {
                         if Task.isCancelled {
@@ -678,7 +678,7 @@ final class LLMService: @unchecked Sendable {
                         case let .token(tokenID):
                             if parser == nil {
                                 let tokenizer = await container.tokenizer
-                                parser = Gemma4ResponseTokenParser(tokenizer: tokenizer)
+                                parser = Qwen35ResponseTokenParser(tokenizer: tokenizer)
                             }
                             if let chunk = parser?.append(tokenID: tokenID), !chunk.isEmpty {
                                 continuation.yield(chunk)
@@ -730,7 +730,7 @@ final class LLMService: @unchecked Sendable {
                             if let parser {
                                 if Yemma4AutomationConfiguration.current.rawTokenLoggingEnabled {
                                     logger.debug(
-                                        "Gemma4 raw stream mode=\(promptMode, privacy: .public) tokens=\(parser.totalTokenCount, privacy: .public) visibleChunks=\(parser.visibleChunkCount, privacy: .public) visibleChars=\(parser.visibleCharacterCount, privacy: .public) preview=[\(parser.tokenPreviewSummary, privacy: .private)]"
+                                        "Qwen35 raw stream mode=\(promptMode, privacy: .public) tokens=\(parser.totalTokenCount, privacy: .public) visibleChunks=\(parser.visibleChunkCount, privacy: .public) visibleChars=\(parser.visibleCharacterCount, privacy: .public) preview=[\(parser.tokenPreviewSummary, privacy: .private)]"
                                     )
                                 }
                             }
@@ -1052,9 +1052,9 @@ final class LLMService: @unchecked Sendable {
         }
     }
 
-    static func promptMessagesForGemma4(
+    static func promptMessagesForQwen35(
         from messages: [PromptMessageInput]
-    ) -> [Gemma4ConversationMessage] {
+    ) -> [Qwen35ConversationMessage] {
         messages.compactMap { message in
             let imageURLs = message.images.map { URL(fileURLWithPath: $0.filePath) }
             let trimmedText = message.text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1066,12 +1066,12 @@ final class LLMService: @unchecked Sendable {
                 trimmedText.isEmpty,
                 !imageURLs.isEmpty
             {
-                Gemma4MLXSupport.defaultImagePrompt
+                Qwen35MLXSupport.defaultImagePrompt
             } else {
                 message.text
             }
 
-            return Gemma4ConversationMessage(
+            return Qwen35ConversationMessage(
                 role: message.role,
                 content: content,
                 imageURLs: imageURLs
@@ -1081,11 +1081,11 @@ final class LLMService: @unchecked Sendable {
 
 }
 
-private extension LLMService {
+extension LLMService {
     static let hiddenChannelTokenBudget = 48
     static let recommendedMultimodalMaxTokens = 256
 
-    func generationParameters(for messages: [Gemma4ConversationMessage]) -> GenerateParameters {
+    func generationParameters(for messages: [Qwen35ConversationMessage]) -> GenerateParameters {
         if messages.contains(where: { !$0.imageURLs.isEmpty }) {
             return GenerateParameters(
                 maxTokens: min(maxResponseTokens, Self.recommendedMultimodalMaxTokens),
@@ -1096,8 +1096,8 @@ private extension LLMService {
         return GenerateParameters(
             maxTokens: maxResponseTokens,
             temperature: Float(temperature),
-            topP: 0.95,
-            topK: 64
+            topP: 0.8,
+            topK: 20
         )
     }
 
@@ -1111,17 +1111,23 @@ private extension LLMService {
             return baseProcessor
         }
 
-        return Gemma4HiddenChannelBudgetProcessor(
+        return Qwen35HiddenChannelBudgetProcessor(
             tokenizer: tokenizer,
             hiddenChannelTokenBudget: Self.hiddenChannelTokenBudget,
             baseProcessor: baseProcessor
         )
     }
 
-    func makeGemma4UserInput(
-        from messages: [Gemma4ConversationMessage]
+    func makeQwen35UserInput(
+        from messages: [Qwen35ConversationMessage]
     ) -> UserInput {
-        let promptMessages = promptInstructionMessages(for: messages) + messages
+        // Qwen requires exactly one system message at the beginning.
+        let instructions = promptInstructionMessages(for: messages)
+            + messages.filter { Self.chatRole(for: $0.role) == .system }
+        let system = Qwen35ConversationMessage(
+            role: "system", content: instructions.map(\.content).joined(separator: "\n\n"), imageURLs: []
+        )
+        let promptMessages = [system] + messages.filter { Self.chatRole(for: $0.role) != .system }
 
         return UserInput(
             chat: promptMessages.map { message in
@@ -1131,15 +1137,16 @@ private extension LLMService {
                     images: message.imageURLs.map(UserInput.Image.url)
                 )
             },
-            additionalContext: Gemma4MLXSupport.templateContext
+            processing: .init(resize: CGSize(width: 768, height: 768)),
+            additionalContext: Qwen35MLXSupport.templateContext
         )
     }
 
     func promptInstructionMessages(
-        for conversationMessages: [Gemma4ConversationMessage]
-    ) -> [Gemma4ConversationMessage] {
+        for conversationMessages: [Qwen35ConversationMessage]
+    ) -> [Qwen35ConversationMessage] {
         var instructionMessages = [
-            Gemma4ConversationMessage(
+            Qwen35ConversationMessage(
                 role: "system",
                 content: Self.baseSystemPrompt,
                 imageURLs: []
@@ -1148,7 +1155,7 @@ private extension LLMService {
 
         if let stylePrompt = activeResponseStylePreset?.instructionPrompt {
             instructionMessages.append(
-                Gemma4ConversationMessage(
+                Qwen35ConversationMessage(
                     role: "developer",
                     content: stylePrompt,
                     imageURLs: []
@@ -1158,7 +1165,7 @@ private extension LLMService {
 
         if let lengthTargetPrompt = activeResponseStylePreset?.lengthTargetPrompt {
             instructionMessages.append(
-                Gemma4ConversationMessage(
+                Qwen35ConversationMessage(
                     role: "developer",
                     content: lengthTargetPrompt,
                     imageURLs: []
@@ -1170,7 +1177,7 @@ private extension LLMService {
             let taskHint = PromptTaskHint.classify( latestUserPrompt)
         {
             instructionMessages.append(
-                Gemma4ConversationMessage(
+                Qwen35ConversationMessage(
                     role: "developer",
                     content: taskHint.instructionPrompt,
                     imageURLs: []

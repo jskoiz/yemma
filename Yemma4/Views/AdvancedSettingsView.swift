@@ -172,8 +172,8 @@ struct AdvancedSettingsView: View {
         switch llmService.selectedRuntime {
         case .appleFoundationModel:
             return "Built into iOS"
-        case .gemma4:
-            return Gemma4MLXSupport.repositoryID
+        case .qwen35:
+            return Qwen35MLXSupport.repositoryID
         }
     }
 
@@ -217,7 +217,7 @@ struct AdvancedSettingsView: View {
             return llmService.appleFoundationModelAvailability.isAvailable
                 ? runtime.detail
                 : llmService.appleFoundationModelAvailability.detail
-        case .gemma4:
+        case .qwen35:
             return runtime.detail
         }
     }
@@ -406,9 +406,9 @@ struct AdvancedSettingsView: View {
     private var setupPageDetail: String {
         switch llmService.selectedRuntime {
         case .appleFoundationModel:
-            return "View Apple model availability or choose the optional Gemma download."
-        case .gemma4:
-            return "View Gemma download progress and local setup."
+            return "View Apple model availability or choose the optional Qwen download."
+        case .qwen35:
+            return "View Qwen download progress and local setup."
         }
     }
 
