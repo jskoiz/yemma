@@ -19,7 +19,7 @@ enum ModelDownloadStorageCheck {
 
     static func insufficientStorageMessage(forModelBytes modelBytes: Int64) -> String {
         let neededGB = formattedGigabytes(requiredBytes(forModelBytes: modelBytes))
-        return "Not enough storage — Yemma needs about \(neededGB) free to download the model. Free up some space and try again."
+        return "Not enough storage: Yemma needs about \(neededGB) free to download the model. Free up some space and try again."
     }
 
     static func formattedGigabytes(_ bytes: Int64) -> String {
@@ -56,6 +56,43 @@ final class BackgroundModelDownloadCoordinator: NSObject, @unchecked Sendable {
     private struct PersistedState: Codable, Sendable {
         let manifest: DownloadManifest
         var lastError: String?
+        var verifiedFiles: [String: ModelDownloadVerificationReceipt]
+        var receivedBytes: [String: Int64]
+        var allowsCellularDownload: Bool
+
+        init(
+            manifest: DownloadManifest,
+            lastError: String?,
+            verifiedFiles: [String: ModelDownloadVerificationReceipt] = [:],
+            receivedBytes: [String: Int64] = [:],
+            allowsCellularDownload: Bool = false
+        ) {
+            self.manifest = manifest
+            self.lastError = lastError
+            self.verifiedFiles = verifiedFiles
+            self.receivedBytes = receivedBytes
+            self.allowsCellularDownload = allowsCellularDownload
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case manifest
+            case lastError
+            case verifiedFiles
+            case receivedBytes
+            case allowsCellularDownload
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            manifest = try container.decode(DownloadManifest.self, forKey: .manifest)
+            lastError = try container.decodeIfPresent(String.self, forKey: .lastError)
+            verifiedFiles = try container.decodeIfPresent(
+                [String: ModelDownloadVerificationReceipt].self,
+                forKey: .verifiedFiles
+            ) ?? [:]
+            receivedBytes = try container.decodeIfPresent([String: Int64].self, forKey: .receivedBytes) ?? [:]
+            allowsCellularDownload = try container.decodeIfPresent(Bool.self, forKey: .allowsCellularDownload) ?? false
+        }
     }
 
     private struct DownloadManifest: Codable, Sendable {
@@ -81,6 +118,7 @@ final class BackgroundModelDownloadCoordinator: NSObject, @unchecked Sendable {
     private let fileManager: FileManager
     private let decoder = JSONDecoder()
     private let encoder = JSONEncoder()
+    private let stateTransactionLock = NSLock()
     private let completionHandlerLock = NSLock()
     private var backgroundCompletionHandler: (() -> Void)?
 
@@ -89,6 +127,9 @@ final class BackgroundModelDownloadCoordinator: NSObject, @unchecked Sendable {
         configuration.isDiscretionary = false
         configuration.sessionSendsLaunchEvents = true
         configuration.waitsForConnectivity = true
+        // Keep the session permissive so each request can apply the user's
+        // current cellular preference. Requests default to Wi-Fi-only below.
+        configuration.allowsCellularAccess = true
         configuration.allowsExpensiveNetworkAccess = true
         configuration.allowsConstrainedNetworkAccess = true
         configuration.httpMaximumConnectionsPerHost = 1
@@ -123,7 +164,8 @@ final class BackgroundModelDownloadCoordinator: NSObject, @unchecked Sendable {
         using hub: HubApi,
         repositoryID: String,
         revision: String,
-        matching patterns: [String]
+        matching patterns: [String],
+        allowsCellularDownload: Bool = false
     ) async throws -> BackgroundModelDownloadSnapshot {
         _ = session
 
@@ -131,12 +173,17 @@ final class BackgroundModelDownloadCoordinator: NSObject, @unchecked Sendable {
             using: hub,
             repositoryID: repositoryID,
             revision: revision,
-            matching: patterns
+            matching: patterns,
+            allowsCellularDownload: allowsCellularDownload
         )
 
         try ensureSufficientStorage(for: manifest, hub: hub)
 
-        try await enqueueMissingTasks(using: manifest, hub: hub)
+        try await enqueueMissingTasks(
+            using: manifest,
+            hub: hub,
+            allowsCellularDownload: allowsCellularDownload
+        )
         return await snapshot(using: hub, repositoryID: repositoryID)
     }
 
@@ -146,8 +193,9 @@ final class BackgroundModelDownloadCoordinator: NSObject, @unchecked Sendable {
     ) throws {
         // Only the not-yet-downloaded files will consume new space.
         let repoLocation = hub.localRepoLocation(Hub.Repo(id: manifest.repositoryID))
+        let state = loadState(using: hub, repositoryID: manifest.repositoryID)
         let remainingBytes = manifest.files.reduce(into: Int64(0)) { partialResult, file in
-            guard !completedFileExists(file, in: repoLocation) else {
+            guard !completedFileExists(file, in: repoLocation, state: state) else {
                 return
             }
             partialResult += file.expectedBytes
@@ -169,6 +217,7 @@ final class BackgroundModelDownloadCoordinator: NSObject, @unchecked Sendable {
             )
         else {
             let message = ModelDownloadStorageCheck.insufficientStorageMessage(forModelBytes: remainingBytes)
+            updateLastError(message, repositoryID: manifest.repositoryID, using: hub)
             AppDiagnostics.shared.record(
                 "Blocked MLX model download: insufficient storage",
                 category: "download",
@@ -241,7 +290,7 @@ final class BackgroundModelDownloadCoordinator: NSObject, @unchecked Sendable {
         var hasPendingWork = false
 
         for file in manifest.files {
-            if completedFileExists(file, in: repoLocation) {
+            if completedFileExists(file, in: repoLocation, state: persistedState) {
                 completedBytes += file.expectedBytes
                 continue
             }
@@ -254,11 +303,22 @@ final class BackgroundModelDownloadCoordinator: NSObject, @unchecked Sendable {
 
             if resumeDataExists(for: file, in: repoLocation) {
                 hasPendingWork = true
+                completedBytes += min(
+                    max(persistedState.receivedBytes[file.relativePath] ?? 0, 0),
+                    file.expectedBytes
+                )
                 continue
             }
+
+            completedBytes += min(
+                max(persistedState.receivedBytes[file.relativePath] ?? 0, 0),
+                file.expectedBytes
+            )
         }
 
-        let isComplete = manifest.files.allSatisfy { completedFileExists($0, in: repoLocation) }
+        let isComplete = manifest.files.allSatisfy {
+            completedFileExists($0, in: repoLocation, state: persistedState)
+        }
         if isComplete {
             return BackgroundModelDownloadSnapshot(
                 totalBytes: manifest.totalBytes,
@@ -280,15 +340,165 @@ final class BackgroundModelDownloadCoordinator: NSObject, @unchecked Sendable {
 
     func clearState(using hub: HubApi, repositoryID: String) async {
         let repoLocation = hub.localRepoLocation(Hub.Repo(id: repositoryID))
-        try? await cancelTasks(repositoryID: repositoryID)
+        await cancelTasks(repositoryID: repositoryID, using: hub)
         try? fileManager.removeItem(at: cacheDirectory(for: repoLocation))
+    }
+
+    /// Removes transient resume and byte-progress state while retaining the
+    /// manifest and verified receipts for a ready cached model.
+    func clearTransientState(using hub: HubApi, repositoryID: String) async {
+        let repoLocation = hub.localRepoLocation(Hub.Repo(id: repositoryID))
+        await cancelTasks(repositoryID: repositoryID, using: hub)
+        try? fileManager.removeItem(at: cacheDirectory(for: repoLocation).appending(path: "resume-data"))
+        withStateTransaction(using: hub, repositoryID: repositoryID) { state in
+            state?.lastError = nil
+            state?.receivedBytes.removeAll()
+        }
+    }
+
+    /// Verifies the on-disk files against the persisted manifest before the
+    /// model directory is offered to the runtime. A matching receipt avoids a
+    /// second full hash when the file identity has not changed; a changed or
+    /// missing receipt is rehashed and invalid files are removed for repair.
+    func verifyCachedFiles(
+        using hub: HubApi,
+        repositoryID: String,
+        revision: String
+    ) async -> Bool {
+        guard let state = loadState(using: hub, repositoryID: repositoryID),
+              state.manifest.revision == revision else {
+            return false
+        }
+
+        let repoLocation = hub.localRepoLocation(Hub.Repo(id: repositoryID))
+        let manifest = state.manifest
+        let result = await Task.detached(priority: .utility) {
+            var receipts: [String: ModelDownloadVerificationReceipt] = [:]
+            var invalidFiles: [String] = []
+
+            for file in manifest.files {
+                let destination = repoLocation.appending(path: file.relativePath)
+                if let receipt = state.verifiedFiles[file.relativePath],
+                   ModelDownloadIntegrity.receiptMatches(
+                       receipt,
+                       fileAt: destination,
+                       revision: manifest.revision,
+                       expectedBytes: file.expectedBytes,
+                       etag: file.etag
+                   ) {
+                    receipts[file.relativePath] = receipt
+                    continue
+                }
+
+                do {
+                    receipts[file.relativePath] = try ModelDownloadIntegrity.verify(
+                        fileAt: destination,
+                        expectedBytes: file.expectedBytes,
+                        etag: file.etag,
+                        revision: manifest.revision
+                    )
+                } catch {
+                    invalidFiles.append(file.relativePath)
+                }
+            }
+
+            return (receipts: receipts, invalidFiles: invalidFiles)
+        }.value
+
+        return withStateTransaction(using: hub, repositoryID: repositoryID) { state in
+            guard var currentState = state,
+                  currentState.manifest.revision == revision else {
+                return false
+            }
+
+            var invalidFiles = Set(result.invalidFiles)
+            for file in manifest.files {
+                let relativePath = file.relativePath
+                let destination = repoLocation.appending(path: relativePath)
+
+                // A delegate callback may have published a newer verified file
+                // while the detached validation pass was reading the old one.
+                // Preserve that receipt instead of replacing it with stale
+                // validation output.
+                if let currentReceipt = currentState.verifiedFiles[relativePath],
+                   ModelDownloadIntegrity.receiptMatches(
+                       currentReceipt,
+                       fileAt: destination,
+                       revision: revision,
+                       expectedBytes: file.expectedBytes,
+                       etag: file.etag
+                   ) {
+                    invalidFiles.remove(relativePath)
+                    continue
+                }
+
+                if let receipt = result.receipts[relativePath],
+                   ModelDownloadIntegrity.receiptMatches(
+                       receipt,
+                       fileAt: destination,
+                       revision: revision,
+                       expectedBytes: file.expectedBytes,
+                       etag: file.etag
+                   ) {
+                    currentState.verifiedFiles[relativePath] = receipt
+                    invalidFiles.remove(relativePath)
+                    continue
+                }
+
+                currentState.verifiedFiles.removeValue(forKey: relativePath)
+                currentState.receivedBytes.removeValue(forKey: relativePath)
+                invalidFiles.insert(relativePath)
+                try? fileManager.removeItem(at: destination)
+            }
+
+            if invalidFiles.isEmpty {
+                currentState.lastError = nil
+            } else {
+                currentState.lastError = "One or more saved model files failed integrity verification. They will be downloaded again."
+            }
+            state = currentState
+            return invalidFiles.isEmpty
+        }
+    }
+
+    /// Forces every cached file to be treated as incomplete after a structural
+    /// asset-contract failure, so a retry actually replaces same-size files.
+    func invalidateCachedFiles(using hub: HubApi, repositoryID: String, reason: String) {
+        withStateTransaction(using: hub, repositoryID: repositoryID) { state in
+            state?.verifiedFiles.removeAll()
+            state?.receivedBytes.removeAll()
+            state?.lastError = reason
+        }
+    }
+
+    func pauseDownload(using hub: HubApi, repositoryID: String) async -> BackgroundModelDownloadSnapshot {
+        await cancelTasks(repositoryID: repositoryID, using: hub, producingResumeData: true)
+        updateLastError(nil, repositoryID: repositoryID, using: hub)
+        return await snapshot(using: hub, repositoryID: repositoryID)
+    }
+
+    func cancelDownload(using hub: HubApi, repositoryID: String) async -> BackgroundModelDownloadSnapshot {
+        await cancelTasks(repositoryID: repositoryID, using: hub)
+        let repoLocation = hub.localRepoLocation(Hub.Repo(id: repositoryID))
+        withStateTransaction(using: hub, repositoryID: repositoryID) { state in
+            guard state != nil else { return }
+            for file in state!.manifest.files {
+                removeResumeData(for: file.relativePath, in: repoLocation)
+                if !completedFileExists(file, in: repoLocation, state: state!) {
+                    state!.receivedBytes.removeValue(forKey: file.relativePath)
+                }
+            }
+            state!.lastError = nil
+        }
+        return await snapshot(using: hub, repositoryID: repositoryID)
     }
 
     private func persistedOrFreshManifest(
         using hub: HubApi,
         repositoryID: String,
         revision: String,
-        matching patterns: [String]
+        matching patterns: [String],
+        allowsCellularDownload: Bool
     ) async throws -> DownloadManifest {
         let repo = Hub.Repo(id: repositoryID)
         let repoLocation = hub.localRepoLocation(repo)
@@ -297,10 +507,27 @@ final class BackgroundModelDownloadCoordinator: NSObject, @unchecked Sendable {
             persistedState.manifest.repositoryID == repositoryID,
             persistedState.manifest.revision == revision
         {
+            if persistedState.allowsCellularDownload != allowsCellularDownload {
+                await cancelTasks(repositoryID: repositoryID, using: hub)
+                try? fileManager.removeItem(
+                    at: cacheDirectory(for: repoLocation).appending(path: "resume-data")
+                )
+                return withStateTransaction(using: hub, repositoryID: repositoryID) { state in
+                    guard var currentState = state,
+                          currentState.manifest.repositoryID == repositoryID,
+                          currentState.manifest.revision == revision else {
+                        return persistedState.manifest
+                    }
+                    currentState.allowsCellularDownload = allowsCellularDownload
+                    currentState.receivedBytes.removeAll()
+                    state = currentState
+                    return currentState.manifest
+                }
+            }
             return persistedState.manifest
         }
 
-        try? await cancelTasks(repositoryID: repositoryID)
+        await cancelTasks(repositoryID: repositoryID, using: hub)
         try? fileManager.removeItem(at: cacheDirectory(for: repoLocation))
 
         let manifest = try await buildManifest(
@@ -309,7 +536,13 @@ final class BackgroundModelDownloadCoordinator: NSObject, @unchecked Sendable {
             revision: revision,
             matching: patterns
         )
-        saveState(PersistedState(manifest: manifest, lastError: nil), using: hub)
+        withStateTransaction(using: hub, repositoryID: repositoryID) { state in
+            state = PersistedState(
+                manifest: manifest,
+                lastError: nil,
+                allowsCellularDownload: allowsCellularDownload
+            )
+        }
         return manifest
     }
 
@@ -374,14 +607,22 @@ final class BackgroundModelDownloadCoordinator: NSObject, @unchecked Sendable {
 
     private func enqueueMissingTasks(
         using manifest: DownloadManifest,
-        hub: HubApi
+        hub: HubApi,
+        allowsCellularDownload: Bool
     ) async throws {
         let repoLocation = hub.localRepoLocation(Hub.Repo(id: manifest.repositoryID))
+        guard let state = loadState(using: hub, repositoryID: manifest.repositoryID) else {
+            return
+        }
         let existingTasks = await currentTasks()
-        let existingTaskDescriptions = Set(existingTasks.compactMap(\.taskDescription))
+        let existingTaskDescriptions = Set(
+            existingTasks
+                .filter { $0.state == .running || $0.state == .suspended }
+                .compactMap(\.taskDescription)
+        )
 
         for file in manifest.files {
-            if completedFileExists(file, in: repoLocation) {
+            if completedFileExists(file, in: repoLocation, state: state) {
                 continue
             }
 
@@ -392,15 +633,17 @@ final class BackgroundModelDownloadCoordinator: NSObject, @unchecked Sendable {
             }
 
             let task: URLSessionDownloadTask
-            if let resumeData = try? Data(contentsOf: resumeDataURL(for: file, in: repoLocation)) {
+            if let resumeData = try? Data(contentsOf: resumeDataURL(for: file, in: repoLocation)), !resumeData.isEmpty {
                 task = session.downloadTask(withResumeData: resumeData)
+                rememberResumedTask(task)
             } else {
                 guard let url = URL(string: file.sourceURL) else {
                     // A file we cannot turn into a task would silently never download,
                     // leaving the bundle incomplete with no pending work. Surface it.
                     updateLastError(
                         "Invalid download URL for \(file.relativePath).",
-                        repositoryID: manifest.repositoryID
+                        repositoryID: manifest.repositoryID,
+                        using: hub
                     )
                     AppDiagnostics.shared.record(
                         "Skipped background model download with invalid source URL",
@@ -413,8 +656,7 @@ final class BackgroundModelDownloadCoordinator: NSObject, @unchecked Sendable {
                     continue
                 }
 
-                var request = URLRequest(url: url)
-                request.httpMethod = "GET"
+                let request = makeRequest(url: url, allowsCellularDownload: allowsCellularDownload)
                 task = session.downloadTask(with: request)
             }
 
@@ -430,44 +672,72 @@ final class BackgroundModelDownloadCoordinator: NSObject, @unchecked Sendable {
     /// entry. When the captured etag is an LFS SHA-256 the file's streamed digest
     /// must match; otherwise the existing byte-size check is used. Throws on any
     /// mismatch so the caller can discard the file.
-    private func verifyDownloadedFile(_ file: DownloadFile, at destination: URL) throws {
-        switch ModelDownloadIntegrity.strategy(forETag: file.etag) {
-        case let .sha256(expected):
-            let actual = try ModelDownloadIntegrity.sha256Digest(ofFileAt: destination)
-            guard actual == expected else {
-                throw Hub.HubClientError.downloadError(
-                    "Downloaded file SHA-256 did not match \(file.relativePath)."
-                )
-            }
-        case .size:
-            guard
-                let attributes = try? fileManager.attributesOfItem(atPath: destination.path),
-                let fileSize = attributes[.size] as? NSNumber,
-                fileSize.int64Value == file.expectedBytes
-            else {
-                throw Hub.HubClientError.downloadError(
-                    "Downloaded file size did not match \(file.relativePath)."
-                )
-            }
+    private func verifyDownloadedFile(
+        _ file: DownloadFile,
+        at destination: URL,
+        revision: String
+    ) throws -> ModelDownloadVerificationReceipt {
+        do {
+            return try ModelDownloadIntegrity.verify(
+                fileAt: destination,
+                expectedBytes: file.expectedBytes,
+                etag: file.etag,
+                revision: revision
+            )
+        } catch {
+            throw Hub.HubClientError.downloadError(
+                "Downloaded file verification failed for \(file.relativePath): \(error.localizedDescription)"
+            )
         }
     }
 
-    private func completedFileExists(_ file: DownloadFile, in repoLocation: URL) -> Bool {
+    private func completedFileExists(
+        _ file: DownloadFile,
+        in repoLocation: URL,
+        state: PersistedState?
+    ) -> Bool {
         let destination = repoLocation.appending(path: file.relativePath)
         guard fileManager.fileExists(atPath: destination.path) else {
             return false
         }
 
-        guard let attributes = try? fileManager.attributesOfItem(atPath: destination.path),
-            let fileSize = attributes[.size] as? NSNumber
-        else {
+        guard let state,
+              let receipt = state.verifiedFiles[file.relativePath] else {
             return false
         }
 
-        return fileSize.int64Value == file.expectedBytes
+        return ModelDownloadIntegrity.receiptMatches(
+            receipt,
+            fileAt: destination,
+            revision: state.manifest.revision,
+            expectedBytes: file.expectedBytes,
+            etag: file.etag
+        )
+    }
+
+    private func withStateTransaction<T>(
+        using hub: HubApi,
+        repositoryID: String,
+        _ body: (inout PersistedState?) -> T
+    ) -> T {
+        stateTransactionLock.lock()
+        defer { stateTransactionLock.unlock() }
+
+        var state = loadStateUnlocked(using: hub, repositoryID: repositoryID)
+        let result = body(&state)
+        if let state {
+            saveStateUnlocked(state, using: hub)
+        }
+        return result
     }
 
     private func loadState(using hub: HubApi, repositoryID: String) -> PersistedState? {
+        stateTransactionLock.lock()
+        defer { stateTransactionLock.unlock() }
+        return loadStateUnlocked(using: hub, repositoryID: repositoryID)
+    }
+
+    private func loadStateUnlocked(using hub: HubApi, repositoryID: String) -> PersistedState? {
         let repoLocation = hub.localRepoLocation(Hub.Repo(id: repositoryID))
         let stateURL = stateURL(for: repoLocation)
         guard let data = try? Data(contentsOf: stateURL) else {
@@ -477,7 +747,7 @@ final class BackgroundModelDownloadCoordinator: NSObject, @unchecked Sendable {
         return try? decoder.decode(PersistedState.self, from: data)
     }
 
-    private func saveState(_ state: PersistedState, using hub: HubApi) {
+    private func saveStateUnlocked(_ state: PersistedState, using hub: HubApi) {
         let repoLocation = hub.localRepoLocation(Hub.Repo(id: state.manifest.repositoryID))
         let stateURL = stateURL(for: repoLocation)
 
@@ -497,13 +767,10 @@ final class BackgroundModelDownloadCoordinator: NSObject, @unchecked Sendable {
         }
     }
 
-    private func updateLastError(_ message: String?, repositoryID: String) {
-        let hub = HubApi.shared
-        guard var state = loadState(using: hub, repositoryID: repositoryID) else {
-            return
+    private func updateLastError(_ message: String?, repositoryID: String, using hub: HubApi) {
+        withStateTransaction(using: hub, repositoryID: repositoryID) { state in
+            state?.lastError = message
         }
-        state.lastError = message
-        saveState(state, using: hub)
     }
 
     private static func taskDescription(repositoryID: String, relativePath: String) -> String {
@@ -544,6 +811,15 @@ final class BackgroundModelDownloadCoordinator: NSObject, @unchecked Sendable {
         fileManager.fileExists(atPath: resumeDataURL(for: file, in: repoLocation).path)
     }
 
+    private func makeRequest(url: URL, allowsCellularDownload: Bool) -> URLRequest {
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.allowsCellularAccess = allowsCellularDownload
+        request.allowsExpensiveNetworkAccess = allowsCellularDownload
+        request.allowsConstrainedNetworkAccess = allowsCellularDownload
+        return request
+    }
+
     private func persistResumeData(
         _ data: Data,
         for relativePath: String,
@@ -565,6 +841,37 @@ final class BackgroundModelDownloadCoordinator: NSObject, @unchecked Sendable {
                     "error": error.localizedDescription
                 ]
             )
+        }
+    }
+
+    private let progressMetadataLock = NSLock()
+    private var lastPersistedProgress: [String: (bytes: Int64, date: Date)] = [:]
+
+    private func persistReceivedBytes(
+        _ bytes: Int64,
+        for relativePath: String,
+        repositoryID: String,
+        using hub: HubApi,
+        force: Bool
+    ) {
+        let now = Date()
+        let key = "\(repositoryID)|\(relativePath)"
+        progressMetadataLock.lock()
+        let previous = lastPersistedProgress[key]
+        let shouldPersist = force
+            || previous == nil
+            || bytes - (previous?.bytes ?? 0) >= 1 * 1024 * 1024
+            || now.timeIntervalSince(previous?.date ?? .distantPast) >= 1
+        if shouldPersist {
+            lastPersistedProgress[key] = (bytes: bytes, date: now)
+        }
+        progressMetadataLock.unlock()
+
+        guard shouldPersist else {
+            return
+        }
+        withStateTransaction(using: hub, repositoryID: repositoryID) { state in
+            state?.receivedBytes[relativePath] = max(bytes, 0)
         }
     }
 
@@ -598,6 +905,25 @@ final class BackgroundModelDownloadCoordinator: NSObject, @unchecked Sendable {
         try? fileManager.removeItem(at: selfHealMarkerURL(for: relativePath, in: repoLocation))
     }
 
+    private func enqueueFreshTask(
+        file: DownloadFile?,
+        repositoryID: String,
+        allowsCellularDownload: Bool
+    ) {
+        guard let file, let url = URL(string: file.sourceURL) else {
+            return
+        }
+
+        let task = session.downloadTask(
+            with: makeRequest(url: url, allowsCellularDownload: allowsCellularDownload)
+        )
+        task.taskDescription = Self.taskDescription(
+            repositoryID: repositoryID,
+            relativePath: file.relativePath
+        )
+        task.resume()
+    }
+
     private func currentTasks() async -> [URLSessionTask] {
         await withCheckedContinuation { continuation in
             session.getAllTasks { tasks in
@@ -606,7 +932,26 @@ final class BackgroundModelDownloadCoordinator: NSObject, @unchecked Sendable {
         }
     }
 
-    private func cancelTasks(repositoryID: String) async throws {
+    private let taskMetadataLock = NSLock()
+    private var resumedTaskIdentifiers: Set<Int> = []
+
+    private func rememberResumedTask(_ task: URLSessionTask) {
+        taskMetadataLock.lock()
+        resumedTaskIdentifiers.insert(task.taskIdentifier)
+        taskMetadataLock.unlock()
+    }
+
+    private func takeResumedTask(_ task: URLSessionTask) -> Bool {
+        taskMetadataLock.lock()
+        defer { taskMetadataLock.unlock() }
+        return resumedTaskIdentifiers.remove(task.taskIdentifier) != nil
+    }
+
+    private func cancelTasks(
+        repositoryID: String,
+        using hub: HubApi,
+        producingResumeData: Bool = false
+    ) async {
         let tasks = await currentTasks()
         let scopedTasks = tasks.filter { task in
             guard let descriptor = Self.parseTaskDescription(task.taskDescription) else {
@@ -614,7 +959,48 @@ final class BackgroundModelDownloadCoordinator: NSObject, @unchecked Sendable {
             }
             return descriptor.repositoryID == repositoryID
         }
-        scopedTasks.forEach { $0.cancel() }
+
+        for task in scopedTasks where task.state == .running || task.state == .suspended {
+            if producingResumeData,
+               let downloadTask = task as? URLSessionDownloadTask,
+               let descriptor = Self.parseTaskDescription(task.taskDescription) {
+                let repoLocation = hub.localRepoLocation(Hub.Repo(id: repositoryID))
+                await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                    downloadTask.cancel(byProducingResumeData: { [weak self] resumeData in
+                        defer { continuation.resume() }
+                        guard let self else { return }
+                        if let resumeData, !resumeData.isEmpty {
+                            self.persistResumeData(
+                                resumeData,
+                                for: descriptor.relativePath,
+                                in: repoLocation
+                            )
+                        }
+                    })
+                }
+            } else {
+                task.cancel()
+            }
+        }
+
+        await waitForTasksToDrain(repositoryID: repositoryID)
+    }
+
+    private func waitForTasksToDrain(repositoryID: String) async {
+        for _ in 0..<200 {
+            let tasks = await currentTasks()
+            let hasActiveTask = tasks.contains { task in
+                guard let descriptor = Self.parseTaskDescription(task.taskDescription),
+                      descriptor.repositoryID == repositoryID else {
+                    return false
+                }
+                return task.state == .running || task.state == .suspended || task.state == .canceling
+            }
+            if !hasActiveTask {
+                return
+            }
+            try? await Task.sleep(for: .milliseconds(50))
+        }
     }
 
     private func finishBackgroundEventsIfNeeded() {
@@ -640,6 +1026,7 @@ extension BackgroundModelDownloadCoordinator: URLSessionDownloadDelegate, URLSes
         guard let descriptor = Self.parseTaskDescription(downloadTask.taskDescription) else {
             return
         }
+        _ = takeResumedTask(downloadTask)
 
         let hub = HubApi.shared
         guard let state = loadState(using: hub, repositoryID: descriptor.repositoryID) else {
@@ -650,6 +1037,21 @@ extension BackgroundModelDownloadCoordinator: URLSessionDownloadDelegate, URLSes
         let destination = repoLocation.appending(path: descriptor.relativePath)
 
         do {
+            guard let file = state.manifest.files.first(where: { $0.relativePath == descriptor.relativePath }) else {
+                throw Hub.HubClientError.downloadError(
+                    "Downloaded file was not present in the saved manifest: \(descriptor.relativePath)."
+                )
+            }
+
+            // Verify the system temporary file before publishing it into the
+            // public model directory. Readers can therefore never observe a
+            // same-size payload while its digest is still being checked.
+            let verifiedReceipt = try verifyDownloadedFile(
+                file,
+                at: location,
+                revision: state.manifest.revision
+            )
+
             if fileManager.fileExists(atPath: destination.path) {
                 try fileManager.removeItem(at: destination)
             }
@@ -657,26 +1059,46 @@ extension BackgroundModelDownloadCoordinator: URLSessionDownloadDelegate, URLSes
             try fileManager.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
             try fileManager.moveItem(at: location, to: destination)
 
-            if let file = state.manifest.files.first(where: { $0.relativePath == descriptor.relativePath }) {
-                try verifyDownloadedFile(file, at: destination)
-            }
+            recordVerifiedFile(
+                file,
+                receipt: verifiedReceipt.updatingModificationDate(from: destination),
+                repositoryID: descriptor.repositoryID,
+                using: hub
+            )
 
             removeResumeData(for: descriptor.relativePath, in: repoLocation)
             clearSelfHealMarker(for: descriptor.relativePath, in: repoLocation)
-            updateLastError(nil, repositoryID: descriptor.repositoryID)
+            updateLastError(nil, repositoryID: descriptor.repositoryID, using: hub)
         } catch {
             // The system temp file at `location` is consumed once this delegate
             // returns. Whether the failure was a move error, size mismatch, or
             // hash mismatch, clear any partial/corrupt destination and re-enqueue
             // the file once so the next pass downloads a clean copy.
-            updateLastError(error.localizedDescription, repositoryID: descriptor.repositoryID)
+            updateLastError(error.localizedDescription, repositoryID: descriptor.repositoryID, using: hub)
             selfHealFailedFinish(
                 file: state.manifest.files.first(where: { $0.relativePath == descriptor.relativePath }),
                 repositoryID: descriptor.repositoryID,
                 relativePath: descriptor.relativePath,
                 destination: destination,
-                repoLocation: repoLocation
+                repoLocation: repoLocation,
+                allowsCellularDownload: state.allowsCellularDownload
             )
+        }
+    }
+
+    private func recordVerifiedFile(
+        _ file: DownloadFile,
+        receipt: ModelDownloadVerificationReceipt,
+        repositoryID: String,
+        using hub: HubApi
+    ) {
+        withStateTransaction(using: hub, repositoryID: repositoryID) { state in
+            guard state?.manifest.revision == receipt.revision else {
+                return
+            }
+            state?.verifiedFiles[file.relativePath] = receipt
+            state?.receivedBytes.removeValue(forKey: file.relativePath)
+            state?.lastError = nil
         }
     }
 
@@ -685,7 +1107,8 @@ extension BackgroundModelDownloadCoordinator: URLSessionDownloadDelegate, URLSes
         repositoryID: String,
         relativePath: String,
         destination: URL,
-        repoLocation: URL
+        repoLocation: URL,
+        allowsCellularDownload: Bool
     ) {
         // Remove any partial/corrupt file left at the destination so the missing
         // file is detected as incomplete and a re-download can take its place.
@@ -721,8 +1144,7 @@ extension BackgroundModelDownloadCoordinator: URLSessionDownloadDelegate, URLSes
         }
         markSelfHealAttempted(for: relativePath, in: repoLocation)
 
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
+        let request = makeRequest(url: url, allowsCellularDownload: allowsCellularDownload)
         let task = session.downloadTask(with: request)
         task.taskDescription = Self.taskDescription(
             repositoryID: repositoryID,
@@ -757,13 +1179,63 @@ extension BackgroundModelDownloadCoordinator: URLSessionDownloadDelegate, URLSes
 
         let repoLocation = hub.localRepoLocation(Hub.Repo(id: state.manifest.repositoryID))
         let relativePath = descriptor.relativePath
+        let wasResumed = takeResumedTask(task)
+
+        persistReceivedBytes(
+            max(Int64(task.countOfBytesReceived), 0),
+            for: relativePath,
+            repositoryID: descriptor.repositoryID,
+            using: hub,
+            force: true
+        )
 
         let nsError = error as NSError
         if let resumeData = nsError.userInfo[NSURLSessionDownloadTaskResumeData] as? Data {
             persistResumeData(resumeData, for: relativePath, in: repoLocation)
+        } else if wasResumed && ModelDownloadIntegrity.shouldDiscardResumeData(after: error) {
+            // A stale or undecodable resume blob must not strand this file in
+            // an endless retry loop. Start one clean request after the old
+            // task has fully drained.
+            removeResumeData(for: relativePath, in: repoLocation)
+            var replacement: (file: DownloadFile, allowsCellularDownload: Bool)?
+            withStateTransaction(using: hub, repositoryID: descriptor.repositoryID) { state in
+                guard state != nil else { return }
+                state!.receivedBytes.removeValue(forKey: relativePath)
+                if let file = state!.manifest.files.first(where: { $0.relativePath == relativePath }) {
+                    replacement = (file: file, allowsCellularDownload: state!.allowsCellularDownload)
+                }
+            }
+            if let replacement {
+                enqueueFreshTask(
+                    file: replacement.file,
+                    repositoryID: descriptor.repositoryID,
+                    allowsCellularDownload: replacement.allowsCellularDownload
+                )
+            }
         }
 
-        updateLastError(error.localizedDescription, repositoryID: descriptor.repositoryID)
+        if ModelDownloadIntegrity.shouldDiscardResumeData(after: error) {
+            updateLastError(error.localizedDescription, repositoryID: descriptor.repositoryID, using: hub)
+        }
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        downloadTask: URLSessionDownloadTask,
+        didWriteData bytesWritten: Int64,
+        totalBytesWritten: Int64,
+        totalBytesExpectedToWrite: Int64
+    ) {
+        guard let descriptor = Self.parseTaskDescription(downloadTask.taskDescription) else {
+            return
+        }
+        persistReceivedBytes(
+            max(totalBytesWritten, 0),
+            for: descriptor.relativePath,
+            repositoryID: descriptor.repositoryID,
+            using: HubApi.shared,
+            force: false
+        )
     }
 
     func urlSessionDidFinishEvents(forBackgroundURLSession session: URLSession) {

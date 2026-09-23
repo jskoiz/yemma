@@ -2,6 +2,7 @@ import SwiftUI
 
 enum ChatStarterBehavior: Hashable {
     case promptOnly
+    case guided(GuidedTask)
     case promptAndPickImage
 }
 
@@ -18,64 +19,9 @@ struct ChatStarter: Identifiable, Hashable {
     var prompts: [String] { [prompt] + promptVariants }
 
     static let defaults: [ChatStarter] = [
-        ChatStarter(
-            title: "Describe a photo",
-            subtitle: "Upload an image and tell me what stands out",
-            prompt: "Describe this image clearly. Summarize what is happening, point out the key details, and mention anything easy to miss at a glance.",
-            systemImage: "photo.on.rectangle.angled",
-            behavior: .promptAndPickImage
-        ),
-        ChatStarter(
-            title: "Teach me something",
-            subtitle: "Get a short fact or explanation",
-            prompt: "Teach me one useful fact or simple explanation. Keep it clear and under three short paragraphs.",
-            systemImage: "sparkles",
-            promptVariants: [
-                "Teach me one history fact that is easy to remember and explain why it matters in under three short paragraphs.",
-                "Teach me one science fact that most people do not know and keep it clear in under three short paragraphs.",
-                "Teach me something useful about the human body or brain. Make it easy to understand and keep it under three short paragraphs.",
-                "Teach me one interesting fact from archaeology or ancient history and explain why it matters in under three short paragraphs.",
-                "Teach me one weird but true fact about animals, plants, or evolution. Keep it clear and under three short paragraphs.",
-                "Teach me one clever invention or engineering fact that changed everyday life in a surprising way. Keep it concise and under three short paragraphs."
-            ],
-            sendsImmediately: true
-        ),
-        ChatStarter(
-            title: "Ask a simple question",
-            subtitle: "Get a clear answer in a few sentences",
-            prompt: "Answer this question clearly and briefly. If there are important caveats or tradeoffs, mention them.",
-            systemImage: "questionmark.circle",
-            promptVariants: [
-                "Answer this simple question in plain language and keep it short.",
-                "Explain this like I am new to the topic and keep it to a few sentences.",
-                "Give me the most useful answer first, then add one sentence of context if needed."
-            ],
-            sendsImmediately: true
-        ),
-        ChatStarter(
-            title: "Rewrite or summarize",
-            subtitle: "Tighten text or turn it into a summary",
-            prompt: "Rewrite or summarize the text I share. Keep the meaning, tighten the wording, and make it easier to read.",
-            systemImage: "text.alignleft",
-            promptVariants: [
-                "Rewrite this to sound clearer and more natural while keeping the same meaning.",
-                "Summarize this into a few concise sentences without losing the key points.",
-                "Turn this into a shorter, cleaner version that is easier to read."
-            ],
-            sendsImmediately: true
-        ),
-        ChatStarter(
-            title: "How is Yemma different?",
-            subtitle: "See where Yemma fits best and where cloud AI may still do better",
-            prompt: "Explain what Yemma is best for as a local assistant on this iPhone, what it does well for everyday notes, rewrites, questions, and image help, and where cloud assistants may still be stronger on harder or more current tasks. Keep it calm, honest, and easy to scan.",
-            systemImage: "lock.shield",
-            promptVariants: [
-                "What is Yemma best for as a local assistant on iPhone? Explain what it does well, where it is most convenient, and where a cloud assistant may still do better on harder or newer questions. Keep it balanced and easy to scan.",
-                "Compare Yemma with ChatGPT or Claude in a calm, honest way. Focus on local use, everyday tasks, and the tradeoffs someone should know before relying on it.",
-                "Give me a simple overview of where Yemma fits best, what it is good at, and when a cloud model may still be the better choice."
-            ],
-            sendsImmediately: true
-        )
+        ChatStarter(title: "Rewrite", subtitle: "Find the right words and tone", prompt: "", systemImage: "pencil.line", behavior: .guided(.rewrite)),
+        ChatStarter(title: "Summarize", subtitle: "Pull out the useful parts of your text", prompt: "", systemImage: "text.alignleft", behavior: .guided(.summarize)),
+        ChatStarter(title: "Ask", subtitle: "Bring a question or think something through", prompt: "", systemImage: "questionmark.bubble", behavior: .guided(.ask))
     ]
 }
 
@@ -91,6 +37,8 @@ struct EmptyStateView: View {
     var onPrimarySetupAction: (() -> Void)?
     var starters: [ChatStarter] = []
     var onSelectStarter: (ChatStarter) -> Void = { _ in }
+    var resumeTitle: String?
+    var onResume: (() -> Void)?
 
     var body: some View {
         VStack(spacing: 20) {
@@ -102,8 +50,8 @@ struct EmptyStateView: View {
                         .font(AppTheme.Typography.brandSection)
                         .foregroundStyle(AppTheme.textPrimary)
 
-                    Text("A local assistant for everyday notes, rewrites, and questions. Choose the optional Qwen model when you need image help.")
-                        .font(.system(size: 15, weight: .medium))
+                    Text("A little help with your words, ideas, and questions. All on this iPhone.")
+                        .font(AppTheme.Typography.utilityRowDetail)
                         .foregroundStyle(AppTheme.textSecondary)
                 }
 
@@ -132,6 +80,15 @@ struct EmptyStateView: View {
                         RoundedRectangle(cornerRadius: AppTheme.Radius.medium, style: .continuous)
                             .stroke(AppTheme.controlBorder, lineWidth: 1)
                     )
+                }
+                if let resumeTitle, let onResume {
+                    Button(action: onResume) {
+                        Label("Continue: \(resumeTitle)", systemImage: "clock.arrow.circlepath")
+                            .font(.subheadline)
+                            .lineLimit(2)
+                            .frame(minHeight: 44, alignment: .leading)
+                    }
+                    .accessibilityHint("Opens your most recent saved conversation.")
                 }
             }
             .frame(maxWidth: 540, alignment: .leading)
@@ -241,32 +198,12 @@ struct EmptyStateView: View {
                     .frame(width: 24)
 
                 VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 6) {
-                        Text(starter.title)
-                            .font(AppTheme.Typography.utilityRowTitle.weight(.semibold))
-                            .foregroundStyle(AppTheme.textPrimary)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.92)
-                            .layoutPriority(1)
-
-                        if starter.behavior == .promptAndPickImage {
-                            Text("Photo")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(AppTheme.accent)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(AppTheme.accentSoft)
-                                .clipShape(Capsule())
-                        }
-
-                        Spacer(minLength: 0)
-                    }
+                    starterTitle(for: starter)
 
                     HStack(spacing: 8) {
                         Text(starter.subtitle)
                             .font(AppTheme.Typography.utilityCaption)
                             .foregroundStyle(AppTheme.textSecondary)
-                            .lineLimit(2)
                             .fixedSize(horizontal: false, vertical: true)
 
                         Spacer(minLength: 0)
@@ -284,6 +221,44 @@ struct EmptyStateView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func starterTitle(for starter: ChatStarter) -> some View {
+        if starter.behavior == .promptAndPickImage {
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    starterTitleLabel(starter.title)
+                    photoBadge
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    starterTitleLabel(starter.title)
+                    photoBadge
+                }
+            }
+        } else {
+            starterTitleLabel(starter.title)
+        }
+    }
+
+    private func starterTitleLabel(_ title: String) -> some View {
+        Text(title)
+            .font(AppTheme.Typography.utilityRowTitle.weight(.semibold))
+            .foregroundStyle(AppTheme.textPrimary)
+            .fixedSize(horizontal: false, vertical: true)
+            .layoutPriority(1)
+    }
+
+    private var photoBadge: some View {
+        Text("Photo")
+            .font(.caption2.weight(.semibold))
+            .fixedSize()
+            .foregroundStyle(AppTheme.accent)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(AppTheme.accentSoft)
+            .clipShape(Capsule())
     }
 
     private var shouldShowStatusBanner: Bool {

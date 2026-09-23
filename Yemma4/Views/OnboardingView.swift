@@ -27,6 +27,8 @@ private struct SetupBenefit: Identifiable {
 public struct OnboardingView: View {
     @Environment(ModelDownloader.self) private var modelDownloader
     @Environment(LLMService.self) private var llmService
+    @State private var isChangingDownload = false
+    @State private var confirmsCancelDownload = false
     @State private var isStartingDownload = false
     @State private var isSelectingRuntime = false
     @State private var runtimeSelectionError: String?
@@ -65,6 +67,8 @@ public struct OnboardingView: View {
                         subtitle: headerSubtitle
                     )
 
+                    runtimePicker
+
                     SetupProgressCard(
                         badgeText: setupCopy.badgeText,
                         badgeSystemImage: setupState.systemImage,
@@ -79,13 +83,15 @@ public struct OnboardingView: View {
                         progressStatus
                     }
 
+                    downloadControls
+
                     SetupBenefitsRow(items: setupBenefits)
 
                     if shouldShowPrimaryAction {
                         SetupPrimaryButton(
                             title: setupCopy.actionTitle,
                             subtitle: setupCopy.actionSubtitle,
-                            isEnabled: actionEnabled,
+                            isEnabled: actionEnabled && !isChangingDownload && !isSelectingRuntime,
                             action: handlePrimaryAction
                         )
                     }
@@ -97,6 +103,17 @@ public struct OnboardingView: View {
                 .frame(maxWidth: .infinity)
             }
             .scrollBounceBehavior(.basedOnSize)
+        }
+        .confirmationDialog("Cancel this download?", isPresented: $confirmsCancelDownload, titleVisibility: .visible) {
+            Button("Cancel Download", role: .destructive) {
+                Task {
+                    isChangingDownload = true
+                    defer { isChangingDownload = false }
+                    await modelDownloader.cancelDownload()
+                }
+            }
+        } message: {
+            Text("Partial downloads will be removed. Verified files stay on this iPhone so you can use them when you start again.")
         }
         .contentShape(Rectangle())
         .onAppear {
@@ -138,6 +155,74 @@ public struct OnboardingView: View {
         }
     }
 
+    private var runtimePicker: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Choose your model").font(.headline)
+            ForEach(InferenceRuntime.allCases) { runtime in
+                Button {
+                    Task { await selectRuntime(runtime) }
+                } label: {
+                    HStack(alignment: .top, spacing: 12) {
+                        Image(systemName: llmService.selectedRuntime == runtime ? "checkmark.circle.fill" : "circle")
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(runtime.title).font(.body.weight(.semibold))
+                            Text(runtime == .appleFoundationModel && !llmService.appleFoundationModelAvailability.isAvailable
+                                 ? llmService.appleFoundationModelAvailability.title : runtime.detail)
+                                .font(.caption).foregroundStyle(AppTheme.textSecondary)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(isSelectingRuntime || isChangingDownload || runtimeIsUnsupported(runtime))
+                .accessibilityAddTraits(llmService.selectedRuntime == runtime ? [.isSelected] : [])
+            }
+        }
+        .padding(20)
+        .groupedCard(cornerRadius: AppTheme.Radius.large)
+    }
+
+    @ViewBuilder
+    private var downloadControls: some View {
+        if llmService.selectedRuntime == .qwen35 && supportsLocalModelRuntime && !modelDownloader.isDownloaded {
+            VStack(alignment: .leading, spacing: 12) {
+                Toggle("Allow cellular download", isOn: Binding(
+                    get: { modelDownloader.allowsCellularDownload },
+                    set: { modelDownloader.allowsCellularDownload = $0 }
+                ))
+                .disabled(modelDownloader.isDownloading || isChangingDownload)
+                Text("Keep at least \(Self.formatBytes(modelDownloader.requiredFreeSpaceBytes)) free for download and setup.")
+                    .font(.caption).foregroundStyle(AppTheme.textSecondary)
+                if modelDownloader.isDownloading {
+                    Button("Pause Download") {
+                        Task {
+                            isChangingDownload = true
+                            defer { isChangingDownload = false }
+                            await modelDownloader.pauseDownload()
+                        }
+                    }
+                    .frame(minHeight: 44)
+                }
+                if modelDownloader.isDownloading || modelDownloader.canResumeDownload {
+                    Button("Cancel Download", role: .destructive) { confirmsCancelDownload = true }
+                        .frame(minHeight: 44)
+                }
+            }
+            .disabled(isChangingDownload)
+            .padding(20)
+            .groupedCard(cornerRadius: AppTheme.Radius.large)
+        }
+    }
+
+    private func runtimeIsUnsupported(_ runtime: InferenceRuntime) -> Bool {
+        runtime == .appleFoundationModel && (
+            llmService.appleFoundationModelAvailability == .requiresIOS26
+            || llmService.appleFoundationModelAvailability == .deviceNotEligible
+        )
+    }
+
     @ViewBuilder
     private var progressStatus: some View {
         switch setupState {
@@ -173,13 +258,13 @@ public struct OnboardingView: View {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
                     Text(progressPercentLabel)
-                        .font(.system(size: 34, weight: .bold, design: .rounded))
+                        .font(.largeTitle.weight(.bold))
                         .foregroundStyle(AppTheme.textPrimary)
 
                     Spacer(minLength: 0)
 
                     Text("Saving on this iPhone")
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.caption.weight(.semibold))
                         .foregroundStyle(AppTheme.textTertiary)
                 }
 
@@ -202,11 +287,11 @@ public struct OnboardingView: View {
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(appSetup.preparationStatusText)
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.caption.weight(.semibold))
                         .foregroundStyle(AppTheme.textPrimary)
 
                     Text("Local setup is finishing now.")
-                        .font(.system(size: 12, weight: .medium))
+                        .font(.caption.weight(.medium))
                         .foregroundStyle(AppTheme.textTertiary)
                 }
 
@@ -578,7 +663,7 @@ public struct OnboardingView: View {
         case .simulator, .appleReady, .preparing, .ready:
             onContinue?()
         case .appleUnavailable:
-            Task { await selectQwenRuntime() }
+            Task { await selectRuntime(.qwen35) }
         case .failed where appSetup.modelDeletionError != nil:
             Task { _ = await modelDownloader.deleteModel() }
         case .failed where hasModelPreparationError:
@@ -603,13 +688,16 @@ public struct OnboardingView: View {
     }
 
     @MainActor
-    private func selectQwenRuntime() async {
+    private func selectRuntime(_ runtime: InferenceRuntime) async {
         guard !isSelectingRuntime else { return }
-        guard llmService.selectedRuntime != .qwen35 else { return }
+        guard llmService.selectedRuntime != runtime else { return }
 
         isSelectingRuntime = true
         defer { isSelectingRuntime = false }
-        guard await llmService.selectRuntime(.qwen35) else {
+        if modelDownloader.isDownloading {
+            await modelDownloader.pauseDownload()
+        }
+        guard await llmService.selectRuntime(runtime) else {
             runtimeSelectionError = llmService.lastError
                 ?? "The current model is still stopping. Try again in a moment."
             return
@@ -659,25 +747,25 @@ private struct OnboardingHeader: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 10) {
                 Text("Y4")
-                    .font(.system(size: 22, weight: .bold, design: .serif))
+                    .font(.title2.weight(.bold))
                     .foregroundStyle(AppTheme.accent)
                     .frame(width: 38, height: 38)
                     .background(AppTheme.accent.opacity(0.12))
                     .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
 
                 Text("Yemma 4")
-                    .font(.system(size: 22, weight: .semibold, design: .serif))
+                    .font(.title2.weight(.semibold))
                     .foregroundStyle(AppTheme.textPrimary)
                     .accessibilityLabel("Yemma 4")
             }
 
             Text("Local AI chat on your iPhone")
-                .font(.system(size: 32, weight: .bold))
+                .font(.largeTitle.weight(.bold))
                 .foregroundStyle(AppTheme.textPrimary)
                 .fixedSize(horizontal: false, vertical: true)
 
             Text(subtitle)
-                .font(.system(size: 15, weight: .medium))
+                .font(.body.weight(.medium))
                 .foregroundStyle(AppTheme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -723,7 +811,7 @@ private struct SetupProgressCard<StatusContent: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Label(badgeText, systemImage: badgeSystemImage)
-                .font(.system(size: 12, weight: .semibold))
+                .font(.caption.weight(.semibold))
                 .foregroundStyle(badgeTint)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
@@ -732,11 +820,11 @@ private struct SetupProgressCard<StatusContent: View>: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 Text(title)
-                    .font(.system(size: 24, weight: .semibold))
+                    .font(.title2.weight(.semibold))
                     .foregroundStyle(AppTheme.textPrimary)
 
                 Text(message)
-                    .font(.system(size: 15, weight: .medium))
+                    .font(.body.weight(.medium))
                     .foregroundStyle(AppTheme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -751,7 +839,7 @@ private struct SetupProgressCard<StatusContent: View>: View {
 
             if let errorMessage {
                 Text(errorMessage)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.caption.weight(.medium))
                     .foregroundStyle(AppTheme.destructive)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -762,23 +850,22 @@ private struct SetupProgressCard<StatusContent: View>: View {
 }
 
 private struct CompactStatsGrid: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let stats: [SetupStat]
 
     var body: some View {
-        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), alignment: .top), count: dynamicTypeSize.isAccessibilitySize ? 1 : 2), alignment: .leading, spacing: 8) {
             ForEach(stats) { stat in
                 VStack(alignment: .leading, spacing: 2) {
                     Text(stat.title)
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.caption2.weight(.semibold))
                         .foregroundStyle(AppTheme.textTertiary)
                         .textCase(.uppercase)
                         .tracking(0.4)
 
                     Text(stat.value)
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.subheadline.weight(.semibold))
                         .foregroundStyle(AppTheme.textPrimary)
-                        .lineLimit(2)
-                        .minimumScaleFactor(0.85)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -792,12 +879,13 @@ private struct CompactStatsGrid: View {
 }
 
 private struct SetupBenefitsRow: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let items: [SetupBenefit]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if items.count >= 2 {
-                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                EqualControlRow {
                     ForEach(Array(items.prefix(2))) { item in
                         benefitChip(item)
                     }
@@ -813,18 +901,19 @@ private struct SetupBenefitsRow: View {
     private func benefitChip(_ item: SetupBenefit) -> some View {
         HStack(spacing: 8) {
             Image(systemName: item.systemImage)
-                .font(.system(size: 12, weight: .semibold))
+                .font(.caption.weight(.semibold))
                 .foregroundStyle(AppTheme.accent)
 
             Text(item.title)
-                .font(.system(size: 13, weight: .medium))
+                .font(.subheadline)
                 .foregroundStyle(AppTheme.textPrimary)
-                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
 
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, minHeight: AppTheme.Layout.minimumControlSize, maxHeight: .infinity, alignment: .leading)
         .background(AppTheme.controlFill)
         .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.small, style: .continuous))
     }
@@ -832,11 +921,11 @@ private struct SetupBenefitsRow: View {
     private func benefitLine(_ item: SetupBenefit) -> some View {
         HStack(spacing: 8) {
             Image(systemName: item.systemImage)
-                .font(.system(size: 12, weight: .semibold))
+                .font(.caption.weight(.semibold))
                 .foregroundStyle(AppTheme.textSecondary)
 
             Text(item.title)
-                .font(.system(size: 13, weight: .medium))
+                .font(.caption.weight(.medium))
                 .foregroundStyle(AppTheme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
 
@@ -857,11 +946,11 @@ private struct SetupPrimaryButton: View {
             HStack(spacing: 14) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(title)
-                        .font(.system(size: 17, weight: .semibold))
+                        .font(.body.weight(.semibold))
                         .foregroundStyle(AppTheme.accentForeground)
 
                     Text(subtitle)
-                        .font(.system(size: 12, weight: .medium))
+                        .font(.caption.weight(.medium))
                         .foregroundStyle(AppTheme.accentSecondaryForeground)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -869,7 +958,7 @@ private struct SetupPrimaryButton: View {
                 Spacer(minLength: 0)
 
                 Image(systemName: "arrow.right")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.body.weight(.semibold))
                     .foregroundStyle(AppTheme.accentForeground.opacity(0.88))
             }
             .padding(.horizontal, AppTheme.Layout.rowHorizontalPadding)
@@ -891,21 +980,21 @@ private struct SetupStatusRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: systemImage)
-                .font(.system(size: 14, weight: .semibold))
+                .font(.caption.weight(.semibold))
                 .foregroundStyle(AppTheme.accent)
                 .frame(width: 18)
 
             Text(title)
-                .font(.system(size: 13, weight: .medium))
+                .font(.caption.weight(.medium))
                 .foregroundStyle(AppTheme.textSecondary)
 
             Spacer(minLength: 0)
 
             if let trailing {
                 Text(trailing)
-                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                    .font(.caption.weight(.semibold).monospaced())
                     .foregroundStyle(AppTheme.textTertiary)
-                    .lineLimit(1)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
@@ -917,12 +1006,12 @@ private struct SetupInlineNote: View {
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: "info.circle.fill")
-                .font(.system(size: 13, weight: .semibold))
+                .font(.caption.weight(.semibold))
                 .foregroundStyle(AppTheme.textTertiary)
                 .padding(.top, 1)
 
             Text(text)
-                .font(.system(size: 12, weight: .medium))
+                .font(.caption.weight(.medium))
                 .foregroundStyle(AppTheme.textTertiary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -930,6 +1019,7 @@ private struct SetupInlineNote: View {
 }
 
 private struct AnimatedProgressBar: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let progress: Double
 
     @State private var shimmerOffset: CGFloat = -1
@@ -939,7 +1029,7 @@ private struct AnimatedProgressBar: View {
     }
 
     private var shouldAnimateShimmer: Bool {
-        clampedProgress > 0 && clampedProgress < 1
+        !reduceMotion && clampedProgress > 0 && clampedProgress < 1
     }
 
     var body: some View {
@@ -971,7 +1061,7 @@ private struct AnimatedProgressBar: View {
                             }
                         }
                     )
-                    .animation(.easeInOut(duration: 0.3), value: progress)
+                    .animation(reduceMotion ? nil : .easeInOut(duration: 0.3), value: progress)
             }
         }
         .frame(height: 8)

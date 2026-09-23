@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import MLX
 import MLXLMCommon
 import MLXVLM
@@ -6,7 +7,7 @@ import Tokenizers
 
 private enum MLXRuntimeEnvironment {
     static let lock = NSLock()
-    nonisolated(unsafe) static var didPrepare = false
+    nonisolated(unsafe) static var preparedDirectoryPath: String?
 }
 
 enum Qwen35ModelLoader {
@@ -14,8 +15,9 @@ enum Qwen35ModelLoader {
         try await prepareMLXRuntimeInBackground()
         Memory.cacheLimit = 20 * 1024 * 1024
 
+        let validatedDirectory: ValidatedModelDirectory
         do {
-            let validatedDirectory = try ModelDirectoryValidator.validatedDirectory(at: modelDirectory)
+            validatedDirectory = try ModelDirectoryValidator.validatedDirectory(at: modelDirectory)
             AppDiagnostics.shared.record(
                 "Validated MLX model directory before load",
                 category: "model",
@@ -40,7 +42,7 @@ enum Qwen35ModelLoader {
             }
         )
 
-        var configuration = ResolvedModelConfiguration(directory: modelDirectory)
+        var configuration = ResolvedModelConfiguration(directory: validatedDirectory.location)
         configuration.extraEOSTokens = ["<|im_end|>", "<|endoftext|>"]
         let context = try await VLMModelFactory.shared._load(
             configuration: configuration,
@@ -59,32 +61,55 @@ enum Qwen35ModelLoader {
         MLXRuntimeEnvironment.lock.lock()
         defer { MLXRuntimeEnvironment.lock.unlock() }
 
-        if MLXRuntimeEnvironment.didPrepare {
-            return
-        }
-
         guard let source = bundledMetalLibraryURL() else {
             throw LLMServiceError.modelLoadFailed(path: "default.metallib")
         }
 
         let fileManager = FileManager.default
+        let sourceData = try Data(contentsOf: source, options: [.mappedIfSafe])
+        let sourceDigest = digestHex(for: sourceData)
+        let buildIdentifier = ((Bundle.main.object(
+            forInfoDictionaryKey: "CFBundleVersion"
+        ) as? String) ?? "unknown")
+            .replacingOccurrences(of: "/", with: "-")
+            .replacingOccurrences(of: " ", with: "-")
         let runtimeDirectory = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first?
             .appending(path: "mlx-runtime", directoryHint: .isDirectory)
             ?? fileManager.temporaryDirectory.appending(path: "mlx-runtime", directoryHint: .isDirectory)
+        let versionedDirectory = runtimeDirectory.appending(
+            path: "mlx-3.31.3-\(buildIdentifier)-\(sourceDigest.prefix(16))",
+            directoryHint: .isDirectory
+        )
 
-        try fileManager.createDirectory(at: runtimeDirectory, withIntermediateDirectories: true)
+        if MLXRuntimeEnvironment.preparedDirectoryPath == versionedDirectory.path,
+            fileManager.currentDirectoryPath == versionedDirectory.path,
+            fileManager.fileExists(atPath: versionedDirectory.appending(path: "default.metallib").path)
+        {
+            return
+        }
 
-        let runtimeMetalLib = runtimeDirectory.appending(path: "default.metallib")
-        if !fileManager.fileExists(atPath: runtimeMetalLib.path) {
+        try fileManager.createDirectory(at: versionedDirectory, withIntermediateDirectories: true)
+
+        let runtimeMetalLib = versionedDirectory.appending(path: "default.metallib")
+        let cachedData = try? Data(contentsOf: runtimeMetalLib, options: [.mappedIfSafe])
+        if cachedData.map({ digestHex(for: $0) != sourceDigest }) != false {
+            let temporaryMetalLib = versionedDirectory.appending(
+                path: ".default.metallib.\(UUID().uuidString)"
+            )
+            try sourceData.write(to: temporaryMetalLib, options: [.atomic])
             try? fileManager.removeItem(at: runtimeMetalLib)
-            try fileManager.copyItem(at: source, to: runtimeMetalLib)
+            try fileManager.moveItem(at: temporaryMetalLib, to: runtimeMetalLib)
         }
 
-        guard fileManager.changeCurrentDirectoryPath(runtimeDirectory.path) else {
-            throw LLMServiceError.modelLoadFailed(path: runtimeDirectory.path)
+        guard fileManager.changeCurrentDirectoryPath(versionedDirectory.path) else {
+            throw LLMServiceError.modelLoadFailed(path: versionedDirectory.path)
         }
 
-        MLXRuntimeEnvironment.didPrepare = true
+        MLXRuntimeEnvironment.preparedDirectoryPath = versionedDirectory.path
+    }
+
+    private static func digestHex(for data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
     static func bundledMetalLibraryURL() -> URL? {

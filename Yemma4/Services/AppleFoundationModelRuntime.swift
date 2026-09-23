@@ -109,6 +109,7 @@ enum AppleFoundationModelRuntimeError: LocalizedError {
     case unavailable(AppleFoundationModelAvailability)
     case imagesUnsupported
     case imageHistoryUnsupported
+    case contextLimitExceeded
     case nonMonotonicSnapshot
 
     var errorDescription: String? {
@@ -119,6 +120,8 @@ enum AppleFoundationModelRuntimeError: LocalizedError {
             return "Image chat currently requires the optional Qwen3.5 4B model."
         case .imageHistoryUnsupported:
             return "This chat contains images. Start a new text chat or switch to Qwen3.5 4B."
+        case .contextLimitExceeded:
+            return "This request is too long for Apple's on-device context. Shorten the current message or start a new chat."
         case .nonMonotonicSnapshot:
             return "The Apple model returned an unexpected streaming update. Try the request again."
         }
@@ -126,7 +129,12 @@ enum AppleFoundationModelRuntimeError: LocalizedError {
 }
 
 enum AppleFoundationModelRuntime {
+    static let contextWindowTokenLimit = 4_096
+    static let contextSafetyMarginTokens = 256
+    static let maximumResponseTokenLimit = 1_024
     static let maximumHistoryCharacters = 8_000
+
+    private static let transcriptEntryOverheadTokens = 4
 
     static func currentAvailability(locale: Locale = .current) -> AppleFoundationModelAvailability {
 #if canImport(FoundationModels)
@@ -181,6 +189,83 @@ enum AppleFoundationModelRuntime {
         return bounded
     }
 
+    static func inputTokenBudget(maximumResponseTokens: Int) -> Int {
+        let responseTokens = min(max(maximumResponseTokens, 1), maximumResponseTokenLimit)
+        return max(
+            1,
+            contextWindowTokenLimit - contextSafetyMarginTokens - responseTokens
+        )
+    }
+
+    static func estimatedTokenCount(_ text: String) -> Int {
+        PromptTokenEstimator.estimate(text)
+    }
+
+    /// Bounds the complete Apple request, including instructions, the current
+    /// prompt, recent history, and a response reserve. History may be omitted
+    /// from the front, but the current prompt is never truncated.
+    static func boundedRequestHistory(
+        instructions: String,
+        history: [PromptMessageInput],
+        prompt: PromptMessageInput,
+        maximumResponseTokens: Int
+    ) throws -> [PromptMessageInput] {
+        let budget = inputTokenBudget(maximumResponseTokens: maximumResponseTokens)
+        let instructionTokens = PromptTokenEstimator.estimate(instructions)
+            + transcriptEntryOverheadTokens
+        let promptTokens = PromptTokenEstimator.estimate(prompt.text)
+            + (prompt.text.isEmpty ? 0 : transcriptEntryOverheadTokens)
+
+        guard instructionTokens + promptTokens <= budget else {
+            throw AppleFoundationModelRuntimeError.contextLimitExceeded
+        }
+
+        var remainingTokens = budget - instructionTokens - promptTokens
+        var result: [PromptMessageInput] = []
+
+        for message in history.reversed() {
+            let text = message.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { continue }
+
+            let messageTokens = PromptTokenEstimator.estimate(text)
+                + transcriptEntryOverheadTokens
+            guard messageTokens <= remainingTokens else {
+                break
+            }
+
+            result.append(message)
+            remainingTokens -= messageTokens
+        }
+
+        var bounded = Array(result.reversed())
+        while bounded.first.map({ $0.role.lowercased() != "user" }) == true {
+            bounded.removeFirst()
+        }
+        return bounded
+    }
+
+    @discardableResult
+    static func validateRequest(
+        instructions: String,
+        history: [PromptMessageInput],
+        prompt: PromptMessageInput,
+        maximumResponseTokens: Int
+    ) throws -> [PromptMessageInput] {
+        guard prompt.images.isEmpty else {
+            throw AppleFoundationModelRuntimeError.imagesUnsupported
+        }
+        guard history.allSatisfy({ $0.images.isEmpty }) else {
+            throw AppleFoundationModelRuntimeError.imageHistoryUnsupported
+        }
+
+        return try boundedRequestHistory(
+            instructions: instructions,
+            history: history,
+            prompt: prompt,
+            maximumResponseTokens: maximumResponseTokens
+        )
+    }
+
     static func snapshotDelta(previous: String, current: String) throws -> String {
         guard current.hasPrefix(previous) else {
             throw AppleFoundationModelRuntimeError.nonMonotonicSnapshot
@@ -202,17 +287,13 @@ enum AppleFoundationModelRuntime {
         guard availability.isAvailable else {
             throw AppleFoundationModelRuntimeError.unavailable(availability)
         }
-        guard prompt.images.isEmpty else {
-            throw AppleFoundationModelRuntimeError.imagesUnsupported
-        }
-        guard history.allSatisfy({ $0.images.isEmpty }) else {
-            throw AppleFoundationModelRuntimeError.imageHistoryUnsupported
-        }
-
-        let transcript = makeTranscript(
+        let boundedHistory = try validateRequest(
             instructions: instructions,
-            history: boundedHistory(history)
+            history: history,
+            prompt: prompt,
+            maximumResponseTokens: maximumResponseTokens
         )
+        let transcript = makeTranscript(instructions: instructions, history: boundedHistory)
         let session = LanguageModelSession(
             model: .default,
             tools: [],
@@ -220,7 +301,7 @@ enum AppleFoundationModelRuntime {
         )
         let options = GenerationOptions(
             temperature: temperature,
-            maximumResponseTokens: min(maximumResponseTokens, 1_024)
+            maximumResponseTokens: min(maximumResponseTokens, maximumResponseTokenLimit)
         )
 
         var previousSnapshot = ""

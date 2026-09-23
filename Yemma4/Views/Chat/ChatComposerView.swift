@@ -2,6 +2,7 @@ import PhotosUI
 import SwiftUI
 
 struct ChatComposerView: View {
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     let appSetup: AppSetupSnapshot
@@ -53,11 +54,14 @@ struct ChatComposerView: View {
                 inputCapabilityNotice(message: inputBlockReason)
             }
 
-            HStack(spacing: 10) {
+            HStack(alignment: .bottom, spacing: 10) {
                 attachmentPickerButton
 
                 TextField("Ask anything", text: $draft, axis: .vertical)
+                    .accessibilityIdentifier("chatDraft")
+                    .lineLimit(1...(verticalSizeClass == .compact ? 3 : 6))
                     .textFieldStyle(.plain)
+                    .padding(.vertical, 10)
                     .font(AppTheme.Typography.chatComposer)
                     .foregroundStyle(AppTheme.textPrimary)
                     .focused(isComposerFocused)
@@ -103,7 +107,7 @@ struct ChatComposerView: View {
                 startPoint: .top,
                 endPoint: .bottom
             )
-            .ignoresSafeArea(edges: .bottom)
+            .ignoresSafeArea(.container, edges: .bottom)
         )
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: shouldShowTypingIndicator)
     }
@@ -125,73 +129,68 @@ struct ChatComposerView: View {
     }
 
     private var composerSetupNotice: some View {
-        HStack(alignment: .top, spacing: 12) {
-            composerSetupStatusIcon
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(appSetup.chatStatusText)
-                    .font(AppTheme.Typography.utilityRowTitle)
-                    .foregroundStyle(AppTheme.textPrimary)
-
-                if let detail = appSetup.chatStatusDetailText {
-                    Text(detail)
-                        .font(AppTheme.Typography.utilityCaption)
-                        .foregroundStyle(AppTheme.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 12) {
+                composerSetupStatusIcon
+                    .frame(width: AppTheme.Layout.rowIconSize)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(appSetup.chatStatusText)
+                        .font(AppTheme.Typography.utilityRowTitle)
+                        .foregroundStyle(AppTheme.textPrimary)
+                    if let detail = appSetup.chatStatusDetailText {
+                        Text(detail)
+                            .font(AppTheme.Typography.utilityCaption)
+                            .foregroundStyle(AppTheme.textSecondary)
+                    }
                 }
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-
-            Spacer(minLength: 0)
-
             if let actionTitle = primarySetupActionTitle,
                let action = primarySetupAction,
-               !appSetup.isModelLoading
-            {
-                Button(actionTitle, action: action)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(AppTheme.accent)
-                    .buttonStyle(.plain)
+               !appSetup.isModelLoading {
+                noticeAction(actionTitle, action: action)
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .background(AppTheme.controlFill)
-        .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.medium, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: AppTheme.Radius.medium, style: .continuous)
-                .stroke(AppTheme.controlBorder, lineWidth: 1)
-        )
-        .accessibilityElement(children: .combine)
+        .padding(14)
+        .inputChrome(cornerRadius: AppTheme.Radius.medium)
+        .accessibilityElement(children: .contain)
     }
 
     private func inputCapabilityNotice(message: String) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: "photo.badge.exclamationmark")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(AppTheme.accent)
-
-            Text(message)
-                .font(AppTheme.Typography.utilityCaption)
-                .foregroundStyle(AppTheme.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            Spacer(minLength: 0)
-
-            if let inputBlockActionTitle, let inputBlockAction {
-                Button(inputBlockActionTitle, action: inputBlockAction)
-                    .font(.system(size: 12, weight: .semibold))
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "photo.badge.exclamationmark")
+                    .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(AppTheme.accent)
-                    .buttonStyle(.plain)
+                    .frame(width: AppTheme.Layout.rowIconSize)
+                Text(message)
+                    .font(AppTheme.Typography.utilityCaption)
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if let inputBlockActionTitle, let inputBlockAction {
+                noticeAction(inputBlockActionTitle, action: inputBlockAction)
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .background(AppTheme.controlFill)
-        .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.medium, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: AppTheme.Radius.medium, style: .continuous)
-                .stroke(AppTheme.controlBorder, lineWidth: 1)
-        )
+        .padding(14)
+        .inputChrome(cornerRadius: AppTheme.Radius.medium)
+    }
+
+    private func noticeAction(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(AppTheme.accent)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity, minHeight: AppTheme.Layout.minimumControlSize)
+                .background(AppTheme.accentSoft, in: RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(.plain)
     }
 
     @ViewBuilder
@@ -237,7 +236,8 @@ struct ChatComposerView: View {
             Image(systemName: isImportingAttachments ? "hourglass" : "plus")
                 .font(.system(size: 22, weight: .semibold))
                 .foregroundStyle(AppTheme.textSecondary)
-                .frame(width: 36, height: 36)
+                .frame(width: AppTheme.Layout.composerActionSize, height: AppTheme.Layout.composerActionSize)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .photosPicker(
@@ -259,8 +259,12 @@ struct ChatComposerView: View {
     private var composerAttachmentStrip: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 10) {
-                ForEach(pendingAttachments, id: \.id) { attachment in
-                    attachmentPreviewChip(for: attachment)
+                ForEach(Array(pendingAttachments.enumerated()), id: \.element.id) { index, attachment in
+                    attachmentPreviewChip(
+                        for: attachment,
+                        index: index,
+                        totalCount: pendingAttachments.count
+                    )
                 }
             }
             .padding(.horizontal, 2)
@@ -276,7 +280,11 @@ struct ChatComposerView: View {
         .padding(.vertical, 8)
     }
 
-    private func attachmentPreviewChip(for attachment: Attachment) -> some View {
+    private func attachmentPreviewChip(
+        for attachment: Attachment,
+        index: Int,
+        totalCount: Int
+    ) -> some View {
         ZStack(alignment: .topTrailing) {
             ChatAttachmentPreviewTile(attachment: attachment, height: 76)
                 .frame(width: 76)
@@ -287,13 +295,19 @@ struct ChatComposerView: View {
                 Image(systemName: "xmark.circle.fill")
                     .font(.system(size: 18, weight: .bold))
                     .foregroundStyle(AppTheme.accentForeground, AppTheme.textSecondary.opacity(0.8))
+                    .frame(width: AppTheme.Layout.minimumControlSize, height: AppTheme.Layout.minimumControlSize)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .offset(x: 6, y: -6)
-            .accessibilityLabel("Remove image")
+            .offset(x: 10, y: -10)
+            .accessibilityLabel(
+                totalCount == 1
+                    ? "Remove image"
+                    : "Remove image \(index + 1) of \(totalCount)"
+            )
             .accessibilityHint("Removes this image from the draft.")
         }
-        .padding(.top, 6)
-        .padding(.trailing, 2)
+        .padding(.top, 10)
+        .padding(.trailing, 10)
     }
 }

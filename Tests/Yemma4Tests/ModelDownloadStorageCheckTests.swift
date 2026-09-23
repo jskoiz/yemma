@@ -76,4 +76,22 @@ final class ModelDownloadStorageCheckTests: XCTestCase {
         )
         XCTAssertEqual(ModelDownloadStorageCheck.formattedGigabytes(-5), "0.0 GB")
     }
+
+    @MainActor
+    func testCellularPreferencePersistsAndDefaultsToWiFiOnly() throws {
+        let suiteName = "ModelDownloadStorageCheckTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let downloader = ModelDownloader(defaults: defaults)
+        XCTAssertFalse(downloader.allowsCellularDownload)
+        XCTAssertEqual(
+            downloader.requiredFreeSpaceBytes,
+            ModelDownloadStorageCheck.requiredBytes(forModelBytes: Qwen35MLXSupport.approximateDownloadBytes)
+        )
+
+        downloader.allowsCellularDownload = true
+        let relaunchedDownloader = ModelDownloader(defaults: defaults)
+        XCTAssertTrue(relaunchedDownloader.allowsCellularDownload)
+    }
 }

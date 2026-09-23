@@ -7,6 +7,7 @@ import UIKit
 #endif
 
 public struct ChatView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(ModelDownloader.self) private var modelDownloader
     @Environment(LLMService.self) private var llmService
@@ -26,14 +27,21 @@ public struct ChatView: View {
     @State private var memoryAlertMessage: String?
     @State private var toastMessage: String?
     @State private var toastTask: Task<Void, Never>?
-    @State private var isSidebarOpen = false
+    @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
+    @State private var preferredCompactColumn: NavigationSplitViewColumn = .detail
     @State private var isShowingPhotoPicker = false
     @State private var showQwenImageRequirement = false
     @State private var showArchiveBrowser = false
     @State private var loadedConversationID: UUID?
     @State private var isRestoringConversation = false
     @State private var conversationSaveTask: Task<Void, Never>?
+    @State private var restoreRevision = UUID()
+    @State private var importRevision = UUID()
+    @State private var importTask: Task<Void, Never>?
+    @State private var isNavigating = false
+    @State private var isSubmitting = false
     @State private var sharePayload: SharePayload?
+    @State private var features = ChatFeatureCoordinator()
     @FocusState private var isComposerFocused: Bool
 
     // MARK: - Streaming state
@@ -70,176 +78,200 @@ public struct ChatView: View {
     }
 
     public var body: some View {
-        NavigationStack {
-            ChatNavigationShell(isSidebarOpen: $isSidebarOpen) {
-                mainShell
-            } sidebar: {
-                ChatSidebarView(
-                    currentConversationID: loadedConversationID,
-                    title: "Yemma 4",
-                    subtitle: "Chats and quick controls",
-                    showsChatManagement: true,
-                    onSelectConversation: { conversationID in
-                        Task { @MainActor in
-                            await switchConversation(to: conversationID)
-                            closeSidebar()
-                        }
-                    },
-                    onStartFresh: {
-                        Task { @MainActor in
-                            await startFreshConversation()
-                            closeSidebar()
-                        }
-                    },
-                    onShowOnboarding: {
-                        closeSidebar()
-                        onShowOnboarding()
-                    },
-                    onRunDebugScenario: { scenario in
-                        closeSidebar()
-                        Task { @MainActor in
-                            try? await Task.sleep(for: .milliseconds(150))
-                            await runDebugScenario(scenario)
-                        }
-                    },
-                    onOpenArchive: {
-                        closeSidebar()
-                        showArchiveBrowser = true
-                    },
-                    onClose: {
+        ChatNavigationShell(
+            columnVisibility: $columnVisibility,
+            preferredCompactColumn: $preferredCompactColumn
+        ) {
+            mainShell
+        } sidebar: {
+            ChatSidebarView(
+                currentConversationID: loadedConversationID,
+                title: "Yemma 4",
+                subtitle: "Chats and quick controls",
+                showsChatManagement: true,
+                onSelectConversation: { conversationID in
+                    Task { @MainActor in
+                        await switchConversation(to: conversationID)
                         closeSidebar()
                     }
-                )
-            }
-            .toolbar(.hidden, for: .navigationBar)
-            .sheet(isPresented: $showArchiveBrowser) {
-                ConversationBrowserSheet(
-                    scope: .archive(recentLimit: 5),
-                    currentConversationID: loadedConversationID,
-                    onSelectConversation: { conversationID in
-                        Task { @MainActor in
-                            await switchConversation(to: conversationID)
-                            showArchiveBrowser = false
-                        }
-                    },
-                    onStartFresh: {
-                        Task { @MainActor in
-                            await startFreshConversation()
-                            showArchiveBrowser = false
-                        }
+                },
+                onStartFresh: {
+                    Task { @MainActor in
+                        await startFreshConversation()
+                        closeSidebar()
                     }
-                )
-                .presentationDetents([.large])
-                .presentationDragIndicator(.hidden)
-                .presentationBackground(.clear)
+                },
+                onShowOnboarding: {
+                    closeSidebar()
+                    onShowOnboarding()
+                },
+                onRunDebugScenario: { scenario in
+                    closeSidebar()
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .milliseconds(150))
+                        await runDebugScenario(scenario)
+                    }
+                },
+                onOpenArchive: {
+                    closeSidebar()
+                    showArchiveBrowser = true
+                },
+                onClose: {
+                    preferredCompactColumn = .detail
+                    columnVisibility = .detailOnly
+                },
+                onReloadModel: onRetryModelLoad
+            )
+        }
+        .environment(\.chatFeatures, features)
+        .environment(\.chatConversationID, loadedConversationID)
+        .modifier(ChatFeaturePresentation(
+            features: features,
+            draft: $draft,
+            onSelectConversation: openLibraryResult,
+            onCreateRevision: { message, text in
+                Task { @MainActor in await createPromptRevision(message, text: text) }
             }
-            .onAppear {
-                AppDiagnostics.shared.record(
-                    "startup: view_appeared",
-                    category: "startup",
-                    metadata: ["view": "ChatView", "elapsedMs": StartupTiming.elapsedMs()]
-                )
+        ))
+        .onChange(of: conversationStore.conversations.map(\.id)) { _, ids in
+            features.library.prune(conversationIDs: Set(ids))
+        }
+        .onChange(of: loadedConversationID) { _, _ in features.speech.stop() }
+        .allowsHitTesting(!shouldBlockStartupInteraction)
+        .accessibilityHidden(shouldBlockStartupInteraction)
+        .overlay {
+            if shouldShowStartupOverlay {
+                startupLoadingOverlay
+                    .accessibilityAddTraits(.isModal)
             }
-            .task {
-                await restoreConversationIfNeeded(force: true)
+        }
+        .sheet(isPresented: $showArchiveBrowser) {
+            ConversationBrowserSheet(
+                scope: .archive(recentLimit: 5),
+                currentConversationID: loadedConversationID,
+                onSelectConversation: { conversationID in
+                    Task { @MainActor in
+                        await switchConversation(to: conversationID)
+                        showArchiveBrowser = false
+                    }
+                },
+                onStartFresh: {
+                    Task { @MainActor in
+                        await startFreshConversation()
+                        showArchiveBrowser = false
+                    }
+                }
+            )
+            .presentationDetents([.large])
+            .presentationDragIndicator(.hidden)
+            .presentationBackground(.clear)
+        }
+        .onAppear {
+            AppDiagnostics.shared.record(
+                "startup: view_appeared",
+                category: "startup",
+                metadata: ["view": "ChatView", "elapsedMs": StartupTiming.elapsedMs()]
+            )
+        }
+        .task(id: conversationStore.currentConversationID) {
+            await restoreConversationIfNeeded()
+        }
+        .onDisappear {
+            features.speech.stop()
+            cancelPhotoImport()
+            conversationSaveTask?.cancel()
+            Task { @MainActor in await stopGeneration() }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase != .active else { return }
+            features.speech.stop()
+            conversationSaveTask?.cancel()
+            Task { @MainActor in
+                let backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "Save chat")
+                defer {
+                    if backgroundTask != .invalid { UIApplication.shared.endBackgroundTask(backgroundTask) }
+                }
+                await stopGeneration()
             }
-            .onDisappear {
-                Task { @MainActor in
-                    persistConversationNow()
-                    await stopGeneration()
+        }
+        .onChange(of: selectedPhotoItems) { _, newItems in
+            guard !newItems.isEmpty else { return }
+            cancelPhotoImport()
+            let revision = importRevision
+            let conversationID = loadedConversationID
+            importTask = Task { @MainActor in
+                await importSelectedPhotos(from: newItems, conversationID: conversationID, revision: revision)
+            }
+        }
+        .onChange(of: draft) { _, _ in
+            scheduleConversationSave()
+        }
+        .onChange(of: pendingAttachments.map(\.id)) { _, _ in
+            scheduleConversationSave()
+        }
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: toastMessage)
+        .alert("Chat Storage Error", isPresented: Binding(
+            get: { conversationStore.storageError != nil },
+            set: { if !$0 { conversationStore.storageError = nil } }
+        )) {
+            Button("Try Again") {
+                conversationStore.storageError = nil
+                Task {
+                    if loadedConversationID != conversationStore.currentConversationID {
+                        await restoreConversationIfNeeded(force: true)
+                    } else { await persistConversationNow() }
                 }
             }
-            .onChange(of: conversationStore.currentConversationID) { _, _ in
-                Task { @MainActor in
-                    await restoreConversationIfNeeded(force: true)
-                }
+            Button("OK", role: .cancel) { conversationStore.storageError = nil }
+        } message: {
+            Text(conversationStore.storageError ?? "Please try saving again.")
+        }
+        .alert(
+            "Generation Failed",
+            isPresented: Binding(
+                get: { generationError != nil },
+                set: { if !$0 { generationError = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) {
+                generationError = nil
             }
-            .onChange(of: selectedPhotoItems) { _, newItems in
-                guard !newItems.isEmpty else { return }
-                Task { @MainActor in
-                    await importSelectedPhotos(from: newItems)
-                }
+        } message: {
+            Text(generationError ?? "The model could not generate a response.")
+        }
+        .alert(
+            "Low Memory",
+            isPresented: Binding(
+                get: { memoryAlertMessage != nil },
+                set: { if !$0 { memoryAlertMessage = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) {
+                memoryAlertMessage = nil
             }
-            .onChange(of: draft) { _, _ in
-                scheduleConversationSave()
+        } message: {
+            Text(memoryAlertMessage ?? "Your device ran low on memory. Try a shorter conversation.")
+        }
+        .confirmationDialog(
+            "Use Qwen3.5 4B for image chat?",
+            isPresented: $showQwenImageRequirement,
+            titleVisibility: .visible
+        ) {
+            Button("Use Qwen3.5 4B") {
+                selectQwenRuntime()
             }
-            .onChange(of: pendingAttachments.map(\.id)) { _, _ in
-                scheduleConversationSave()
-            }
-            .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: toastMessage)
-            .alert("Chat Could Not Be Saved", isPresented: Binding(
-                get: { conversationStore.storageError != nil },
-                set: { if !$0 { conversationStore.storageError = nil } }
-            )) {
-                Button("Try Again") {
-                    conversationStore.storageError = nil
-                    persistConversationNow()
-                }
-                Button("OK", role: .cancel) { conversationStore.storageError = nil }
-            } message: {
-                Text(conversationStore.storageError ?? "Please try saving again.")
-            }
-            .alert(
-                "Generation Failed",
-                isPresented: Binding(
-                    get: { generationError != nil },
-                    set: { if !$0 { generationError = nil } }
-                )
-            ) {
-                Button("OK", role: .cancel) {
-                    generationError = nil
-                }
-            } message: {
-                Text(generationError ?? "The model could not generate a response.")
-            }
-            .alert(
-                "Low Memory",
-                isPresented: Binding(
-                    get: { memoryAlertMessage != nil },
-                    set: { if !$0 { memoryAlertMessage = nil } }
-                )
-            ) {
-                Button("OK", role: .cancel) {
-                    memoryAlertMessage = nil
-                }
-            } message: {
-                Text(memoryAlertMessage ?? "Your device ran low on memory. Try a shorter conversation.")
-            }
-            .confirmationDialog(
-                "Use Qwen3.5 4B for image chat?",
-                isPresented: $showQwenImageRequirement,
-                titleVisibility: .visible
-            ) {
-                Button("Use Qwen3.5 4B") {
-                    selectQwenRuntime()
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("Qwen3.5 4B adds image understanding through an optional 3.05 GB download. Selecting it does not start the download.")
-            }
-            .sheet(item: $sharePayload) { payload in
-                ActivityShareSheet(activityItems: [payload.text])
-            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Qwen3.5 4B adds image understanding through an optional 3.05 GB download. Selecting it does not start the download.")
+        }
+        .sheet(item: $sharePayload) { payload in
+            ActivityShareSheet(activityItems: [payload.text])
         }
     }
 
     private var mainShell: some View {
         ZStack {
-            AppBackground()
-
-            ProgressiveBlurHeaderHost(
-                initialHeaderHeight: 68,
-                maxBlurRadius: 10,
-                fadeExtension: 60,
-                tintOpacityTop: 0.26,
-                tintOpacityMiddle: 0.08
-            ) { headerHeight in
-                conversationContent(topInset: headerHeight)
-            } header: {
-                ChatTopBar(onToggleSidebar: toggleSidebar, onStartFresh: {
-                    Task { @MainActor in await startFreshConversation() }
-                })
-            }
+            conversationContent(topInset: 0)
 
             if let toastMessage {
                 VStack {
@@ -254,21 +286,27 @@ public struct ChatView: View {
                 }
             }
         }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            composerSection
-        }
-        .allowsHitTesting(!shouldBlockStartupInteraction)
-        .overlay {
-            if shouldShowStartupOverlay {
-                startupLoadingOverlay
-                    .transition(
-                        reduceMotion
-                            ? .opacity
-                            : .opacity.combined(with: .scale(scale: 0.98))
-                    )
+        .background { AppBackground() }
+        .navigationTitle("Yemma 4")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                ChatFeatureMenu(features: features, draft: draft, conversationID: loadedConversationID,
+                                canChangeDraft: !isRestoringConversation && !isNavigating && !isSubmitting)
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Button("New chat", systemImage: "square.and.pencil") {
+                    Task { @MainActor in await startFreshConversation() }
+                }
+                .accessibilityHint("Start a fresh conversation and keep older chats saved.")
             }
         }
-        .animation(reduceMotion ? nil : .easeInOut(duration: 0.28), value: shouldShowStartupOverlay)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            composerSection
+                .frame(maxWidth: 760)
+                .frame(maxWidth: .infinity)
+        }
+
     }
 
     // MARK: - Conversation content
@@ -276,6 +314,7 @@ public struct ChatView: View {
     private func conversationContent(topInset: CGFloat) -> some View {
         ChatTranscriptView(
             messages: messages,
+            conversationID: loadedConversationID,
             appSetup: appSetup,
             taskStarters: taskStarters,
             streamingMessageID: streamingMessageID,
@@ -297,15 +336,73 @@ public struct ChatView: View {
             onCopyMessageText: copyMessageText,
             onShareMessageText: shareMessageText,
             onRetryAssistantResponse: triggerRetryAssistantResponse,
-            onRefineAssistantResponse: triggerRefineAssistantResponse
+            onRefineAssistantResponse: triggerRefineAssistantResponse,
+            resumeTitle: resumableConversation?.title,
+            onResume: resumableConversation.map { conversation in
+                { Task { @MainActor in await switchConversation(to: conversation.id) } }
+            }
         )
     }
 
-    private func handleConversationBackgroundTap() {
-        if isSidebarOpen {
+    private var resumableConversation: ConversationMetadata? {
+        conversationStore.conversations.first { $0.id != loadedConversationID && $0.messageCount > 0 }
+    }
+
+    private func openLibraryResult(_ conversationID: UUID, _ messageID: String?) {
+        Task { @MainActor in
+            guard !isNavigating, !isSubmitting else { return }
+            if let messageID {
+                features.destination = ChatTranscriptDestination(conversationID: conversationID, messageID: messageID)
+            } else {
+                features.destination = nil
+            }
+            await switchConversation(to: conversationID)
             closeSidebar()
-            return
         }
+    }
+
+    @MainActor
+    private func createPromptRevision(_ message: ChatMessage, text: String) async {
+        guard !llmService.isGenerating, !isNavigating, !isSubmitting, !isRestoringConversation else { return }
+        isNavigating = true
+        defer { isNavigating = false }
+        cancelPhotoImport()
+        conversationSaveTask?.cancel()
+        guard await persistConversationNow() else { return }
+        let originalID = loadedConversationID
+        let originalMessages = messages
+        do {
+            let revision = try await Task.detached(priority: .userInitiated) {
+                try PromptRevision.prepare(messages: originalMessages, messageID: message.id, text: text)
+            }.value
+            guard originalID == loadedConversationID else {
+                _ = ConversationAttachmentStore.removeFiles(at: revision.copiedFiles)
+                return
+            }
+            let newID = UUID()
+            do {
+                _ = try await conversationStore.saveConversationAsync(
+                    id: newID, messages: revision.messages,
+                    draftText: revision.text, draftAttachments: revision.attachments
+                )
+            } catch {
+                // A failed index write can leave a recoverable conversation file.
+                // Keep its copied images until the store confirms there is no saved draft.
+                if await conversationStore.loadConversationAsync(id: newID) == nil {
+                    _ = ConversationAttachmentStore.removeFiles(at: revision.copiedFiles)
+                }
+                throw error
+            }
+            features.speech.stop()
+            features.destination = nil
+            conversationStore.setCurrentConversation(id: newID)
+            showToast("Original chat kept. Review your edited draft.")
+        } catch {
+            features.error = error.localizedDescription
+        }
+    }
+
+    private func handleConversationBackgroundTap() {
         isComposerFocused = false
     }
 
@@ -353,7 +450,9 @@ public struct ChatView: View {
     }
 
     private var canSubmitDraft: Bool {
-        guard !isImportingAttachments else { return false }
+        guard activeGenerationSessionID == nil, !isImportingAttachments, !isRestoringConversation, !isNavigating, !isSubmitting,
+              loadedConversationID == conversationStore.currentConversationID,
+              loadedConversationID != nil else { return false }
         guard !llmService.isSwitchingRuntime else { return false }
         let hasDraft = !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         guard hasDraft || !pendingAttachments.isEmpty else { return false }
@@ -381,6 +480,7 @@ public struct ChatView: View {
 
     private func selectQwenRuntime() {
         Task { @MainActor in
+            guard await persistConversationNow() else { return }
             let didSelect = await llmService.selectRuntime(.qwen35)
             if !didSelect {
                 showToast(llmService.lastError ?? "Try switching again in a moment")
@@ -414,7 +514,7 @@ public struct ChatView: View {
     }
 
     private var shouldBlockStartupInteraction: Bool {
-        shouldShowStartupOverlay || isSidebarOpen
+        shouldShowStartupOverlay
     }
 
     private var startupLoadingOverlay: some View {
@@ -441,6 +541,12 @@ public struct ChatView: View {
     }
 
     private func selectStarter(_ starter: ChatStarter) {
+        guard !isRestoringConversation, !isNavigating, !isSubmitting else { return }
+        if case let .guided(task) = starter.behavior {
+            isComposerFocused = false
+            features.sheet = .task(task, draft)
+            return
+        }
         if starter.behavior == .promptAndPickImage,
            supportsLocalModelRuntime,
            !llmService.supportsImageInput
@@ -501,8 +607,8 @@ public struct ChatView: View {
     }
 
     private func canRetryAssistantResponse(_ message: ChatMessage, index: Int) -> Bool {
-        guard !llmService.isGenerating, !message.user.isCurrentUser else { return false }
-        guard index >= 0, index == latestAssistantMessageIndex(), index == messages.indices.last else { return false }
+        guard activeGenerationSessionID == nil, !llmService.isGenerating, !message.user.isCurrentUser else { return false }
+        guard !isRestoringConversation, index >= 0, index == messages.indices.last else { return false }
         if supportsLocalModelRuntime,
            !llmService.supportsImageInput,
            messages.prefix(index).contains(where: { !$0.attachments.isEmpty })
@@ -518,8 +624,7 @@ public struct ChatView: View {
             return false
         }
         let hasText = !message.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        guard hasText else { return false }
-        return completedAssistantMessageIDs.contains(message.id)
+        return message.status == .error || (hasText && completedAssistantMessageIDs.contains(message.id))
     }
 
     private func triggerStopGeneration() {
@@ -541,34 +646,24 @@ public struct ChatView: View {
     }
 
     private func removePendingAttachment(_ attachment: Attachment) {
-        guard let attachmentIndex = pendingAttachments.firstIndex(where: { $0.id == attachment.id }) else {
-            return
-        }
-
-        pendingAttachments.remove(at: attachmentIndex)
-        // Commit the draft metadata first. If the process is suspended after
-        // the unlink, the next launch must not restore a reference to a file
-        // that has already been removed.
-        guard persistConversationNow() else {
-            pendingAttachments.insert(attachment, at: attachmentIndex)
-            return
-        }
-        let removedFileCount = ConversationAttachmentStore.removeFiles(
-            at: [attachment.thumbnail, attachment.full]
-        )
-        if removedFileCount > 0 {
-            AppDiagnostics.shared.record(
-                "Removed draft attachment files",
-                category: "storage",
-                metadata: ["files": removedFileCount]
-            )
+        guard !isNavigating, let index = pendingAttachments.firstIndex(where: { $0.id == attachment.id }) else { return }
+        let conversationID = loadedConversationID
+        pendingAttachments.remove(at: index)
+        Task { @MainActor in
+            guard await persistConversationNow() else {
+                if loadedConversationID == conversationID, conversationStore.storageError != nil {
+                    pendingAttachments.insert(attachment, at: min(index, pendingAttachments.count))
+                }
+                return
+            }
+            _ = ConversationAttachmentStore.removeFiles(at: [attachment.thumbnail, attachment.full])
         }
     }
 
     private func copyMessageText(_ text: String) {
         AppHaptics.success()
 #if canImport(UIKit)
-        UIPasteboard.general.string = text
+        UIPasteboard.general.setItems([["public.utf8-plain-text": text]], options: [.localOnly: true, .expirationDate: Date().addingTimeInterval(120)])
 #endif
         AppDiagnostics.shared.record(
             "Message copied",
@@ -610,7 +705,12 @@ public struct ChatView: View {
             ]
         )
 
+        let conversationID = loadedConversationID
         await stopGeneration()
+        guard !llmService.isGenerating, !isRestoringConversation,
+              conversationID == loadedConversationID,
+              conversationID == conversationStore.currentConversationID else { return }
+        if let index = messages.firstIndex(where: { $0.id == message.id }) { messages[index].status = .sending }
         updateMessageText(id: message.id, text: "")
         assistantResponseStats.removeValue(forKey: message.id)
         completedAssistantMessageIDs.remove(message.id)
@@ -622,7 +722,7 @@ public struct ChatView: View {
     }
 
     private func refineAssistantResponse(_ message: ChatMessage, refinement: AssistantRefinement) async {
-        guard !llmService.isGenerating, !message.user.isCurrentUser else { return }
+        guard activeGenerationSessionID == nil, !llmService.isGenerating, !message.user.isCurrentUser else { return }
         guard imageInputBlockReason == nil else {
             showToast("Use Qwen3.5 4B for this image chat")
             return
@@ -640,50 +740,51 @@ public struct ChatView: View {
             ]
         )
 
-        draft = ""
-        pendingAttachments.removeAll()
-        selectedPhotoItems = []
+        // Refinement must not consume the user's unsent draft or its images.
         await handlePrompt(refinement.prompt, attachments: [])
     }
 
     @MainActor
     private func restoreConversationIfNeeded(force: Bool = false) async {
-        let targetConversationID: UUID
-        do {
-            targetConversationID = try conversationStore.ensureCurrentConversation()
-        } catch {
-            conversationStore.reportStorageError(error)
-            return
-        }
-        guard force || loadedConversationID != targetConversationID else { return }
-
-        conversationSaveTask?.cancel()
+        let revision = UUID()
+        restoreRevision = revision
         isRestoringConversation = true
-        await stopGeneration()
-
-        guard let snapshot = await conversationStore.loadConversationAsync(id: targetConversationID) else {
-            let newConversationID: UUID
-            do {
-                newConversationID = try conversationStore.startFreshConversation()
-            } catch {
-                conversationStore.reportStorageError(error)
-                isRestoringConversation = false
-                return
-            }
-            guard let fallbackSnapshot = await conversationStore.loadConversationAsync(id: newConversationID) else {
-                isRestoringConversation = false
-                return
-            }
-            applyConversationSnapshot(fallbackSnapshot)
+        defer { if restoreRevision == revision { isRestoringConversation = false } }
+        conversationSaveTask?.cancel()
+        cancelPhotoImport()
+        await conversationStore.loadIndexIfNeeded()
+        guard !Task.isCancelled, restoreRevision == revision else { return }
+        let targetID: UUID
+        do { targetID = try conversationStore.ensureCurrentConversation() }
+        catch { conversationStore.reportStorageError(error); return }
+        guard force || loadedConversationID != targetID else { return }
+        await stopGeneration(persist: false)
+        guard !Task.isCancelled, restoreRevision == revision else { return }
+        let snapshot: ConversationSnapshot
+        do { snapshot = try await conversationStore.loadConversationAsyncThrowing(id: targetID) }
+        catch {
+            guard !Task.isCancelled, restoreRevision == revision else { return }
+            conversationStore.storageError = "This saved chat could not be opened. Your files have been kept. " + error.localizedDescription
             return
         }
-
+        guard !Task.isCancelled, restoreRevision == revision,
+              conversationStore.currentConversationID == targetID else { return }
+        guard snapshot.id == targetID else {
+            conversationStore.storageError = "This saved chat could not be opened. Your files have been kept. Try opening another chat or start a new one."
+            return
+        }
         applyConversationSnapshot(snapshot)
     }
 
     private func applyConversationSnapshot(_ snapshot: ConversationSnapshot) {
         loadedConversationID = snapshot.id
-        messages = snapshot.messages
+        messages = snapshot.messages.map { message in
+            var restored = message
+            if !message.user.isCurrentUser && (message.status == .sending || message.text.isEmpty) {
+                restored.status = .error
+            }
+            return restored
+        }
         assistantResponseStats = [:]
         completedAssistantMessageIDs = Set(
             snapshot.messages
@@ -698,60 +799,42 @@ public struct ChatView: View {
         toastMessage = nil
         streamingMessageID = nil
         isPinnedToBottom = true
+        latestContentOverflow = 0
         isRestoringConversation = false
     }
 
     @MainActor
     private func switchConversation(to conversationID: UUID) async {
-        guard persistConversationNow() else { return }
+        guard !isNavigating, !isSubmitting else { return }
         guard conversationStore.currentConversationID != conversationID else { return }
+        isNavigating = true
+        defer { isNavigating = false }
+        cancelPhotoImport()
         await stopGeneration()
-        conversationStore.setCurrentConversation(id: conversationID)
-        if let snapshot = conversationStore.loadConversation(id: conversationID) {
-            applyConversationSnapshot(snapshot)
-        } else {
-            await restoreConversationIfNeeded(force: true)
+        if loadedConversationID == conversationStore.currentConversationID {
+            guard await persistConversationNow() else { return }
         }
+        conversationStore.setCurrentConversation(id: conversationID)
+        // The keyed restore task is the single owner of snapshot application.
     }
 
     @MainActor
     private func startFreshConversation() async {
-        guard persistConversationNow() else { return }
+        guard !isNavigating, !isSubmitting else { return }
+        isNavigating = true
+        defer { isNavigating = false }
+        cancelPhotoImport()
         await stopGeneration()
-        let conversationID: UUID
-        do {
-            conversationID = try conversationStore.startFreshConversation()
-        } catch {
-            conversationStore.reportStorageError(error)
-            return
+        if loadedConversationID == conversationStore.currentConversationID, loadedConversationID != nil {
+            guard await persistConversationNow() else { return }
         }
-        conversationSaveTask?.cancel()
-        applyConversationSnapshot(
-            ConversationSnapshot(
-                id: conversationID,
-                title: "New chat",
-                messages: [],
-                draftText: "",
-                draftAttachments: []
-            )
-        )
-        AppDiagnostics.shared.record(
-            "Fresh conversation started",
-            category: "ui",
-            metadata: ["conversationID": conversationID.uuidString]
-        )
-    }
-
-    private func toggleSidebar() {
-        withAnimation(.spring(response: 0.34, dampingFraction: 0.88)) {
-            isSidebarOpen.toggle()
-        }
+        do { _ = try conversationStore.startFreshConversation() }
+        catch { conversationStore.reportStorageError(error) }
     }
 
     private func closeSidebar() {
-        withAnimation(.spring(response: 0.34, dampingFraction: 0.88)) {
-            isSidebarOpen = false
-        }
+        // Return to chat on compact displays without hiding a tiled sidebar.
+        preferredCompactColumn = .detail
     }
 
     private func scheduleConversationSave(delayMs: Int = 280) {
@@ -767,27 +850,29 @@ public struct ChatView: View {
                 }
             }
 
-            await MainActor.run {
-                _ = persistConversationNow()
-            }
+            guard !Task.isCancelled else { return }
+            _ = await persistConversationNow()
         }
     }
 
     @discardableResult
-    private func persistConversationNow() -> Bool {
-        guard !isRestoringConversation else { return false }
+    private func persistConversationNow() async -> Bool {
+        guard !isRestoringConversation, let targetID = loadedConversationID,
+              conversationStore.canSaveConversation(id: targetID) else { return false }
         do {
-            let conversationID = try conversationStore.saveConversation(
-                id: loadedConversationID,
+            _ = try await conversationStore.saveConversationAsync(
+                id: targetID,
                 messages: messages,
                 draftText: draft,
                 draftAttachments: pendingAttachments
             )
-            loadedConversationID = conversationID
-            if conversationStore.currentConversationID == nil {
-                conversationStore.setCurrentConversation(id: conversationID)
-            }
             return true
+        } catch ConversationStoreError.saveSuperseded(_) {
+            // A newer snapshot owns persistence; this is not a storage failure.
+            return false
+        } catch ConversationStoreError.conversationDeleted(_) {
+            // The delete operation owns the final state.
+            return false
         } catch {
             conversationStore.reportStorageError(error)
             return false
@@ -801,7 +886,7 @@ public struct ChatView: View {
     // MARK: - Photo import
 
     @MainActor
-    private func importSelectedPhotos(from items: [PhotosPickerItem]) async {
+    private func importSelectedPhotos(from items: [PhotosPickerItem], conversationID: UUID?, revision: UUID) async {
         guard !items.isEmpty else { return }
         guard llmService.supportsImageInput || !supportsLocalModelRuntime else {
             selectedPhotoItems = []
@@ -811,14 +896,18 @@ public struct ChatView: View {
 
         isImportingAttachments = true
         defer {
-            isImportingAttachments = false
-            selectedPhotoItems = []
+            if importRevision == revision {
+                isImportingAttachments = false
+                selectedPhotoItems = []
+                importTask = nil
+            }
         }
 
         var importedAttachments: [Attachment] = []
         var failedCount = 0
 
-        for item in items {
+        for item in items.prefix(max(0, 4 - pendingAttachments.count)) {
+            guard !Task.isCancelled else { break }
             do {
                 if let attachment = try await ChatAttachmentImagePipeline.makeAttachment(from: item) {
                     importedAttachments.append(attachment)
@@ -828,6 +917,12 @@ public struct ChatView: View {
             }
         }
 
+        guard !Task.isCancelled, importRevision == revision,
+              conversationID == loadedConversationID,
+              conversationID == conversationStore.currentConversationID else {
+            _ = ConversationAttachmentStore.removeFiles(at: importedAttachments.flatMap { [$0.thumbnail, $0.full] })
+            return
+        }
         if !importedAttachments.isEmpty {
             pendingAttachments.append(contentsOf: importedAttachments)
             scheduleConversationSave()
@@ -838,10 +933,18 @@ public struct ChatView: View {
         }
     }
 
+    private func cancelPhotoImport() {
+        importRevision = UUID()
+        importTask?.cancel()
+        importTask = nil
+        isImportingAttachments = false
+    }
+
     // MARK: - Prompt handling & streaming
 
     @MainActor
     private func submitDraft() {
+        guard canSubmitDraft else { return }
         let trimmedText = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedText.isEmpty || !pendingAttachments.isEmpty else { return }
         guard !llmService.isSwitchingRuntime else {
@@ -882,21 +985,33 @@ public struct ChatView: View {
                 "existingMessages": messages.count
             ]
         )
-        draft = ""
+        let attachments = pendingAttachments
+        let conversationID = loadedConversationID
         isComposerFocused = false
+        isSubmitting = true
         Task { @MainActor in
-            let attachments = pendingAttachments
-            pendingAttachments = []
-            selectedPhotoItems = []
-            await handlePrompt(trimmedText, attachments: attachments)
+            defer { isSubmitting = false }
+            guard conversationID == loadedConversationID else { return }
+            await handlePrompt(trimmedText, attachments: attachments, consumesDraft: true)
         }
     }
 
     @MainActor
-    private func handlePrompt(_ trimmedText: String, attachments: [Attachment]) async {
+    private func handlePrompt(_ trimmedText: String, attachments: [Attachment], consumesDraft: Bool = false) async {
+        guard !isRestoringConversation, loadedConversationID == conversationStore.currentConversationID else { return }
         triggerSendHaptic()
+        let conversationID = loadedConversationID
         await stopGeneration()
+        guard conversationID == loadedConversationID, !llmService.isGenerating else {
+            showToast("The previous response is still stopping")
+            return
+        }
 
+        if consumesDraft {
+            draft = ""
+            pendingAttachments = []
+            selectedPhotoItems = []
+        }
         let history = conversationHistory(from: messages)
         let userMessage = ChatMessage(
             id: UUID().uuidString,
@@ -915,7 +1030,7 @@ public struct ChatView: View {
             ChatMessage(
                 id: assistantID,
                 user: .yemma,
-                status: .sent,
+                status: .sending,
                 createdAt: Date(),
                 text: "",
                 attachments: []
@@ -955,7 +1070,8 @@ public struct ChatView: View {
         }
     }
 
-    /// Streams tokens into a buffer and flushes visible text at ~50ms intervals or word boundaries.
+    /// Flushes only visible updates while keeping generation ownership on the main actor.
+    @MainActor
     private func streamReply(
         prompt: PromptMessageInput,
         history: [PromptMessageInput],
@@ -964,74 +1080,30 @@ public struct ChatView: View {
     ) async {
         var streamingPolicy = StreamingUpdatePolicy()
         let previousGenerationID = llmService.lastGenerationStats?.generationID
-
-        defer {
-            Task { @MainActor in
-                finishGenerationSessionIfCurrent(sessionID: sessionID, assistantID: assistantID)
-            }
-        }
-
+        defer { finishGenerationSessionIfCurrent(sessionID: sessionID, assistantID: assistantID) }
         for await token in llmService.generate(prompt: prompt, history: history) {
-            guard !Task.isCancelled else { return }
-
+            guard !Task.isCancelled, isCurrentGenerationSession(sessionID: sessionID, assistantID: assistantID) else { return }
             let update = streamingPolicy.append(token)
-
-            let isCurrent = await MainActor.run {
-                guard isCurrentGenerationSession(sessionID: sessionID, assistantID: assistantID) else {
-                    return false
-                }
-
-                if let visibleText = update.visibleText {
-                    updateMessageText(id: assistantID, text: visibleText)
-                }
-                return true
-            }
-            guard isCurrent, !Task.isCancelled else { return }
-
+            if let visibleText = update.visibleText { updateMessageText(id: assistantID, text: visibleText) }
             if update.shouldStop {
                 await llmService.stopGeneration()
                 break
             }
         }
-
-        guard !Task.isCancelled else { return }
-
-        // Final flush — applies full sanitization and switches to markdown rendering
-        let finalText = streamingPolicy.finalize()
-        let responseStats = llmService.lastGenerationStats?.generationID == previousGenerationID
-            ? nil
-            : llmService.lastGenerationStats
-        await MainActor.run {
-            guard isCurrentGenerationSession(sessionID: sessionID, assistantID: assistantID) else {
-                return
-            }
-            finalizeAssistantMessage(
-                id: assistantID,
-                text: finalText,
-                responseStats: responseStats
-            )
-            persistConversationNow()
-        }
-
-        guard !Task.isCancelled else { return }
-
+        guard !Task.isCancelled, isCurrentGenerationSession(sessionID: sessionID, assistantID: assistantID) else { return }
+        let responseStats = llmService.lastGenerationStats?.generationID == previousGenerationID ? nil : llmService.lastGenerationStats
+        finalizeAssistantMessage(id: assistantID, text: streamingPolicy.finalize(), responseStats: responseStats)
         if let lastError = llmService.lastError {
-            await MainActor.run {
-                guard isCurrentGenerationSession(sessionID: sessionID, assistantID: assistantID) else {
-                    return
-                }
-                if isLowMemoryError(lastError) {
-                    self.memoryAlertMessage = "Your device ran low on memory. Try a shorter conversation."
-                } else {
-                    self.generationError = lastError
-                }
-            }
+            if isLowMemoryError(lastError) { memoryAlertMessage = lastError }
+            else { generationError = lastError }
         }
+        await persistConversationNow()
     }
 
     @MainActor
     private func updateMessageText(id: String, text: String) {
-        guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
+        let index = messages.last?.id == id ? messages.indices.last : messages.firstIndex(where: { $0.id == id })
+        guard let index else { return }
         messages[index].text = text
     }
 
@@ -1043,13 +1115,7 @@ public struct ChatView: View {
     ) {
         guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
 
-        if text.isEmpty {
-            messages.remove(at: index)
-            completedAssistantMessageIDs.remove(id)
-            assistantResponseStats.removeValue(forKey: id)
-            return
-        }
-
+        messages[index].status = (text.isEmpty || llmService.lastError != nil) ? .error : .sent
         messages[index].text = text
         completedAssistantMessageIDs.insert(id)
         if let responseStats {
@@ -1081,6 +1147,8 @@ public struct ChatView: View {
     private func clearConversation() async {
         AppDiagnostics.shared.record("Conversation cleared", category: "ui", metadata: ["previousMessages": messages.count])
         await stopGeneration()
+        cancelPhotoImport()
+        let discarded = (messages.flatMap(\.attachments) + pendingAttachments).flatMap { [$0.thumbnail, $0.full] }
         messages.removeAll()
         assistantResponseStats.removeAll()
         completedAssistantMessageIDs.removeAll()
@@ -1092,7 +1160,7 @@ public struct ChatView: View {
         memoryAlertMessage = nil
         toastMessage = nil
         streamingMessageID = nil
-        persistConversationNow()
+        if await persistConversationNow() { _ = ConversationAttachmentStore.removeFiles(at: discarded) }
     }
 
     @MainActor
@@ -1109,7 +1177,7 @@ public struct ChatView: View {
                 .previewMessage(user: .user, text: sampleTranscript.user),
                 .previewMessage(user: .yemma, text: sampleTranscript.assistant)
             ]
-            persistConversationNow()
+            await persistConversationNow()
             return
         }
 
@@ -1125,7 +1193,7 @@ public struct ChatView: View {
                     text: "Simulator mode uses mocked replies. Run this debug scenario on a physical iPhone to judge real inference quality."
                 )
             ]
-            persistConversationNow()
+            await persistConversationNow()
             return
         }
 
@@ -1137,7 +1205,7 @@ public struct ChatView: View {
                     text: "Choose a ready on-device model, then rerun this debug scenario."
                 )
             ]
-            persistConversationNow()
+            await persistConversationNow()
             return
         }
 
@@ -1173,12 +1241,16 @@ public struct ChatView: View {
     }
 
     @MainActor
-    private func stopGeneration() async {
+    private func stopGeneration(persist: Bool = true) async {
+        if let id = streamingMessageID, let index = messages.firstIndex(where: { $0.id == id }) {
+            messages[index].status = .error
+            completedAssistantMessageIDs.insert(id)
+        }
         activeGenerationSessionID = nil
         generationTask?.cancel()
         generationTask = nil
         streamingMessageID = nil
         await llmService.stopGeneration()
-        persistConversationNow()
+        if persist { await persistConversationNow() }
     }
 }

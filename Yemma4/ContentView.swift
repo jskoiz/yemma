@@ -41,7 +41,7 @@ struct AppBackground: View {
                 endPoint: .top
             )
         }
-        .ignoresSafeArea()
+        .ignoresSafeArea(.container)
     }
 }
 
@@ -51,7 +51,7 @@ struct CircleIconButton: View {
     var action: () -> Void
 
     var body: some View {
-        let hitTargetSize = max(AppTheme.Layout.controlIconSize + 14, 48)
+        let hitTargetSize = AppTheme.Layout.minimumControlSize
 
         return Button(action: action) {
             ZStack {
@@ -65,10 +65,9 @@ struct CircleIconButton: View {
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(AppTheme.textPrimary)
             }
-            .frame(width: AppTheme.Layout.controlIconSize, height: AppTheme.Layout.controlIconSize)
+            .frame(width: hitTargetSize, height: hitTargetSize)
+            .contentShape(Rectangle())
         }
-        .frame(width: hitTargetSize, height: hitTargetSize)
-        .contentShape(Rectangle())
         .buttonStyle(.plain)
     }
 }
@@ -119,7 +118,7 @@ public struct ContentView: View {
             )
         }
         .task(id: llmService.selectedRuntime.rawValue) {
-            if supportsLocalModelRuntime {
+            if supportsLocalModelRuntime && llmService.selectedRuntime == .qwen35 {
                 await modelDownloader.validateDownloadedModel()
             }
             if llmService.selectedRuntime == .appleFoundationModel {
@@ -246,6 +245,7 @@ public struct ContentView: View {
         }
     }
 
+    @MainActor
     private func loadModelIfNeeded(force: Bool = false) async {
         guard Yemma4AppConfiguration.supportsLocalModelRuntime else {
             await MainActor.run {
@@ -265,6 +265,19 @@ public struct ContentView: View {
 
         let signature = modelPath
         guard force || loadedModelSignature != signature || (!llmService.isModelLoaded && !llmService.isModelLoading) else { return }
+
+        guard !llmService.isModelLoading else { return }
+        if force {
+            guard await llmService.unloadModel() else {
+                modelLoadError = llmService.lastError ?? "The model is still stopping. Try again shortly."
+                return
+            }
+            guard llmService.selectedRuntime == .qwen35,
+                  modelDownloader.modelPath == modelPath else { return }
+        } else if llmService.isModelLoaded {
+            loadedModelSignature = signature
+            return
+        }
 
         do {
             // Signal loading state immediately so OnboardingView shows "Preparing model"

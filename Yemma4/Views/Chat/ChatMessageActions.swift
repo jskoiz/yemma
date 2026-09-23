@@ -1,8 +1,9 @@
 import SwiftUI
 
-enum AssistantRefinement: String {
+enum AssistantRefinement: String, CaseIterable {
     case shorter
     case moreDetail
+    case warmer, checklist, explainSimply
 
     var title: String {
         switch self {
@@ -10,6 +11,9 @@ enum AssistantRefinement: String {
             return "Shorter"
         case .moreDetail:
             return "More detail"
+        case .warmer: return "Make warmer"
+        case .checklist: return "Make a checklist"
+        case .explainSimply: return "Explain simply"
         }
     }
 
@@ -19,6 +23,9 @@ enum AssistantRefinement: String {
             return "text.alignleft"
         case .moreDetail:
             return "plus.bubble"
+        case .warmer: return "sun.max"
+        case .checklist: return "checklist"
+        case .explainSimply: return "lightbulb"
         }
     }
 
@@ -28,6 +35,9 @@ enum AssistantRefinement: String {
             return "Make that shorter and more direct."
         case .moreDetail:
             return "Expand that with a bit more detail and one concrete example."
+        case .warmer: return "Rewrite your last answer in a warmer, natural tone while preserving its meaning and facts."
+        case .checklist: return "Turn your last answer into a practical checklist. Preserve important conditions and do not invent new steps."
+        case .explainSimply: return "Explain your last answer in simpler language, with one concrete example if useful."
         }
     }
 }
@@ -141,6 +151,8 @@ struct ChatResponseStatsLabel: View {
 }
 
 struct ChatMessageActionStrip: View {
+    @Environment(\.chatFeatures) private var features
+    @Environment(\.chatConversationID) private var conversationID
     let messageID: String
     let messageText: String
     let index: Int
@@ -155,39 +167,43 @@ struct ChatMessageActionStrip: View {
 
     var body: some View {
         let trimmedText = messageText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let hasMeaningfulText = !trimmedText.isEmpty
 
-        HStack(spacing: 14) {
+        VStack(alignment: .leading, spacing: 4) {
             if let responseStats, showsResponseStats {
                 ChatResponseStatsLabel(stats: responseStats)
-                Spacer(minLength: 0)
             }
 
-            if !trimmedText.isEmpty {
-                actionButton(
-                    title: "Copy",
-                    systemImage: "doc.on.doc",
-                    accessibilityHint: "Copy this response.",
-                    action: onCopy
-                )
+            HStack(spacing: 4) {
+                if hasMeaningfulText {
+                    actionButton(
+                        title: "Copy",
+                        systemImage: "doc.on.doc",
+                        accessibilityHint: "Copy this response.",
+                        action: onCopy
+                    )
+                }
+
+                if canRetry && !isGenerating {
+                    actionButton(
+                        title: "Retry response",
+                        systemImage: "arrow.clockwise",
+                        accessibilityHint: "Generate the assistant reply again.",
+                        action: onRetry
+                    )
+
+                    if hasMeaningfulText {
+                        actionButton(
+                            title: AssistantRefinement.shorter.title,
+                            systemImage: AssistantRefinement.shorter.systemImage,
+                            accessibilityHint: "Ask for a shorter version of the latest assistant reply.",
+                            action: { onRefine(.shorter) }
+                        )
+                    }
+                }
+
+                actionOverflowMenu(trimmedText: trimmedText)
             }
-
-            if canRetry && !isGenerating {
-                actionButton(
-                    title: "Retry",
-                    systemImage: "arrow.clockwise",
-                    accessibilityHint: "Generate the assistant reply again.",
-                    action: onRetry
-                )
-
-                actionButton(
-                    title: AssistantRefinement.shorter.title,
-                    systemImage: AssistantRefinement.shorter.systemImage,
-                    accessibilityHint: "Ask for a shorter version of the latest assistant reply.",
-                    action: { onRefine(.shorter) }
-                )
-            }
-
-            actionOverflowMenu(trimmedText: trimmedText)
         }
         .padding(.horizontal, 2)
         .padding(.top, 6)
@@ -203,7 +219,7 @@ struct ChatMessageActionStrip: View {
             Image(systemName: systemImage)
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(AppTheme.textSecondary)
-                .frame(width: 22, height: 22)
+                .frame(width: AppTheme.Layout.minimumControlSize, height: AppTheme.Layout.minimumControlSize)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -227,18 +243,32 @@ struct ChatMessageActionStrip: View {
                 }
             }
 
+            if !trimmedText.isEmpty, let features {
+                if let conversationID {
+                    Button(features.library.isSaved(conversationID: conversationID, messageID: messageID) ? "Remove saved answer" : "Save answer", systemImage: "bookmark") {
+                        features.library.toggleSaved(conversationID: conversationID, messageID: messageID)
+                    }
+                }
+                Button("Read aloud", systemImage: "speaker.wave.2") { features.speech.speak(trimmedText) }
+                if features.speech.isSpeaking {
+                    Button("Stop reading", systemImage: "stop.circle") { features.speech.stop() }
+                }
+            }
+
             if canRetry && !isGenerating {
                 Button {
                     onRetry()
                 } label: {
-                    Label("Retry", systemImage: "arrow.clockwise")
+                    Label("Retry response", systemImage: "arrow.clockwise")
                 }
 
-                ForEach([AssistantRefinement.shorter, .moreDetail], id: \.rawValue) { refinement in
-                    Button {
-                        onRefine(refinement)
-                    } label: {
-                        Label(refinement.title, systemImage: refinement.systemImage)
+                if !trimmedText.isEmpty {
+                    ForEach(AssistantRefinement.allCases, id: \.rawValue) { refinement in
+                        Button {
+                            onRefine(refinement)
+                        } label: {
+                            Label(refinement.title, systemImage: refinement.systemImage)
+                        }
                     }
                 }
             }
@@ -246,7 +276,7 @@ struct ChatMessageActionStrip: View {
             Image(systemName: "ellipsis")
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(AppTheme.textSecondary)
-                .frame(width: 22, height: 22)
+                .frame(width: AppTheme.Layout.minimumControlSize, height: AppTheme.Layout.minimumControlSize)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

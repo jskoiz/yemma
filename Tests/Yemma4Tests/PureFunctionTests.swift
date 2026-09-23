@@ -1,5 +1,6 @@
 import Foundation
 import Hub
+import MLXLMCommon
 import XCTest
 @testable import Yemma4
 
@@ -43,6 +44,72 @@ final class Qwen35PromptMessageTests: XCTestCase {
         XCTAssertEqual(shaped[0].content, Qwen35MLXSupport.defaultImagePrompt)
         XCTAssertEqual(shaped[1].content, "")
         XCTAssertEqual(shaped.map(\.imageURLs.count), [1, 1])
+    }
+
+    func testQwenBudgetPreservesCurrentPromptWhileDroppingOldHistory() throws {
+        let oldHistory = PromptMessageInput(
+            role: "user",
+            text: String(repeating: "old ", count: 1_300),
+            images: []
+        )
+        let recentHistory = PromptMessageInput(role: "user", text: "recent", images: [])
+        let prompt = PromptMessageInput(role: "user", text: "current request", images: [])
+
+        let bounded = try LLMService.boundedPromptMessagesForQwen35(
+            history: [oldHistory, recentHistory],
+            prompt: prompt,
+            maximumResponseTokens: 1_024,
+            instructionMessages: [
+                Qwen35ConversationMessage(role: "system", content: "Be concise.", imageURLs: [])
+            ]
+        )
+
+        XCTAssertEqual(bounded.map(\.content), ["recent", "current request"])
+    }
+
+    func testQwenBudgetRejectsOversizedCurrentPrompt() {
+        let prompt = PromptMessageInput(
+            role: "user",
+            text: String(repeating: "x", count: 5_000),
+            images: []
+        )
+
+        XCTAssertThrowsError(
+            try LLMService.boundedPromptMessagesForQwen35(
+                history: [],
+                prompt: prompt,
+                maximumResponseTokens: 1_024,
+                instructionMessages: []
+            )
+        ) { error in
+            guard let budgetError = error as? PromptBudgetError,
+                case .currentPromptTooLong = budgetError
+            else {
+                return XCTFail("Expected an oversized current prompt error")
+            }
+        }
+    }
+
+    func testQwenBudgetRejectsTooManyCurrentImages() {
+        let images = (0..<Qwen35PromptBudget.maximumImages + 1).map {
+            PromptImageAsset(id: "image-\($0)", filePath: "/tmp/image-\($0).jpg")
+        }
+        let prompt = PromptMessageInput(role: "user", text: "Compare these", images: images)
+
+        XCTAssertThrowsError(
+            try LLMService.boundedPromptMessagesForQwen35(
+                history: [],
+                prompt: prompt,
+                maximumResponseTokens: 256,
+                instructionMessages: []
+            )
+        ) { error in
+            guard let budgetError = error as? PromptBudgetError,
+                case .currentImagesTooMany = budgetError
+            else {
+                return XCTFail("Expected a current-image budget error")
+            }
+        }
     }
 }
 
@@ -139,6 +206,59 @@ final class AppleFoundationModelRuntimeTests: XCTestCase {
         )
     }
 
+    func testRequestBudgetKeepsRecentHistoryAndAccountsForCurrentPrompt() throws {
+        let oldHistory = PromptMessageInput(
+            role: "user",
+            text: String(repeating: "old ", count: 900),
+            images: []
+        )
+        let recentHistory = [
+            PromptMessageInput(role: "user", text: "recent question", images: []),
+            PromptMessageInput(role: "assistant", text: "recent answer", images: [])
+        ]
+        let prompt = PromptMessageInput(role: "user", text: "current request", images: [])
+
+        let bounded = try AppleFoundationModelRuntime.boundedRequestHistory(
+            instructions: "Be concise.",
+            history: [oldHistory] + recentHistory,
+            prompt: prompt,
+            maximumResponseTokens: 1_024
+        )
+
+        XCTAssertEqual(bounded.map(\.text), recentHistory.map(\.text))
+    }
+
+    func testRequestBudgetRejectsOversizedCurrentPromptInsteadOfTruncatingIt() {
+        let prompt = PromptMessageInput(
+            role: "user",
+            text: String(repeating: "界", count: 1_000),
+            images: []
+        )
+
+        XCTAssertThrowsError(
+            try AppleFoundationModelRuntime.boundedRequestHistory(
+                instructions: "Be concise.",
+                history: [],
+                prompt: prompt,
+                maximumResponseTokens: 1_024
+            )
+        ) { error in
+            guard let runtimeError = error as? AppleFoundationModelRuntimeError,
+                case .contextLimitExceeded = runtimeError
+            else {
+                return XCTFail("Expected an Apple context budget error")
+            }
+        }
+    }
+
+    func testTokenEstimatorUsesUTF8UpperBoundForUnicode() {
+        let text = "👩‍💻 e\u{301} 界"
+        XCTAssertGreaterThanOrEqual(
+            AppleFoundationModelRuntime.estimatedTokenCount(text),
+            text.utf8.count
+        )
+    }
+
     func testSnapshotDeltaConvertsCumulativeSnapshotsAndRejectsReplacement() {
         XCTAssertEqual(
             try AppleFoundationModelRuntime.snapshotDelta(previous: "", current: "Hello"),
@@ -176,7 +296,7 @@ final class AppleFoundationModelRuntimeTests: XCTestCase {
         XCTAssertEqual(service.selectedRuntime, .appleFoundationModel)
 
         var response = ""
-        for await chunk in service.generate(
+        for await chunk in await service.generate(
             prompt: PromptMessageInput(role: "user", text: "Hello", images: []),
             history: []
         ) {
@@ -188,6 +308,82 @@ final class AppleFoundationModelRuntimeTests: XCTestCase {
         XCTAssertFalse(service.isGenerating)
     }
 #endif
+}
+
+final class GenerationStartGateTests: XCTestCase {
+    func testCancellationResumesWaitingTaskWithoutOpeningGate() async {
+        let gate = GenerationStartGate()
+        let waiter = Task { await gate.wait() }
+
+        for _ in 0..<8 {
+            await Task.yield()
+        }
+        waiter.cancel()
+
+        let didOpen = await waiter.value
+        XCTAssertFalse(didOpen)
+        gate.open()
+    }
+
+    func testOpenBeforeWaitAllowsGeneration() async {
+        let gate = GenerationStartGate()
+        gate.open()
+
+        let didOpen = await gate.wait()
+        XCTAssertTrue(didOpen)
+    }
+}
+
+final class Qwen35UnicodeStreamingTests: XCTestCase {
+    func testCombiningMarkAndZWJAreNotDroppedByIncrementalDecode() {
+        var parser = Qwen35ResponseTokenParser(tokenizer: UnicodeFixtureTokenizer())
+
+        let combining = [0, 1].compactMap { parser.append(tokenID: $0) }.joined()
+        XCTAssertEqual(combining, "e\u{301}")
+
+        var emojiParser = Qwen35ResponseTokenParser(tokenizer: UnicodeFixtureTokenizer())
+        let emoji = [2, 3, 4].compactMap { emojiParser.append(tokenID: $0) }.joined()
+        XCTAssertEqual(emoji, "👩‍💻")
+    }
+
+    func testNewlineBoundaryKeepsFollowingText() {
+        var parser = Qwen35ResponseTokenParser(tokenizer: UnicodeFixtureTokenizer())
+        let output = [5, 6].compactMap { parser.append(tokenID: $0) }.joined()
+
+        XCTAssertEqual(output, "\nA")
+    }
+}
+
+private struct UnicodeFixtureTokenizer: MLXLMCommon.Tokenizer {
+    private let vocabulary = ["e", "\u{301}", "👩", "\u{200D}", "💻", "\n", "A"]
+
+    var bosToken: String? { nil }
+    var eosToken: String? { nil }
+    var unknownToken: String? { nil }
+
+    func encode(text: String, addSpecialTokens: Bool) -> [Int] {
+        vocabulary.firstIndex(of: text).map { [$0] } ?? []
+    }
+
+    func decode(tokenIds: [Int], skipSpecialTokens: Bool) -> String {
+        tokenIds.compactMap { vocabulary.indices.contains($0) ? vocabulary[$0] : nil }.joined()
+    }
+
+    func convertTokenToId(_ token: String) -> Int? {
+        vocabulary.firstIndex(of: token)
+    }
+
+    func convertIdToToken(_ id: Int) -> String? {
+        vocabulary.indices.contains(id) ? vocabulary[id] : nil
+    }
+
+    func applyChatTemplate(
+        messages: [[String: any Sendable]],
+        tools: [[String: any Sendable]]?,
+        additionalContext: [String: any Sendable]?
+    ) throws -> [Int] {
+        []
+    }
 }
 
 // MARK: - LLMService response-token math
@@ -384,7 +580,6 @@ final class ModelDownloaderLifecycleTests: XCTestCase {
         XCTAssertTrue(downloader.isValidatingDownloadedModel)
         XCTAssertFalse(downloader.isDownloaded)
         XCTAssertNil(downloader.modelPath)
-        XCTAssertNil(downloader.localResources)
     }
 
     func testDeleteModelRemovesSyntheticBundleBeforeReturning() async throws {

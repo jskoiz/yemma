@@ -144,6 +144,22 @@ struct ConversationBrowserSheet: View {
         } message: {
             Text("Give this chat a shorter, easier-to-scan name.")
         }
+        .alert("Chat Could Not Be Deleted", isPresented: Binding(
+            get: { conversationStore.conversationDeletionError != nil },
+            set: { if !$0 { conversationStore.conversationDeletionError = nil } }
+        )) {
+            Button("OK", role: .cancel) { conversationStore.conversationDeletionError = nil }
+        } message: {
+            Text(conversationStore.conversationDeletionError ?? "Please try again.")
+        }
+        .alert("History Could Not Be Deleted", isPresented: Binding(
+            get: { conversationStore.historyDeletionError != nil },
+            set: { if !$0 { conversationStore.historyDeletionError = nil } }
+        )) {
+            Button("OK", role: .cancel) { conversationStore.historyDeletionError = nil }
+        } message: {
+            Text(conversationStore.historyDeletionError ?? "Please try again.")
+        }
         .confirmationDialog(
             "Delete this chat?",
             isPresented: Binding(
@@ -199,6 +215,9 @@ struct ConversationBrowserSheet: View {
 
     private var header: some View {
         HStack {
+            Color.clear
+                .frame(width: AppTheme.Layout.minimumControlSize, height: AppTheme.Layout.minimumControlSize)
+                .accessibilityHidden(true)
             Spacer()
             Text(scope.title)
                 .font(AppTheme.Typography.utilityTitle)
@@ -227,6 +246,8 @@ struct ConversationBrowserSheet: View {
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .foregroundStyle(AppTheme.textTertiary)
+                        .frame(width: AppTheme.Layout.minimumControlSize, height: AppTheme.Layout.minimumControlSize)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Clear archive search")
@@ -297,7 +318,7 @@ struct ConversationBrowserSheet: View {
             Image(systemName: "ellipsis.circle")
                 .font(.system(size: 18, weight: .semibold))
                 .foregroundStyle(AppTheme.textSecondary)
-                .frame(width: 32, height: 32)
+                .frame(width: AppTheme.Layout.minimumControlSize, height: AppTheme.Layout.minimumControlSize)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -335,6 +356,7 @@ struct ConversationBrowserSheet: View {
                     Text(Self.relativeDateText(for: metadata.updatedAt))
                     Text("·")
                     Text("\(metadata.messageCount) \(metadata.messageCount == 1 ? "message" : "messages")")
+                        .lineLimit(1)
                 }
                 .font(AppTheme.Typography.utilityCaption)
                 .foregroundStyle(AppTheme.textTertiary)
@@ -359,6 +381,8 @@ struct ConversationBrowserSheet: View {
                     .foregroundStyle(AppTheme.textPrimary)
 
                 Text(subtitle)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .multilineTextAlignment(.leading)
                     .font(AppTheme.Typography.utilityRowDetail)
                     .foregroundStyle(AppTheme.textSecondary)
             }
@@ -381,6 +405,8 @@ struct ConversationBrowserSheet: View {
                     .foregroundStyle(AppTheme.destructive)
 
                 Text(subtitle)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .multilineTextAlignment(.leading)
                     .font(AppTheme.Typography.utilityRowDetail)
                     .foregroundStyle(AppTheme.textSecondary)
             }
@@ -393,7 +419,8 @@ struct ConversationBrowserSheet: View {
 
     private func statusChip(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 11, weight: .semibold))
+            .font(.caption2.weight(.semibold))
+            .fixedSize()
             .foregroundStyle(AppTheme.accent)
             .padding(.horizontal, 8)
             .padding(.vertical, 4)

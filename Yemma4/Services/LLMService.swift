@@ -22,32 +22,68 @@ private final class BoundedJoinState: @unchecked Sendable {
     }
 }
 
-private final class GenerationStartGate: @unchecked Sendable {
+final class GenerationStartGate: @unchecked Sendable {
     private let lock = NSLock()
-    private var isOpen = false
-    private var continuation: CheckedContinuation<Void, Never>?
+    private enum State {
+        case waiting
+        case open
+        case cancelled
+    }
 
-    func wait() async {
-        await withCheckedContinuation { continuation in
-            lock.lock()
-            if isOpen {
-                lock.unlock()
-                continuation.resume()
-            } else {
-                self.continuation = continuation
-                lock.unlock()
+    private var state = State.waiting
+    private var continuation: CheckedContinuation<Bool, Never>?
+
+    func wait() async -> Bool {
+        await withTaskCancellationHandler(operation: {
+            await withCheckedContinuation { continuation in
+                lock.lock()
+                switch state {
+                case .open:
+                    lock.unlock()
+                    continuation.resume(returning: true)
+                case .cancelled:
+                    lock.unlock()
+                    continuation.resume(returning: false)
+                case .waiting:
+                    self.continuation = continuation
+                    lock.unlock()
+                }
             }
-        }
+        }, onCancel: { self.cancel() })
     }
 
     func open() {
         lock.lock()
-        isOpen = true
+        guard case .waiting = state else {
+            lock.unlock()
+            return
+        }
+
+        state = .open
         let continuation = continuation
         self.continuation = nil
         lock.unlock()
-        continuation?.resume()
+        continuation?.resume(returning: true)
     }
+
+    func cancel() {
+        lock.lock()
+        guard case .waiting = state else {
+            lock.unlock()
+            return
+        }
+
+        state = .cancelled
+        let continuation = continuation
+        self.continuation = nil
+        lock.unlock()
+        continuation?.resume(returning: false)
+    }
+}
+
+private enum ModelUnloadReason {
+    case user
+    case memoryWarning
 }
 
 private enum Qwen35InputRoute: String, Sendable {
@@ -120,6 +156,8 @@ final class LLMService: @unchecked Sendable {
     @ObservationIgnored private var generationTask: Task<Void, Never>?
     @ObservationIgnored private var activeGenerationID: UUID?
     @ObservationIgnored private var memoryWarningObserver: NSObjectProtocol?
+    @ObservationIgnored private var deferredMemoryWarningUnload = false
+    @ObservationIgnored private var isMemoryWarningUnloadInProgress = false
     @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored private let stateLock = NSLock()
     @ObservationIgnored private let logger = Logger(
@@ -159,8 +197,9 @@ final class LLMService: @unchecked Sendable {
     }
 
     /// Frees the multi-GB MLX model when the system reports memory pressure so iOS
-    /// can reclaim memory instead of jetsam-killing the app. The unload is skipped
-    /// while a response is generating; the model lazily reloads on next use.
+    /// can reclaim memory instead of jetsam-killing the app. If a response or
+    /// physical load is still active, the unload is deferred until that work is
+    /// finished. The user can explicitly retry the model load afterward.
     private func registerForMemoryWarnings() {
         memoryWarningObserver = NotificationCenter.default.addObserver(
             forName: UIApplication.didReceiveMemoryWarningNotification,
@@ -175,33 +214,55 @@ final class LLMService: @unchecked Sendable {
 
     @MainActor
     private func handleMemoryWarning() {
-        guard !isGenerating else {
-            AppDiagnostics.shared.record(
-                "Memory warning received during generation; skipping model unload",
-                category: "model"
-            )
+        guard selectedRuntime == .qwen35, isModelLoaded || isModelLoading else {
             return
         }
 
-        guard isModelLoaded else {
+        guard !isGenerating else {
+            deferredMemoryWarningUnload = true
+            AppDiagnostics.shared.record(
+                "Memory warning received during generation; deferring model unload",
+                category: "model"
+            )
             return
         }
 
         guard !isModelLoading else {
+            deferredMemoryWarningUnload = true
             AppDiagnostics.shared.record(
-                "Memory warning received while model load is in progress; skipping model unload",
+                "Memory warning received while model load is in progress; deferring model unload",
                 category: "model"
             )
             return
         }
 
+        scheduleDeferredMemoryWarningUnload()
+    }
+
+    @MainActor
+    private func scheduleDeferredMemoryWarningUnload() {
+        guard !isMemoryWarningUnloadInProgress else { return }
+        guard isModelLoaded, !isModelLoading, !isGenerating else {
+            deferredMemoryWarningUnload = true
+            return
+        }
+
+        deferredMemoryWarningUnload = false
+        isMemoryWarningUnloadInProgress = true
         AppDiagnostics.shared.record(
             "Memory warning received; unloading MLX model",
             category: "model"
         )
 
         Task { [weak self] in
-            await self?.unloadModel()
+            let didUnload = await self?.unloadModel(reason: .memoryWarning) ?? false
+            await MainActor.run {
+                guard let self else { return }
+                self.isMemoryWarningUnloadInProgress = false
+                if !didUnload {
+                    self.deferredMemoryWarningUnload = true
+                }
+            }
         }
     }
 
@@ -408,6 +469,14 @@ final class LLMService: @unchecked Sendable {
         }
 
         await stopGeneration()
+        guard await waitForGenerationToDrain() else {
+            await MainActor.run {
+                isModelLoading = false
+                modelLoadStage = .failed
+                lastError = LLMServiceError.generationStillStopping.localizedDescription
+            }
+            throw LLMServiceError.generationStillStopping
+        }
         await MainActor.run {
             isModelLoading = true
             modelLoadStage = .preparingRuntime
@@ -470,6 +539,12 @@ final class LLMService: @unchecked Sendable {
                 return
             }
 
+            await MainActor.run {
+                if self.deferredMemoryWarningUnload {
+                    self.scheduleDeferredMemoryWarningUnload()
+                }
+            }
+
             AppDiagnostics.shared.record(
                 "MLX model bundle loaded",
                 category: "model",
@@ -494,15 +569,19 @@ final class LLMService: @unchecked Sendable {
         }
     }
 
+    @MainActor
     func generate(prompt: PromptMessageInput, history: [PromptMessageInput]) -> AsyncStream<String> {
+        guard !hasActiveGeneration() else {
+            lastError = "The previous response is still stopping. Try again when it finishes stopping."
+            return Self.finishedStream()
+        }
+
         if !Yemma4AppConfiguration.supportsLocalModelRuntime {
             return makeSimulatorStream(prompt: prompt, history: history)
         }
 
         guard !isSwitchingRuntime else {
-            Task { @MainActor in
-                self.lastError = "The on-device model is still switching. Try again in a moment."
-            }
+            lastError = "The on-device model is still switching. Try again in a moment."
             return Self.finishedStream()
         }
 
@@ -514,24 +593,43 @@ final class LLMService: @unchecked Sendable {
         }
     }
 
+    @MainActor
     private func generateWithQwen35(
         prompt: PromptMessageInput,
         history: [PromptMessageInput]
     ) -> AsyncStream<String> {
         let container = withLock { modelContainer }
         guard let container else {
-            // Route the Observable mutation through the main actor like every other
-            // mutation of `lastError` in this file; `generate` itself is not isolated.
             let message = LLMServiceError.modelNotLoaded.localizedDescription
-            Task { @MainActor in
-                self.lastError = message
-            }
+            lastError = message
             return AsyncStream { continuation in
                 continuation.finish()
             }
         }
 
-        let conversation = Self.promptMessagesForQwen35(from: history + [prompt])
+        let initialConversation = Self.promptMessagesForQwen35(from: history + [prompt])
+        let instructionMessages = promptInstructionMessages(for: initialConversation)
+        let responseTokenBudget = initialConversation.contains { !$0.imageURLs.isEmpty }
+            ? min(effectiveMaxResponseTokens, Self.recommendedMultimodalMaxTokens)
+            : effectiveMaxResponseTokens
+        let conversation: [Qwen35ConversationMessage]
+        do {
+            conversation = try Self.boundedPromptMessagesForQwen35(
+                history: history,
+                prompt: prompt,
+                maximumResponseTokens: responseTokenBudget,
+                instructionMessages: instructionMessages
+            )
+        } catch {
+            lastError = Self.generationRecoveryMessage(for: error)
+            AppDiagnostics.shared.record(
+                "Generation preflight failed",
+                category: "generation",
+                metadata: ["error": error.localizedDescription]
+            )
+            return Self.finishedStream()
+        }
+
         let promptRoute: Qwen35InputRoute = .chat
         let promptMode = conversation.contains { !$0.imageURLs.isEmpty } ? "multimodal" : "text-only"
         let conversationImageCount = conversation.reduce(into: 0) { $0 += $1.imageURLs.count }
@@ -587,17 +685,43 @@ final class LLMService: @unchecked Sendable {
 
         let stream = AsyncStream<String> { continuation in
             let startGate = GenerationStartGate()
-            let task = Task {
-                await startGate.wait()
+            let task = Task.detached(priority: .userInitiated) {
+                guard await startGate.wait() else {
+                    await self.finishGeneration(generationID: generationID)
+                    continuation.finish()
+                    return
+                }
+
                 do {
+                    try Task.checkCancellation()
                     let parameters = self.generationParameters(for: conversation)
                     let rawTokenStream = try await container.perform { context in
+                        try Task.checkCancellation()
                         let lmInput: LMInput
                         do {
+                            try Task.checkCancellation()
                             let userInput = self.makeQwen35UserInput(from: conversation)
                             lmInput = try await context.processor.prepare(input: userInput)
                         } catch {
                             throw LLMServiceError.processorFailed(error)
+                        }
+
+                        let preparedInputTokens = lmInput.text.tokens.size
+                            + conversationImageCount * Qwen35PromptBudget.imageTokenEstimate
+                        let inputTokenBudget = Qwen35PromptBudget.inputTokenBudget(
+                            maximumResponseTokens: parameters.maxTokens ?? responseTokenBudget
+                        )
+                        guard preparedInputTokens <= inputTokenBudget else {
+                            if conversationImageCount == 0 {
+                                throw PromptBudgetError.currentPromptTooLong(
+                                    estimatedTokens: preparedInputTokens,
+                                    budget: inputTokenBudget
+                                )
+                            }
+                            throw PromptBudgetError.currentPromptAndImagesTooLarge(
+                                estimatedTokens: preparedInputTokens,
+                                budget: inputTokenBudget
+                            )
                         }
 
                         let tokenShape = lmInput.text.tokens.shape.map(String.init).joined(separator: "x")
@@ -729,7 +853,7 @@ final class LLMService: @unchecked Sendable {
                             )
                             if let parser {
                                 if Yemma4AutomationConfiguration.current.rawTokenLoggingEnabled {
-                                    logger.debug(
+                                    self.logger.debug(
                                         "Qwen35 raw stream mode=\(promptMode, privacy: .public) tokens=\(parser.totalTokenCount, privacy: .public) visibleChunks=\(parser.visibleChunkCount, privacy: .public) visibleChars=\(parser.visibleCharacterCount, privacy: .public) preview=[\(parser.tokenPreviewSummary, privacy: .private)]"
                                     )
                                 }
@@ -749,27 +873,28 @@ final class LLMService: @unchecked Sendable {
                     await Self.joinOrDetach(completionTask)
                 } catch {
                     if !Task.isCancelled {
-                        await self.setLastError(error.localizedDescription)
+                        let recoveryMessage = Self.generationRecoveryMessage(for: error)
+                        await self.setLastError(recoveryMessage)
                         AppDiagnostics.shared.record(
                             "Generation failed",
                             category: "generation",
-                            metadata: ["error": error.localizedDescription]
+                            metadata: [
+                                "error": error.localizedDescription,
+                                "recovery": recoveryMessage
+                            ]
                         )
                     }
                 }
 
-                    await self.finishGeneration(generationID: generationID)
-                    continuation.finish()
-                }
+                await self.finishGeneration(generationID: generationID)
+                continuation.finish()
+            }
 
             self.publishGenerationTask(task, generationID: generationID)
-
-            Task { @MainActor [weak self] in
-                self?.isGenerating = true
-                self?.lastError = nil
-                self?.lastGenerationStats = nil
-                startGate.open()
-            }
+            isGenerating = true
+            lastError = nil
+            lastGenerationStats = nil
+            startGate.open()
 
             continuation.onTermination = { @Sendable _ in
                 task.cancel()
@@ -779,6 +904,7 @@ final class LLMService: @unchecked Sendable {
         return stream
     }
 
+    @MainActor
     private func generateWithAppleFoundationModel(
         prompt: PromptMessageInput,
         history: [PromptMessageInput]
@@ -786,25 +912,19 @@ final class LLMService: @unchecked Sendable {
         let availability = appleFoundationModelAvailability
         guard availability.isAvailable else {
             let message = AppleFoundationModelRuntimeError.unavailable(availability).localizedDescription
-            Task { @MainActor in
-                self.lastError = message
-            }
+            lastError = message
             return Self.finishedStream()
         }
 
         guard prompt.images.isEmpty else {
             let message = AppleFoundationModelRuntimeError.imagesUnsupported.localizedDescription
-            Task { @MainActor in
-                self.lastError = message
-            }
+            lastError = message
             return Self.finishedStream()
         }
 
         guard history.allSatisfy({ $0.images.isEmpty }) else {
             let message = AppleFoundationModelRuntimeError.imageHistoryUnsupported.localizedDescription
-            Task { @MainActor in
-                self.lastError = message
-            }
+            lastError = message
             return Self.finishedStream()
         }
 
@@ -812,15 +932,32 @@ final class LLMService: @unchecked Sendable {
             let message = AppleFoundationModelRuntimeError
                 .unavailable(.requiresIOS26)
                 .localizedDescription
-            Task { @MainActor in
-                self.lastError = message
-            }
+            lastError = message
             return Self.finishedStream()
         }
 
         let generationID = UUID()
         let generationStartUptime = ProcessInfo.processInfo.systemUptime
         let instructions = appleInstructions(for: prompt)
+        let responseTemperature = temperature
+        let responseTokenLimit = effectiveMaxResponseTokens
+
+        do {
+            _ = try AppleFoundationModelRuntime.validateRequest(
+                instructions: instructions,
+                history: history,
+                prompt: prompt,
+                maximumResponseTokens: responseTokenLimit
+            )
+        } catch {
+            lastError = Self.generationRecoveryMessage(for: error)
+            AppDiagnostics.shared.record(
+                "Generation preflight failed",
+                category: "generation",
+                metadata: ["error": error.localizedDescription]
+            )
+            return Self.finishedStream()
+        }
 
         AppDiagnostics.shared.record(
             "Generation requested",
@@ -835,15 +972,21 @@ final class LLMService: @unchecked Sendable {
 
         return AsyncStream { continuation in
             let startGate = GenerationStartGate()
-            let task = Task {
-                await startGate.wait()
+            let task = Task.detached(priority: .userInitiated) {
+                guard await startGate.wait() else {
+                    await self.finishGeneration(generationID: generationID)
+                    continuation.finish()
+                    return
+                }
+
                 do {
+                    try Task.checkCancellation()
                     try await AppleFoundationModelRuntime.streamResponse(
                         instructions: instructions,
                         history: history,
                         prompt: prompt,
-                        temperature: temperature,
-                        maximumResponseTokens: effectiveMaxResponseTokens
+                        temperature: responseTemperature,
+                        maximumResponseTokens: responseTokenLimit
                     ) { delta in
                         continuation.yield(delta)
                     }
@@ -863,12 +1006,14 @@ final class LLMService: @unchecked Sendable {
                     // User-initiated cancellation is an expected terminal state.
                 } catch {
                     if !Task.isCancelled {
-                        await self.setLastError(error.localizedDescription)
+                        let recoveryMessage = Self.generationRecoveryMessage(for: error)
+                        await self.setLastError(recoveryMessage)
                         AppDiagnostics.shared.record(
                             "Generation failed",
                             category: "generation",
                             metadata: [
                                 "error": error.localizedDescription,
+                                "recovery": recoveryMessage,
                                 "runtime": InferenceRuntime.appleFoundationModel.rawValue
                             ]
                         )
@@ -880,13 +1025,10 @@ final class LLMService: @unchecked Sendable {
             }
 
             publishGenerationTask(task, generationID: generationID)
-
-            Task { @MainActor [weak self] in
-                self?.isGenerating = true
-                self?.lastError = nil
-                self?.lastGenerationStats = nil
-                startGate.open()
-            }
+            isGenerating = true
+            lastError = nil
+            lastGenerationStats = nil
+            startGate.open()
 
             continuation.onTermination = { @Sendable _ in
                 task.cancel()
@@ -906,6 +1048,9 @@ final class LLMService: @unchecked Sendable {
             instructions.append(taskHint.instructionPrompt)
         }
 
+        if let preferences = PersonalPreferences.instruction() {
+            instructions.append(preferences)
+        }
         return instructions.joined(separator: "\n\n")
     }
 
@@ -915,21 +1060,73 @@ final class LLMService: @unchecked Sendable {
         }
     }
 
+    private static func generationRecoveryMessage(for error: Error) -> String {
+        if let error = error as? AppleFoundationModelRuntimeError {
+            return error.localizedDescription
+        }
+
+        if let error = error as? PromptBudgetError {
+            return error.localizedDescription
+        }
+
+        if let error = error as? LLMServiceError {
+            switch error {
+            case .modelNotLoaded:
+                return "The Qwen model is not loaded. Use Retry to prepare it again."
+            case .processorFailed:
+                return "Yemma could not prepare this request on device. Check the image files and try again."
+            default:
+                return error.localizedDescription
+            }
+        }
+
+        let rawMessage = error.localizedDescription
+        let normalized = rawMessage.lowercased()
+        if normalized.contains("context")
+            || normalized.contains("token") && normalized.contains("length")
+            || normalized.contains("sequence") && normalized.contains("long")
+        {
+            return "This request is too long for the on-device model. Shorten it or start a new chat."
+        }
+
+        if normalized.contains("guardrail")
+            || normalized.contains("safety")
+            || normalized.contains("refus")
+        {
+            return "The on-device model could not complete that request. Try rephrasing it."
+        }
+
+        if normalized.contains("timeout") || normalized.contains("timed out") {
+            return "The on-device model took too long to respond. Try again with a shorter request."
+        }
+
+        return "Yemma could not complete that on-device request. Try again, or reload the model if this continues."
+    }
+
     func stopGeneration() async {
-        let task = takeGenerationTask()
+        let task = withLock { generationTask }
         task?.cancel()
-        // Cancel-and-detach rather than cancel-and-join. The generation task may
-        // be parked inside a slow MLX prefill that only observes cancellation
-        // between tokens, so an unconditional `await task?.result` can block
-        // indefinitely — stalling loadModel/unloadModel which call this first.
-        // Race a bounded join against a timeout and return promptly either way;
-        // the detached task still finalizes itself (resets isGenerating, finishes
-        // its stream continuation) once MLX yields.
+
+        // Do not release generation ownership when the bounded wait expires.
+        // The task remains in generationTask/activeGenerationID until its own
+        // finally path drains, so a new request cannot overlap it.
         if let task {
             await Self.joinOrDetach(task)
+        } else {
+            await MainActor.run {
+                guard !self.hasActiveGeneration() else { return }
+                self.isGenerating = false
+            }
         }
+
         await MainActor.run {
-            isGenerating = false
+            if self.deferredMemoryWarningUnload,
+                !self.isGenerating,
+                self.isModelLoaded,
+                !self.isModelLoading
+            {
+                self.scheduleDeferredMemoryWarningUnload()
+            }
         }
     }
 
@@ -974,7 +1171,7 @@ final class LLMService: @unchecked Sendable {
         // Called from deinit, which is not isolated to the main actor. Only cancel
         // the in-flight generation task here; do not write `isGenerating` (an
         // Observation-tracked property), which must be mutated on the main actor.
-        let task = takeGenerationTask()
+        let task = withLock { generationTask }
         task?.cancel()
     }
 
@@ -991,6 +1188,11 @@ final class LLMService: @unchecked Sendable {
 
     @discardableResult
     func unloadModel() async -> Bool {
+        await unloadModel(reason: .user)
+    }
+
+    @discardableResult
+    private func unloadModel(reason: ModelUnloadReason) async -> Bool {
         await stopGeneration()
         guard await waitForGenerationToDrain() else {
             await setLastError("The current model is still stopping. Try again in a moment.")
@@ -1000,19 +1202,59 @@ final class LLMService: @unchecked Sendable {
             )
             return false
         }
-        withLock {
+
+        let hasPhysicalLoad = withLock {
             modelLoadCoordinator.invalidate()
             modelContainer = nil
             loadedModelPath = nil
+            return modelLoadCoordinator.hasPhysicalLoad
         }
+
         await MainActor.run {
             isModelLoaded = false
-            isModelLoading = false
             isMLXVisionReady = false
             modelLoadStage = .idle
-            lastError = nil
+        }
+
+        let loadDrained = hasPhysicalLoad
+            ? await waitForPhysicalModelLoadToDrain()
+            : true
+        guard loadDrained else {
+            await MainActor.run {
+                isModelLoading = true
+                modelLoadStage = .failed
+                lastError = "The model is still finishing a background load. Try again in a moment."
+            }
+            AppDiagnostics.shared.record(
+                "MLX model unload deferred while physical load drains",
+                category: "model"
+            )
+            return false
+        }
+
+        await MainActor.run {
+            isModelLoading = false
+            switch reason {
+            case .user:
+                modelLoadStage = .idle
+                lastError = nil
+            case .memoryWarning:
+                modelLoadStage = .failed
+                lastError = "Yemma unloaded Qwen3.5 4B to recover memory. Tap Retry to load it again."
+            }
         }
         AppDiagnostics.shared.record("MLX model unloaded", category: "model")
+        return true
+    }
+
+    private func waitForPhysicalModelLoadToDrain() async -> Bool {
+        while withLock({ modelLoadCoordinator.hasPhysicalLoad }) {
+            do {
+                try await Task.sleep(for: .milliseconds(50))
+            } catch {
+                return false
+            }
+        }
         return true
     }
 
@@ -1031,6 +1273,15 @@ final class LLMService: @unchecked Sendable {
         await MainActor.run {
             isGenerating = false
         }
+
+        await MainActor.run {
+            if self.deferredMemoryWarningUnload,
+                self.isModelLoaded,
+                !self.isModelLoading
+            {
+                self.scheduleDeferredMemoryWarningUnload()
+            }
+        }
     }
 
     private func publishLoadFailure(_ error: Error) async {
@@ -1042,13 +1293,15 @@ final class LLMService: @unchecked Sendable {
             isMLXVisionReady = hasLoadedModel
             isModelLoading = false
             modelLoadStage = hasLoadedModel ? .ready : .failed
+            if !hasLoadedModel {
+                deferredMemoryWarningUnload = false
+            }
         }
     }
 
     private func setLastError(_ message: String) async {
         await MainActor.run {
             lastError = message
-            isGenerating = false
         }
     }
 
@@ -1077,6 +1330,92 @@ final class LLMService: @unchecked Sendable {
                 imageURLs: imageURLs
             )
         }
+    }
+
+    static func boundedPromptMessagesForQwen35(
+        history: [PromptMessageInput],
+        prompt: PromptMessageInput,
+        maximumResponseTokens: Int,
+        instructionMessages: [Qwen35ConversationMessage]
+    ) throws -> [Qwen35ConversationMessage] {
+        let currentMessages = promptMessagesForQwen35(from: [prompt])
+        guard !currentMessages.isEmpty else {
+            throw PromptBudgetError.currentPromptTooLong(
+                estimatedTokens: 0,
+                budget: Qwen35PromptBudget.inputTokenBudget(
+                    maximumResponseTokens: maximumResponseTokens
+                )
+            )
+        }
+
+        let currentImageCount = currentMessages.reduce(into: 0) { count, message in
+            count += message.imageURLs.count
+        }
+        guard currentImageCount <= Qwen35PromptBudget.maximumImages else {
+            throw PromptBudgetError.currentImagesTooMany(
+                count: currentImageCount,
+                maximum: Qwen35PromptBudget.maximumImages
+            )
+        }
+
+        let budget = Qwen35PromptBudget.inputTokenBudget(
+            maximumResponseTokens: maximumResponseTokens
+        )
+        let currentTokens = estimatedQwen35InputTokens(
+            messages: currentMessages,
+            instructionMessages: instructionMessages
+        )
+        guard currentTokens <= budget else {
+            let error: PromptBudgetError = currentImageCount == 0
+                ? .currentPromptTooLong(estimatedTokens: currentTokens, budget: budget)
+                : .currentPromptAndImagesTooLarge(estimatedTokens: currentTokens, budget: budget)
+            throw error
+        }
+
+        var bounded = currentMessages
+        let historyMessages = promptMessagesForQwen35(from: history)
+
+        for message in historyMessages.reversed() {
+            let candidateImageCount = message.imageURLs.count
+            let totalImageCount = bounded.reduce(into: 0) { count, item in
+                count += item.imageURLs.count
+            } + candidateImageCount
+            guard totalImageCount <= Qwen35PromptBudget.maximumImages else {
+                continue
+            }
+
+            let candidate = [message] + bounded
+            let candidateTokens = estimatedQwen35InputTokens(
+                messages: candidate,
+                instructionMessages: instructionMessages
+            )
+            guard candidateTokens <= budget else {
+                break
+            }
+            bounded = candidate
+        }
+
+        return bounded
+    }
+
+    private static func estimatedQwen35InputTokens(
+        messages: [Qwen35ConversationMessage],
+        instructionMessages: [Qwen35ConversationMessage]
+    ) -> Int {
+        let systemMessages = instructionMessages
+            + messages.filter { Self.chatRole(for: $0.role) == .system }
+        let systemText = systemMessages.map(\.content).joined(separator: "\n\n")
+        let systemTokens = PromptTokenEstimator.estimate(systemText)
+            + Qwen35PromptBudget.messageOverheadTokens
+        let conversationTokens = messages
+            .filter { Self.chatRole(for: $0.role) != .system }
+            .reduce(0) { total, message in
+                total + Qwen35PromptBudget.messageTokenCost(
+                    content: message.content,
+                    imageCount: message.imageURLs.count
+                )
+            }
+        return systemTokens + conversationTokens
     }
 
 }
@@ -1185,6 +1524,9 @@ extension LLMService {
             )
         }
 
+        if let preferences = PersonalPreferences.instruction() {
+            instructionMessages.append(Qwen35ConversationMessage(role: "developer", content: preferences, imageURLs: []))
+        }
         return instructionMessages
     }
 
@@ -1205,12 +1547,8 @@ extension LLMService {
         return body()
     }
 
-    func takeGenerationTask() -> Task<Void, Never>? {
-        withLock {
-            let task = generationTask
-            generationTask = nil
-            return task
-        }
+    func hasActiveGeneration() -> Bool {
+        withLock { activeGenerationID != nil }
     }
 
     func publishGenerationTask(_ task: Task<Void, Never>, generationID: UUID) {
@@ -1220,6 +1558,7 @@ extension LLMService {
         }
     }
 
+    @MainActor
     func makeSimulatorStream(prompt: PromptMessageInput, history: [PromptMessageInput]) -> AsyncStream<String> {
         let transcriptCount = history.count + 1
         let response = Self.simulatorResponse(
@@ -1230,8 +1569,13 @@ extension LLMService {
 
         return AsyncStream { continuation in
             let startGate = GenerationStartGate()
-            let task = Task { [weak self] in
-                await startGate.wait()
+            let task = Task.detached(priority: .userInitiated) { [weak self] in
+                guard await startGate.wait() else {
+                    await self?.finishGeneration(generationID: generationID)
+                    continuation.finish()
+                    return
+                }
+
                 for chunk in response.map(String.init) {
                     if Task.isCancelled {
                         break
@@ -1246,13 +1590,10 @@ extension LLMService {
             }
 
             publishGenerationTask(task, generationID: generationID)
-
-            Task { @MainActor [weak self] in
-                self?.isGenerating = true
-                self?.lastError = nil
-                self?.lastGenerationStats = nil
-                startGate.open()
-            }
+            isGenerating = true
+            lastError = nil
+            lastGenerationStats = nil
+            startGate.open()
 
             continuation.onTermination = { @Sendable _ in
                 task.cancel()

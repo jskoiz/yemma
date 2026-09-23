@@ -47,12 +47,15 @@ final class ConversationStoreTests: XCTestCase {
         try fixture.fileManager.createDirectory(at: legacy, withIntermediateDirectories: true)
         let original = legacy.appendingPathComponent("photo.jpg")
         try Data([4]).write(to: original)
-        let id = try fixture.makeStore().saveConversation(
+        // Saving now loads the index and attempts migration too, so inject the
+        // migration failure before the initial save, not just before restore.
+        let manager = FailingAttachmentFileManager()
+        manager.blockedMove = original
+        let seedStore = ConversationStore(fileManager: manager, defaults: fixture.defaults, storageRootOverride: fixture.storageRoot)
+        let id = try seedStore.saveConversation(
             id: nil, messages: [], draftText: "Draft",
             draftAttachments: [Attachment(id: "photo", url: original, type: .image)]
         )
-        let manager = FailingAttachmentFileManager()
-        manager.blockedMove = original
         let store = ConversationStore(fileManager: manager, defaults: fixture.defaults, storageRootOverride: fixture.storageRoot)
         let snapshot = store.loadConversation(id: id)
         XCTAssertEqual(snapshot?.draftAttachments.first?.full, original)
@@ -127,7 +130,9 @@ final class ConversationStoreTests: XCTestCase {
             .compactMap { UUID(uuidString: $0.lastPathComponent) }
         XCTAssertEqual(ids.count, 1)
         XCTAssertNil(restarted.currentConversationID)
-        XCTAssertTrue(restarted.conversations.isEmpty)
+        // The index barrier recovers the previously written conversation file
+        // even when the index destination remains unwritable.
+        XCTAssertEqual(restarted.conversations.map(\.id), ids)
         try fixture.fileManager.removeItem(at: index)
         let recovered = fixture.makeStore()
         let id = try recovered.ensureCurrentConversation()
@@ -169,6 +174,159 @@ final class ConversationStoreTests: XCTestCase {
             id: id, messages: [makeMessage(text: "Changed")], draftText: "", draftAttachments: []
         ))
         XCTAssertEqual(store.conversations.first?.title, "Original")
+    }
+
+    func testSaveBeforeIndexLoadReconcilesExistingConversationMetadata() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanUp() }
+
+        let firstStore = fixture.makeStore()
+        let existingID = try firstStore.saveConversation(
+            id: nil,
+            messages: [makeMessage(text: "Existing chat")],
+            draftText: "",
+            draftAttachments: []
+        )
+
+        let secondStore = fixture.makeStore()
+        let newID = UUID()
+        _ = try await secondStore.saveConversationAsync(
+            id: newID,
+            messages: [makeMessage(text: "New chat")],
+            draftText: "",
+            draftAttachments: []
+        )
+        await secondStore.loadIndexIfNeeded()
+
+        XCTAssertEqual(Set(secondStore.conversations.map(\.id)), Set([existingID, newID]))
+        XCTAssertNotNil(secondStore.loadConversation(id: existingID))
+        XCTAssertNotNil(secondStore.loadConversation(id: newID))
+    }
+
+    func testCorruptConversationPayloadProducesExplicitLoadError() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanUp() }
+
+        let requestedID = UUID()
+        let payloadID = UUID()
+        let directory = fixture.storageRoot.appendingPathComponent(requestedID.uuidString, isDirectory: true)
+        try fixture.fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        let payload: [String: Any] = [
+            "id": payloadID.uuidString,
+            "title": "Wrong payload",
+            "createdAt": "2023-11-14T22:13:20Z",
+            "updatedAt": "2023-11-14T22:13:20Z",
+            "messages": [],
+            "draftText": "",
+            "draftAttachments": [],
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
+        try data.write(to: directory.appendingPathComponent("conversation.json"))
+
+        do {
+            _ = try await fixture.makeStore().loadConversationAsyncThrowing(id: requestedID)
+            XCTFail("A payload ID mismatch must not be treated as a new conversation.")
+        } catch let error as ConversationStoreError {
+            guard case let .corruptConversation(requested, payload, _) = error else {
+                return XCTFail("Unexpected store error: \(error)")
+            }
+            XCTAssertEqual(requested, requestedID)
+            XCTAssertEqual(payload, payloadID)
+        }
+    }
+
+    func testFailedConversationDeletionRetainsMetadataAndRetriesCleanup() throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanUp() }
+
+        let manager = FailingAttachmentFileManager()
+        let attachmentDirectory = try ConversationAttachmentStore.prepareDirectory(
+            fileManager: manager,
+            baseDirectoryOverride: fixture.storageRoot
+        )
+        let attachmentURL = attachmentDirectory.appendingPathComponent("retry.png")
+        try Data([1, 2, 3]).write(to: attachmentURL)
+        let store = ConversationStore(
+            fileManager: manager,
+            defaults: fixture.defaults,
+            storageRootOverride: fixture.storageRoot
+        )
+        let id = try store.saveConversation(
+            id: nil,
+            messages: [ChatMessage(id: "message", user: .user, attachments: [Attachment(id: "image", url: attachmentURL, type: .image)])],
+            draftText: "",
+            draftAttachments: []
+        )
+
+        manager.blockedRemoval = attachmentURL
+        XCTAssertEqual(store.deleteConversations(ids: [id]), 0)
+        XCTAssertTrue(store.conversations.contains(where: { $0.id == id }))
+        XCTAssertNotNil(store.conversationDeletionError)
+        XCTAssertTrue(fixture.fileManager.fileExists(atPath: attachmentURL.path))
+
+        manager.blockedRemoval = nil
+        XCTAssertEqual(store.deleteConversations(ids: [id]), 1)
+        XCTAssertFalse(store.conversations.contains(where: { $0.id == id }))
+        XCTAssertFalse(fixture.fileManager.fileExists(atPath: attachmentURL.path))
+    }
+
+    func testLateAsyncSaveCannotResurrectDeletedConversation() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanUp() }
+
+        let store = fixture.makeStore()
+        let id = try store.saveConversation(
+            id: nil,
+            messages: [makeMessage(text: "Before delete")],
+            draftText: "",
+            draftAttachments: []
+        )
+        let lateSave = Task {
+            try? await store.saveConversationAsync(
+                id: id,
+                messages: [makeMessage(text: "Late write")],
+                draftText: "",
+                draftAttachments: []
+            )
+        }
+
+        XCTAssertTrue(store.deleteConversation(id: id))
+        _ = await lateSave.value
+
+        XCTAssertFalse(store.canSaveConversation(id: id))
+        XCTAssertNil(store.loadConversation(id: id))
+        XCTAssertFalse(fixture.fileManager.fileExists(
+            atPath: fixture.storageRoot
+                .appendingPathComponent(id.uuidString, isDirectory: true)
+                .path
+        ))
+    }
+
+    func testConversationFilesAreExcludedFromBackupIncludingExistingAttachment() throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanUp() }
+
+        let attachmentDirectory = try ConversationAttachmentStore.prepareDirectory(
+            baseDirectoryOverride: fixture.storageRoot
+        )
+        let attachmentURL = attachmentDirectory.appendingPathComponent("private.png")
+        try Data([9, 8, 7]).write(to: attachmentURL)
+        let id = try fixture.makeStore().saveConversation(
+            id: nil,
+            messages: [ChatMessage(id: "message", user: .user, attachments: [Attachment(id: "image", url: attachmentURL, type: .image)])],
+            draftText: "",
+            draftAttachments: []
+        )
+
+        let conversationURL = fixture.storageRoot
+            .appendingPathComponent(id.uuidString, isDirectory: true)
+            .appendingPathComponent("conversation.json")
+        let urls = [fixture.storageRoot.appendingPathComponent("index.json"), conversationURL, attachmentURL]
+        let values = try urls.map { try $0.resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup }
+        guard values.allSatisfy({ $0 != nil }) else {
+            throw XCTSkip("This filesystem did not report backup-exclusion resource values.")
+        }
+        XCTAssertTrue(values.allSatisfy { $0 == true })
     }
 
     func testLegacyAttachmentMigrationPreservesImageAndResolvesSavedURL() async throws {
@@ -498,7 +656,7 @@ final class ConversationStoreTests: XCTestCase {
     }
 }
 
-private final class FailingAttachmentFileManager: FileManager, @unchecked Sendable {
+private final class FailingAttachmentFileManager: FileManager {
     var blockedMove: URL?
     var blockedRemoval: URL?
 

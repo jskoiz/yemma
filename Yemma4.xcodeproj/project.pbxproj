@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+U1000001 = {isa = PBXBuildFile; fileRef = U1000002; };
 		ABCD0011 /* Fixtures in Resources */ = {isa = PBXBuildFile; fileRef = ABCD0012 /* Fixtures */; };
 		A1000001 /* RichMessageText.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000002 /* RichMessageText.swift */; };
 		A1000003 /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = A1000005 /* MarkdownUI */; };
@@ -63,9 +64,25 @@
 		B74400F1CD903CB4036D1EAD /* ChatPreviews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 093343F714720EF797FF7B45 /* ChatPreviews.swift */; };
 		9585CA550B85CE1F30C961F2 /* ChatNavigationShell.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1B77AA568F5164C9940ED0A /* ChatNavigationShell.swift */; };
 		F0AEC40C2C878BCEC10A854D /* ChatChrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = A46F14C5CA565E5449C0D884 /* ChatChrome.swift */; };
+		C2B50728E4CDB6E0A27137BD /* ChatLibraryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39BB18AE903593E950999273 /* ChatLibraryStore.swift */; };
+		B98C9611F1CB97130B6D01A5 /* ChatSpeechReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 084DECEE0AB2A472C4316C1D /* ChatSpeechReader.swift */; };
+		937AC81F59AA84299AA62504 /* PersonalPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABE0698EEBAFEAC2C3EE7B28 /* PersonalPreferences.swift */; };
+		1710ED9EC95B9626B36286CC /* PromptRevision.swift in Sources */ = {isa = PBXBuildFile; fileRef = F992F32AC497DBB8EE4AF316 /* PromptRevision.swift */; };
+		E94C44CE317C085B6A7610EE /* AboutYemmaSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2120ADD1235F7D6F3B2177D /* AboutYemmaSheet.swift */; };
+		FF14EEEC3406A18678B3BBB8 /* AppPrivacyShield.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A41FBFF25C86350541B7303 /* AppPrivacyShield.swift */; };
+		06F1EA3F397939F965C75341 /* ChatLibrarySheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FB4943E7F94807EB9D94C5C /* ChatLibrarySheet.swift */; };
+		3ACB71035185449A4BD0DF9F /* EditPromptSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91645DBC007213E45CA14C57 /* EditPromptSheet.swift */; };
+		22AFE7945DA785F4BB6324A3 /* PersonalPreferencesSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A930CEE2BB65462EAAE3FCF /* PersonalPreferencesSheet.swift */; };
+		4793D73DEDB0C0026384F92F /* ScanTextSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F91814F5F0B922C58ACE644 /* ScanTextSheet.swift */; };
+		2908B49E75001D1582182BA4 /* TaskInputSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2AEDFF0BD5EF13215547C639 /* TaskInputSheet.swift */; };
+		19398F4684AFA983BDC83601 /* ChatFeatureControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8E6BBC2B2F9C70EF6263E36 /* ChatFeatureControls.swift */; };
+		EDFB6093B96333722BD519B8 /* EverydayFeaturesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D47F19BDA17D35167993E0C /* EverydayFeaturesTests.swift */; };
+		426177E04B56C5FC10AA7B1E /* EverydayJourneyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF54E2D7CB8B2B11C508893E /* EverydayJourneyTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+U1000002 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatJourneyTests.swift; sourceTree = "<group>"; };
+U1000003 = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = Yemma4UITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		ABCD0012 /* Fixtures */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Fixtures; sourceTree = "<group>"; };
 		11FB93FF040AF083B453837C /* ModelDownloader.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ModelDownloader.swift; sourceTree = "<group>"; };
 		39C187E5F33C4B9C302E7029 /* Yemma4.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = Yemma4.entitlements; sourceTree = "<group>"; };
@@ -119,9 +136,24 @@
 		093343F714720EF797FF7B45 /* ChatPreviews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatPreviews.swift; sourceTree = "<group>"; };
 		B1B77AA568F5164C9940ED0A /* ChatNavigationShell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatNavigationShell.swift; sourceTree = "<group>"; };
 		A46F14C5CA565E5449C0D884 /* ChatChrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatChrome.swift; sourceTree = "<group>"; };
+		39BB18AE903593E950999273 /* ChatLibraryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Yemma4/Services/ChatLibraryStore.swift"; sourceTree = SOURCE_ROOT; };
+		084DECEE0AB2A472C4316C1D /* ChatSpeechReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Yemma4/Services/ChatSpeechReader.swift"; sourceTree = SOURCE_ROOT; };
+		ABE0698EEBAFEAC2C3EE7B28 /* PersonalPreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Yemma4/Services/PersonalPreferences.swift"; sourceTree = SOURCE_ROOT; };
+		F992F32AC497DBB8EE4AF316 /* PromptRevision.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Yemma4/Services/PromptRevision.swift"; sourceTree = SOURCE_ROOT; };
+		A2120ADD1235F7D6F3B2177D /* AboutYemmaSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Yemma4/Views/AboutYemmaSheet.swift"; sourceTree = SOURCE_ROOT; };
+		0A41FBFF25C86350541B7303 /* AppPrivacyShield.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Yemma4/Views/AppPrivacyShield.swift"; sourceTree = SOURCE_ROOT; };
+		5FB4943E7F94807EB9D94C5C /* ChatLibrarySheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Yemma4/Views/ChatLibrarySheet.swift"; sourceTree = SOURCE_ROOT; };
+		91645DBC007213E45CA14C57 /* EditPromptSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Yemma4/Views/EditPromptSheet.swift"; sourceTree = SOURCE_ROOT; };
+		3A930CEE2BB65462EAAE3FCF /* PersonalPreferencesSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Yemma4/Views/PersonalPreferencesSheet.swift"; sourceTree = SOURCE_ROOT; };
+		8F91814F5F0B922C58ACE644 /* ScanTextSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Yemma4/Views/ScanTextSheet.swift"; sourceTree = SOURCE_ROOT; };
+		2AEDFF0BD5EF13215547C639 /* TaskInputSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Yemma4/Views/TaskInputSheet.swift"; sourceTree = SOURCE_ROOT; };
+		D8E6BBC2B2F9C70EF6263E36 /* ChatFeatureControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Yemma4/Views/Chat/ChatFeatureControls.swift"; sourceTree = SOURCE_ROOT; };
+		1D47F19BDA17D35167993E0C /* EverydayFeaturesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Tests/Yemma4Tests/EverydayFeaturesTests.swift"; sourceTree = SOURCE_ROOT; };
+		FF54E2D7CB8B2B11C508893E /* EverydayJourneyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Tests/Yemma4UITests/EverydayJourneyTests.swift"; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
+U1000008 = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 		B10000008 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -145,10 +177,13 @@
 	/* End PBXFrameworksBuildPhase section */
 
 	/* Begin PBXGroup section */
+U1000004 = {isa = PBXGroup; children = (
+				FF54E2D7CB8B2B11C508893E /* EverydayJourneyTests.swift */,U1000002,); path = Yemma4UITests; sourceTree = "<group>"; };
 		T200000F /* Tests */ = {
 			isa = PBXGroup;
 			children = (
 				T2000010 /* Yemma4Tests */,
+                U1000004 /* Yemma4UITests */,
 			);
 			path = Tests;
 			sourceTree = "<group>";
@@ -156,6 +191,7 @@
 		T2000010 /* Yemma4Tests */ = {
 			isa = PBXGroup;
 			children = (
+				1D47F19BDA17D35167993E0C /* EverydayFeaturesTests.swift */,
 				ABCD0012 /* Fixtures */,
 				T2000002 /* ConversationStoreTests.swift */,
 				T2000004 /* Qwen35AssetContractTests.swift */,
@@ -170,6 +206,7 @@
 		D400000B /* Chat */ = {
 			isa = PBXGroup;
 			children = (
+				D8E6BBC2B2F9C70EF6263E36 /* ChatFeatureControls.swift */,
 				D4000002 /* ChatComposerView.swift */,
 				A46F14C5CA565E5449C0D884 /* ChatChrome.swift */,
 				B1B77AA568F5164C9940ED0A /* ChatNavigationShell.swift */,
@@ -186,6 +223,13 @@
 		54934DF62416A306B1C5304E /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				2AEDFF0BD5EF13215547C639 /* TaskInputSheet.swift */,
+				8F91814F5F0B922C58ACE644 /* ScanTextSheet.swift */,
+				3A930CEE2BB65462EAAE3FCF /* PersonalPreferencesSheet.swift */,
+				91645DBC007213E45CA14C57 /* EditPromptSheet.swift */,
+				5FB4943E7F94807EB9D94C5C /* ChatLibrarySheet.swift */,
+				0A41FBFF25C86350541B7303 /* AppPrivacyShield.swift */,
+				A2120ADD1235F7D6F3B2177D /* AboutYemmaSheet.swift */,
 				A2000002 /* AdvancedSettingsView.swift */,
 				FE484C3E95FF6F044B7B7BC4 /* ChatView.swift */,
 				D400000B /* Chat */,
@@ -211,6 +255,7 @@
 			children = (
 				B10000007 /* Yemma4.app */,
 				T200000D /* Yemma4Tests.xctest */,
+                U1000003 /* Yemma4UITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -245,6 +290,10 @@
 		CE67C04D23A2513EC55AA96D /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				F992F32AC497DBB8EE4AF316 /* PromptRevision.swift */,
+				ABE0698EEBAFEAC2C3EE7B28 /* PersonalPreferences.swift */,
+				084DECEE0AB2A472C4316C1D /* ChatSpeechReader.swift */,
+				39BB18AE903593E950999273 /* ChatLibraryStore.swift */,
 				8AA2B0C22D410A8900E8C001 /* AppDiagnostics.swift */,
 				A3000002 /* AppleFoundationModelRuntime.swift */,
 				F1000002 /* BackgroundModelDownloadCoordinator.swift */,
@@ -281,6 +330,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXNativeTarget section */
+U1000005 = {isa = PBXNativeTarget; buildConfigurationList = U1000006; buildPhases = (U1000007,U1000008,U1000009,); buildRules = (); dependencies = (U100000A,); name = Yemma4UITests; productName = Yemma4UITests; productReference = U1000003; productType = "com.apple.product-type.bundle.ui-testing"; };
 		B1000000C /* Yemma4 */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = B1000000D /* Build configuration list for PBXNativeTarget "Yemma4" */;
@@ -364,11 +414,13 @@
 			targets = (
 				B1000000C /* Yemma4 */,
 				T2000012 /* Yemma4Tests */,
+                U1000005 /* Yemma4UITests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+U1000009 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 		B1000000F /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -390,10 +442,24 @@
 	/* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+U1000007 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (
+				426177E04B56C5FC10AA7B1E /* EverydayJourneyTests.swift in Sources */,U1000001,); runOnlyForDeploymentPostprocessing = 0; };
 		B1000000E /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				19398F4684AFA983BDC83601 /* ChatFeatureControls.swift in Sources */,
+				2908B49E75001D1582182BA4 /* TaskInputSheet.swift in Sources */,
+				4793D73DEDB0C0026384F92F /* ScanTextSheet.swift in Sources */,
+				22AFE7945DA785F4BB6324A3 /* PersonalPreferencesSheet.swift in Sources */,
+				3ACB71035185449A4BD0DF9F /* EditPromptSheet.swift in Sources */,
+				06F1EA3F397939F965C75341 /* ChatLibrarySheet.swift in Sources */,
+				FF14EEEC3406A18678B3BBB8 /* AppPrivacyShield.swift in Sources */,
+				E94C44CE317C085B6A7610EE /* AboutYemmaSheet.swift in Sources */,
+				1710ED9EC95B9626B36286CC /* PromptRevision.swift in Sources */,
+				937AC81F59AA84299AA62504 /* PersonalPreferences.swift in Sources */,
+				B98C9611F1CB97130B6D01A5 /* ChatSpeechReader.swift in Sources */,
+				C2B50728E4CDB6E0A27137BD /* ChatLibraryStore.swift in Sources */,
 				B10000016 /* Appearance.swift in Sources */,
 				B10000001 /* Yemma4App.swift in Sources */,
 				F1000003 /* Yemma4AppDelegate.swift in Sources */,
@@ -440,6 +506,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				EDFB6093B96333722BD519B8 /* EverydayFeaturesTests.swift in Sources */,
 				T2000001 /* ConversationStoreTests.swift in Sources */,
 				T2000003 /* Qwen35AssetContractTests.swift in Sources */,
 				T2000005 /* ModelDownloadIntegrityTests.swift in Sources */,
@@ -452,6 +519,7 @@
 	/* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+U100000A = {isa = PBXTargetDependency; target = B1000000C; targetProxy = T2000011; };
 		T2000016 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = B1000000C /* Yemma4 */;
@@ -460,6 +528,8 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+U100000B = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_STYLE = Automatic; DEVELOPMENT_TEAM = H8PYU9TN9X; GENERATE_INFOPLIST_FILE = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0; PRODUCT_BUNDLE_IDENTIFIER = com.avmillabs.yemma4UITests; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; TEST_TARGET_NAME = Yemma4; }; name = Debug; };
+U100000C = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_STYLE = Automatic; DEVELOPMENT_TEAM = H8PYU9TN9X; GENERATE_INFOPLIST_FILE = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0; PRODUCT_BUNDLE_IDENTIFIER = com.avmillabs.yemma4UITests; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; TEST_TARGET_NAME = Yemma4; }; name = Release; };
 		B10000012 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -601,7 +671,8 @@
 					"$(inherited)",
 				);
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
-				INFOPLIST_KEY_NSCameraUsageDescription = "Yemma uses the camera so you can capture photos to include in conversations.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Yemma uses the camera to scan text locally for your chat.";
+				INFOPLIST_KEY_NSFaceIDUsageDescription = "Use Face ID to unlock your private Yemma conversations.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Yemma saves generated and selected images to your photo library when you ask it to.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Yemma uses your photo library so you can attach existing images to conversations.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -645,7 +716,8 @@
 					"$(inherited)",
 				);
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
-				INFOPLIST_KEY_NSCameraUsageDescription = "Yemma uses the camera so you can capture photos to include in conversations.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Yemma uses the camera to scan text locally for your chat.";
+				INFOPLIST_KEY_NSFaceIDUsageDescription = "Use Face ID to unlock your private Yemma conversations.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Yemma saves generated and selected images to your photo library when you ask it to.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Yemma uses your photo library so you can attach existing images to conversations.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -722,6 +794,7 @@
 	/* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+U1000006 = {isa = XCConfigurationList; buildConfigurations = (U100000B,U100000C,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
 		B1000000D /* Build configuration list for PBXNativeTarget "Yemma4" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

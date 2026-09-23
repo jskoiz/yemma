@@ -1,4 +1,6 @@
 import Foundation
+import CoreTransferable
+import UniformTypeIdentifiers
 import PhotosUI
 import SwiftUI
 import ImageIO
@@ -74,25 +76,40 @@ enum ChatAttachmentImagePipeline {
 
 extension ChatAttachmentImagePipeline {
     static func makeAttachment(from item: PhotosPickerItem) async throws -> Attachment? {
-        guard let data = try await item.loadTransferable(type: Data.self) else {
-            return nil
-        }
-
-#if canImport(UIKit)
-        return try await Task.detached(priority: .userInitiated) {
+        guard let imported = try await item.loadTransferable(type: ImportedPhoto.self) else { return nil }
+        defer { try? FileManager.default.removeItem(at: imported.url) }
+        try Task.checkCancellation()
+        let attachment = try await Task.detached(priority: .userInitiated) {
             try autoreleasepool {
-                let encodedImage = try ChatAttachmentImagePipeline.encodedModelImage(from: data)
-                let fileURL = try Self.storeAttachmentData(
-                    encodedImage.data,
-                    fileExtension: encodedImage.fileExtension
-                )
+                let size = try imported.url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+                guard size > 0, size <= 100 * 1_024 * 1_024,
+                      let source = CGImageSourceCreateWithURL(imported.url as CFURL, nil),
+                      let image = downsampledCGImage(from: source, maxPixelDimension: modelInputMaxPixelDimension),
+                      let data = UIImage(cgImage: image).jpegData(compressionQuality: 0.9) else {
+                    throw CocoaError(.fileReadCorruptFile)
+                }
+                let fileURL = try Self.storeAttachmentData(data, fileExtension: "jpg")
                 return Attachment(id: UUID().uuidString, url: fileURL, type: .image)
             }
         }.value
-#else
-        let fileURL = try Self.storeAttachmentData(data, fileExtension: "bin")
-        return Attachment(id: UUID().uuidString, url: fileURL, type: .image)
-#endif
+        if Task.isCancelled {
+            try? FileManager.default.removeItem(at: attachment.full)
+            throw CancellationError()
+        }
+        return attachment
+    }
+
+    private struct ImportedPhoto: Transferable, Sendable {
+        let url: URL
+
+        static var transferRepresentation: some TransferRepresentation {
+            FileRepresentation(importedContentType: .image) { received in
+                let target = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("yemma-photo-\(UUID().uuidString)")
+                try FileManager.default.copyItem(at: received.file, to: target)
+                return Self(url: target)
+            }
+        }
     }
 
     nonisolated private static func storeAttachmentData(_ data: Data, fileExtension: String) throws -> URL {

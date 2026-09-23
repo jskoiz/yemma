@@ -17,7 +17,9 @@ struct ChatSidebarView: View {
     let onRunDebugScenario: ((DebugInferenceScenario) -> Void)?
     let onOpenArchive: () -> Void
     let onClose: () -> Void
+    var onReloadModel: (() -> Void)? = nil
 
+    @State private var modelActionError: String?
     @State private var renameConversation: ConversationMetadata?
     @State private var renameTitle = ""
     @State private var deleteConversation: ConversationMetadata?
@@ -64,6 +66,11 @@ struct ChatSidebarView: View {
                     .padding(.bottom, 12)
             }
         }
+        .alert("Model action failed", isPresented: Binding(get: { modelActionError != nil }, set: { if !$0 { modelActionError = nil } })) {
+            Button("OK", role: .cancel) { modelActionError = nil }
+        } message: {
+            Text(modelActionError ?? "Please try again.")
+        }
         .task {
             await conversationStore.loadIndexIfNeeded()
         }
@@ -75,9 +82,15 @@ struct ChatSidebarView: View {
             Button("Delete Model", role: .destructive) {
                 Task {
                     if llmService.selectedRuntime == .qwen35 {
-                        guard await llmService.unloadModel() else { return }
+                        guard await llmService.unloadModel() else {
+                            modelActionError = llmService.lastError ?? "The model is still stopping. Try again shortly."
+                            return
+                        }
                     }
-                    guard await modelDownloader.deleteModel() else { return }
+                    guard await modelDownloader.deleteModel() else {
+                        modelActionError = modelDownloader.modelDeletionError ?? "The model files could not be deleted. Try again."
+                        return
+                    }
                     if llmService.selectedRuntime == .qwen35 {
                         onShowOnboarding()
                     }
@@ -99,11 +112,19 @@ struct ChatSidebarView: View {
         } message: {
             Text("This removes saved local chats, drafts, and attached images on this iPhone.")
         }
+        .alert("Chat Could Not Be Deleted", isPresented: Binding(
+            get: { conversationStore.conversationDeletionError != nil },
+            set: { if !$0 { conversationStore.conversationDeletionError = nil } }
+        )) {
+            Button("OK", role: .cancel) { conversationStore.conversationDeletionError = nil }
+        } message: {
+            Text(conversationStore.conversationDeletionError ?? "Please try again.")
+        }
         .alert("History Could Not Be Deleted", isPresented: Binding(
             get: { conversationStore.historyDeletionError != nil },
             set: { if !$0 { conversationStore.historyDeletionError = nil } }
         )) {
-            Button("Try Again") { conversationStore.deleteAllConversations() }
+            Button("OK") { conversationStore.historyDeletionError = nil }
             Button("Cancel", role: .cancel) { conversationStore.historyDeletionError = nil }
         } message: {
             Text(conversationStore.historyDeletionError ?? "Please try deleting again.")
@@ -173,22 +194,8 @@ struct ChatSidebarView: View {
 
             Spacer(minLength: 0)
 
-            ZStack {
-                Circle()
-                    .fill(AppTheme.controlFill)
+            CircleIconButton(systemName: "xmark", action: onClose)
 
-                Circle()
-                    .stroke(AppTheme.controlBorder, lineWidth: 1)
-
-                Image(systemName: "xmark")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(AppTheme.textPrimary)
-            }
-            .frame(width: 48, height: 48)
-            .contentShape(Rectangle())
-            .onTapGesture(perform: onClose)
-            .accessibilityElement()
-            .accessibilityAddTraits(.isButton)
             .accessibilityLabel("Close sidebar")
             .accessibilityHint("Returns to the chat.")
         }
@@ -200,7 +207,7 @@ struct ChatSidebarView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     rowHeader(title: "Response style", detail: llmService.activeResponseStyleTitle)
 
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 90), spacing: 8)], spacing: 8) {
+                    EqualControlRow() {
                         ForEach(ResponseStylePreset.allCases) { preset in
                             responseStyleChip(preset)
                         }
@@ -408,11 +415,13 @@ struct ChatSidebarView: View {
             )
         } label: {
             Text(preset.title)
-                .font(.system(size: 13, weight: .semibold))
+                .font(.subheadline.weight(.semibold))
+                .fixedSize(horizontal: false, vertical: true)
                 .foregroundStyle(isSelected ? AppTheme.accentForeground : AppTheme.textPrimary)
                 .frame(maxWidth: .infinity)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 10)
+                .frame(minHeight: AppTheme.Layout.minimumControlSize, maxHeight: .infinity)
                 .background(isSelected ? AppTheme.accent : AppTheme.controlFill)
                 .clipShape(Capsule())
                 .overlay(
@@ -421,6 +430,7 @@ struct ChatSidebarView: View {
                 )
         }
         .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
     private var selectedResponseStyleSummary: String {
@@ -430,6 +440,7 @@ struct ChatSidebarView: View {
     private var advancedRow: some View {
         NavigationLink {
             AdvancedSettingsView(
+                onReloadModel: onReloadModel,
                 onShowSetupPage: onShowOnboarding,
                 onRunDebugScenario: onRunDebugScenario
             )
@@ -437,11 +448,11 @@ struct ChatSidebarView: View {
             actionRow(
                 icon: "gearshape.2",
                 title: "Advanced",
-                subtitle: "Model controls, setup, diagnostics, and debug tools."
+                subtitle: "Model health, controls, setup, and diagnostics."
             )
         }
         .buttonStyle(.plain)
-        .accessibilityHint("Opens advanced model controls, setup, diagnostics, and debug tools.")
+        .accessibilityHint("Opens model health, controls, setup, and diagnostics.")
     }
 
     private var trustRow: some View {
@@ -509,7 +520,7 @@ struct ChatSidebarView: View {
             Image(systemName: "ellipsis.circle")
                 .font(.system(size: 18, weight: .semibold))
                 .foregroundStyle(AppTheme.textSecondary)
-                .frame(width: 32, height: 32)
+                .frame(width: AppTheme.Layout.minimumControlSize, height: AppTheme.Layout.minimumControlSize)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -549,6 +560,7 @@ struct ChatSidebarView: View {
                     Text(Self.relativeDateText(for: metadata.updatedAt))
                     Text("·")
                     Text("\(metadata.messageCount) \(metadata.messageCount == 1 ? "message" : "messages")")
+                        .lineLimit(1)
                 }
                 .font(AppTheme.Typography.utilityCaption)
                 .foregroundStyle(AppTheme.textTertiary)
@@ -602,6 +614,8 @@ struct ChatSidebarView: View {
                     .foregroundStyle(AppTheme.textPrimary)
 
                 Text(subtitle)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .multilineTextAlignment(.leading)
                     .font(AppTheme.Typography.utilityRowDetail)
                     .foregroundStyle(AppTheme.textSecondary)
             }
@@ -613,43 +627,7 @@ struct ChatSidebarView: View {
     }
 
     private func infoRow(icon: String, title: String, detail: String) -> some View {
-        ViewThatFits(in: .vertical) {
-            HStack(spacing: 14) {
-                Image(systemName: icon)
-                    .frame(width: AppTheme.Layout.rowIconSize)
-                    .foregroundStyle(AppTheme.textPrimary)
-
-                Text(title)
-                    .font(AppTheme.Typography.utilityRowTitle)
-                    .foregroundStyle(AppTheme.textPrimary)
-
-                Spacer()
-
-                Text(detail)
-                    .font(AppTheme.Typography.utilityRowDetail)
-                    .foregroundStyle(AppTheme.textSecondary)
-                    .multilineTextAlignment(.trailing)
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 14) {
-                    Image(systemName: icon)
-                        .frame(width: AppTheme.Layout.rowIconSize)
-                        .foregroundStyle(AppTheme.textPrimary)
-
-                    Text(title)
-                        .font(AppTheme.Typography.utilityRowTitle)
-                        .foregroundStyle(AppTheme.textPrimary)
-                }
-
-                Text(detail)
-                    .font(AppTheme.Typography.utilityRowDetail)
-                    .foregroundStyle(AppTheme.textSecondary)
-                    .padding(.leading, AppTheme.Layout.rowIconSize + 14)
-            }
-        }
-        .utilityRowPadding()
-        .accessibilityElement(children: .combine)
+        UtilityValueRow(icon: icon, title: title, detail: detail)
     }
 
     private func destructiveRow(
@@ -720,7 +698,8 @@ struct ChatSidebarView: View {
 
     private func statusChip(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 11, weight: .semibold))
+            .font(.caption2.weight(.semibold))
+            .fixedSize()
             .foregroundStyle(AppTheme.accent)
             .padding(.horizontal, 8)
             .padding(.vertical, 4)

@@ -131,6 +131,7 @@ public struct Yemma4App: App {
     @State private var modelDownloader: ModelDownloader
     @State private var llmService: LLMService
     @State private var conversationStore: ConversationStore
+    @State private var privacyController = AppPrivacyController()
 
     public static let bundleIdentifier = Yemma4AppConfiguration.bundleIdentifier
 
@@ -161,7 +162,25 @@ public struct Yemma4App: App {
             metadata: ["elapsedMs": StartupTiming.elapsedMs()]
         )
 
-        let conversationStore = ConversationStore()
+        let conversationStore: ConversationStore
+#if DEBUG && targetEnvironment(simulator)
+        if let rawSession = ProcessInfo.processInfo.environment["YEMMA_UI_TEST_SESSION"],
+           let session = UUID(uuidString: rawSession) {
+            let root = FileManager.default.temporaryDirectory
+                .appendingPathComponent("yemma-ui-tests", isDirectory: true)
+                .appendingPathComponent(session.uuidString, isDirectory: true)
+            let defaults = UserDefaults(suiteName: "yemma.ui-tests.\(session.uuidString)")!
+            conversationStore = ConversationStore(defaults: defaults, storageRootOverride: root)
+            if !defaults.bool(forKey: "seeded") {
+                do {
+                    _ = try conversationStore.saveConversation(id: nil, messages: [], draftText: "Audit regression prompt", draftAttachments: [])
+                    defaults.set(true, forKey: "seeded")
+                } catch { conversationStore.reportStorageError(error) }
+            }
+        } else { conversationStore = ConversationStore() }
+#else
+        conversationStore = ConversationStore()
+#endif
         _conversationStore = State(initialValue: conversationStore)
         diagnostics.record(
             "startup: conversation_store_ready",
@@ -183,9 +202,20 @@ public struct Yemma4App: App {
                 .environment(modelDownloader)
                 .environment(llmService)
                 .environment(conversationStore)
+                .environment(privacyController)
+                .opacity(privacyController.enabled && !privacyController.unlocked ? 0 : 1)
+                .accessibilityHidden(privacyController.enabled && !privacyController.unlocked)
+                .onChange(of: privacyController.enabled) { _, _ in
+                    appDelegate.setPrivacyCoverVisible(scenePhase != .active, lock: privacyController)
+                }
+                .onChange(of: privacyController.unlocked) { _, _ in
+                    appDelegate.setPrivacyCoverVisible(scenePhase != .active, lock: privacyController)
+                }
                 .preferredColorScheme(AppearancePreference.from(appearancePreferenceRaw).colorScheme)
                 .tint(AppTheme.accent)
+                .privacySensitive()
                 .onAppear {
+                    appDelegate.setPrivacyCoverVisible(scenePhase != .active, lock: privacyController)
                     AppDiagnostics.shared.record(
                         "startup: root_scene_visible",
                         category: "startup",
@@ -199,6 +229,8 @@ public struct Yemma4App: App {
                     }
                 }
                 .onChange(of: scenePhase) { _, newPhase in
+                    if newPhase == .background { privacyController.lock() }
+                    appDelegate.setPrivacyCoverVisible(newPhase != .active, lock: privacyController)
                     AppDiagnostics.shared.record(
                         "startup: scene_phase",
                         category: "startup",
