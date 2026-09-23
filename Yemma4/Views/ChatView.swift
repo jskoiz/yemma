@@ -3,7 +3,6 @@ import PhotosUI
 import SwiftUI
 
 #if canImport(UIKit)
-import ImageIO
 import UIKit
 #endif
 
@@ -28,7 +27,6 @@ public struct ChatView: View {
     @State private var toastMessage: String?
     @State private var toastTask: Task<Void, Never>?
     @State private var isSidebarOpen = false
-    @State private var sidebarDragOffset: CGFloat = 0
     @State private var isShowingPhotoPicker = false
     @State private var showGemmaImageRequirement = false
     @State private var showArchiveBrowser = false
@@ -73,71 +71,45 @@ public struct ChatView: View {
 
     public var body: some View {
         NavigationStack {
-            GeometryReader { geometry in
-                let sidebarWidth = geometry.size.width
-                let sidebarProgress = sidebarRevealProgress(sidebarWidth: sidebarWidth)
-                let shellOffset = sidebarProgress * (geometry.size.width + 12)
-
-                ZStack(alignment: .leading) {
-                    UtilityBackground()
-
-                    if isSidebarPresented {
-                        ChatSidebarView(
-                            currentConversationID: loadedConversationID,
-                            title: "Yemma 4",
-                            subtitle: "Chats and quick controls",
-                            showsChatManagement: true,
-                            onSelectConversation: { conversationID in
-                                Task { @MainActor in
-                                    await switchConversation(to: conversationID)
-                                    closeSidebar()
-                                }
-                            },
-                            onStartFresh: {
-                                Task { @MainActor in
-                                    await startFreshConversation()
-                                    closeSidebar()
-                                }
-                            },
-                            onShowOnboarding: {
-                                closeSidebar()
-                                onShowOnboarding()
-                            },
-                            onRunDebugScenario: { scenario in
-                                closeSidebar()
-                                Task { @MainActor in
-                                    try? await Task.sleep(for: .milliseconds(150))
-                                    await runDebugScenario(scenario)
-                                }
-                            },
-                            onOpenArchive: {
-                                closeSidebar()
-                                showArchiveBrowser = true
-                            },
-                            onClose: {
-                                closeSidebar()
-                            }
-                        )
-                        .frame(width: sidebarWidth)
-                        .offset(x: sidebarOffset(sidebarWidth: sidebarWidth))
-                    }
-
-                    mainShell
-                        .frame(width: geometry.size.width, height: geometry.size.height)
-                        .overlay {
-                            if sidebarProgress > 0.001 {
-                                Color.black
-                                    .opacity(0.06 * sidebarProgress)
-                                .contentShape(Rectangle())
-                                .onTapGesture {
-                                    closeSidebar()
-                                }
-                            }
+            ChatNavigationShell(isSidebarOpen: $isSidebarOpen) {
+                mainShell
+            } sidebar: {
+                ChatSidebarView(
+                    currentConversationID: loadedConversationID,
+                    title: "Yemma 4",
+                    subtitle: "Chats and quick controls",
+                    showsChatManagement: true,
+                    onSelectConversation: { conversationID in
+                        Task { @MainActor in
+                            await switchConversation(to: conversationID)
+                            closeSidebar()
                         }
-                        .offset(x: shellOffset)
-                        .allowsHitTesting(!isSidebarPresented)
-                        .simultaneousGesture(sidebarGesture(sidebarWidth: sidebarWidth))
-                }
+                    },
+                    onStartFresh: {
+                        Task { @MainActor in
+                            await startFreshConversation()
+                            closeSidebar()
+                        }
+                    },
+                    onShowOnboarding: {
+                        closeSidebar()
+                        onShowOnboarding()
+                    },
+                    onRunDebugScenario: { scenario in
+                        closeSidebar()
+                        Task { @MainActor in
+                            try? await Task.sleep(for: .milliseconds(150))
+                            await runDebugScenario(scenario)
+                        }
+                    },
+                    onOpenArchive: {
+                        closeSidebar()
+                        showArchiveBrowser = true
+                    },
+                    onClose: {
+                        closeSidebar()
+                    }
+                )
             }
             .toolbar(.hidden, for: .navigationBar)
             .sheet(isPresented: $showArchiveBrowser) {
@@ -264,13 +236,15 @@ public struct ChatView: View {
             ) { headerHeight in
                 conversationContent(topInset: headerHeight)
             } header: {
-                topBar
+                ChatTopBar(onToggleSidebar: toggleSidebar, onStartFresh: {
+                    Task { @MainActor in await startFreshConversation() }
+                })
             }
 
             if let toastMessage {
                 VStack {
                     Spacer()
-                    toastView(message: toastMessage)
+                    ChatToast(message: toastMessage)
                         .transition(
                             reduceMotion
                                 ? .opacity
@@ -295,31 +269,6 @@ public struct ChatView: View {
             }
         }
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.28), value: shouldShowStartupOverlay)
-    }
-
-    private var topBar: some View {
-        HStack(spacing: 12) {
-            CircleIconButton(
-                systemName: "line.3.horizontal",
-                filled: true,
-                action: toggleSidebar
-            )
-            .accessibilityLabel("Open sidebar")
-            .accessibilityHint("Browse saved chats and quick settings.")
-
-            Spacer(minLength: 0)
-
-            CircleIconButton(systemName: "square.and.pencil") {
-                Task { @MainActor in
-                    await startFreshConversation()
-                }
-            }
-            .accessibilityLabel("New chat")
-            .accessibilityHint("Start a fresh conversation and keep older chats saved.")
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 6)
-        .padding(.bottom, 12)
     }
 
     // MARK: - Conversation content
@@ -353,7 +302,7 @@ public struct ChatView: View {
     }
 
     private func handleConversationBackgroundTap() {
-        if isSidebarPresented {
+        if isSidebarOpen {
             closeSidebar()
             return
         }
@@ -465,7 +414,7 @@ public struct ChatView: View {
     }
 
     private var shouldBlockStartupInteraction: Bool {
-        shouldShowStartupOverlay || isSidebarPresented
+        shouldShowStartupOverlay || isSidebarOpen
     }
 
     private var startupLoadingOverlay: some View {
@@ -793,74 +742,16 @@ public struct ChatView: View {
         )
     }
 
-    private var isSidebarPresented: Bool {
-        isSidebarOpen || sidebarDragOffset > 0
-    }
-
     private func toggleSidebar() {
         withAnimation(.spring(response: 0.34, dampingFraction: 0.88)) {
             isSidebarOpen.toggle()
-            sidebarDragOffset = 0
         }
     }
 
     private func closeSidebar() {
         withAnimation(.spring(response: 0.34, dampingFraction: 0.88)) {
             isSidebarOpen = false
-            sidebarDragOffset = 0
         }
-    }
-
-    private func sidebarRevealProgress(sidebarWidth: CGFloat) -> CGFloat {
-        guard sidebarWidth > 0 else { return 0 }
-
-        let visibleWidth: CGFloat
-        if isSidebarOpen {
-            visibleWidth = sidebarWidth + min(0, sidebarDragOffset)
-        } else {
-            visibleWidth = max(0, sidebarDragOffset)
-        }
-
-        return min(max(visibleWidth / sidebarWidth, 0), 1)
-    }
-
-    private func sidebarOffset(sidebarWidth: CGFloat) -> CGFloat {
-        if isSidebarOpen {
-            return min(0, sidebarDragOffset)
-        }
-
-        return -sidebarWidth + max(0, sidebarDragOffset)
-    }
-
-    private func sidebarGesture(sidebarWidth: CGFloat) -> some Gesture {
-        DragGesture(minimumDistance: 14)
-            .onChanged { value in
-                guard abs(value.translation.width) > abs(value.translation.height) else { return }
-
-                if isSidebarOpen {
-                    sidebarDragOffset = max(-sidebarWidth, min(0, value.translation.width))
-                } else {
-                    guard value.startLocation.x <= 28, value.translation.width > 0 else { return }
-                    sidebarDragOffset = min(sidebarWidth, value.translation.width)
-                }
-            }
-            .onEnded { value in
-                defer { sidebarDragOffset = 0 }
-                guard abs(value.translation.width) > abs(value.translation.height) else { return }
-
-                if isSidebarOpen {
-                    let closingDistance = min(value.translation.width, value.predictedEndTranslation.width)
-                    withAnimation(.spring(response: 0.34, dampingFraction: 0.88)) {
-                        isSidebarOpen = closingDistance >= -(sidebarWidth * 0.22)
-                    }
-                } else {
-                    guard value.startLocation.x <= 28 else { return }
-                    let openingDistance = max(value.translation.width, value.predictedEndTranslation.width)
-                    withAnimation(.spring(response: 0.34, dampingFraction: 0.88)) {
-                        isSidebarOpen = openingDistance > sidebarWidth * 0.22
-                    }
-                }
-            }
     }
 
     private func scheduleConversationSave(delayMs: Int = 280) {
@@ -877,7 +768,7 @@ public struct ChatView: View {
             }
 
             await MainActor.run {
-                persistConversationNow()
+                _ = persistConversationNow()
             }
         }
     }
@@ -901,18 +792,6 @@ public struct ChatView: View {
             conversationStore.reportStorageError(error)
             return false
         }
-    }
-
-    private func toastView(message: String) -> some View {
-        Text(message)
-            .font(.system(size: 14, weight: .semibold, design: .rounded))
-            .foregroundStyle(AppTheme.accentForeground)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .background(AppTheme.toastFill)
-            .clipShape(Capsule())
-            .shadow(color: AppTheme.toastShadow, radius: 18, x: 0, y: 10)
-            .padding(.horizontal, 24)
     }
 
     private func promptInput(from message: ChatMessage) -> PromptMessageInput {
@@ -941,7 +820,7 @@ public struct ChatView: View {
 
         for item in items {
             do {
-                if let attachment = try await makeAttachment(from: item) {
+                if let attachment = try await ChatAttachmentImagePipeline.makeAttachment(from: item) {
                     importedAttachments.append(attachment)
                 }
             } catch {
@@ -957,36 +836,6 @@ public struct ChatView: View {
         if failedCount > 0 {
             showToast("Some images could not be added")
         }
-    }
-
-    private func makeAttachment(from item: PhotosPickerItem) async throws -> Attachment? {
-        guard let data = try await item.loadTransferable(type: Data.self) else {
-            return nil
-        }
-
-#if canImport(UIKit)
-        return try await Task.detached(priority: .userInitiated) {
-            try autoreleasepool {
-                let encodedImage = try ChatAttachmentImagePipeline.encodedModelImage(from: data)
-                let fileURL = try Self.storeAttachmentData(
-                    encodedImage.data,
-                    fileExtension: encodedImage.fileExtension
-                )
-                return Attachment(id: UUID().uuidString, url: fileURL, type: .image)
-            }
-        }.value
-#else
-        let fileURL = try Self.storeAttachmentData(data, fileExtension: "bin")
-        return Attachment(id: UUID().uuidString, url: fileURL, type: .image)
-#endif
-    }
-
-    nonisolated private static func storeAttachmentData(_ data: Data, fileExtension: String) throws -> URL {
-        let directory = try ConversationAttachmentStore.prepareDirectory()
-
-        let fileURL = directory.appendingPathComponent("\(UUID().uuidString).\(fileExtension)")
-        try data.write(to: fileURL, options: ConversationAttachmentStore.writeOptions)
-        return fileURL
     }
 
     // MARK: - Prompt handling & streaming
@@ -1333,187 +1182,3 @@ public struct ChatView: View {
         persistConversationNow()
     }
 }
-
-#if canImport(UIKit)
-enum ChatAttachmentImagePipeline {
-    struct EncodedImage: Sendable {
-        let data: Data
-        let fileExtension: String
-    }
-
-    struct DecodedImage: @unchecked Sendable {
-        let image: UIImage
-    }
-
-    private static let modelInputMaxPixelDimension = 2_048
-
-    nonisolated static func encodedModelImage(from data: Data) throws -> EncodedImage {
-        guard let image = downsampledImage(from: data, maxPixelDimension: modelInputMaxPixelDimension) else {
-            throw CocoaError(.fileReadCorruptFile)
-        }
-
-        if let jpegData = image.jpegData(compressionQuality: 0.9) {
-            return EncodedImage(data: jpegData, fileExtension: "jpg")
-        }
-
-        if let pngData = image.pngData() {
-            return EncodedImage(data: pngData, fileExtension: "png")
-        }
-
-        throw CocoaError(.fileWriteUnknown)
-    }
-
-    nonisolated static func decodedThumbnail(
-        at url: URL,
-        maxPixelDimension: Int
-    ) -> DecodedImage? {
-        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
-              let cgImage = downsampledCGImage(from: source, maxPixelDimension: maxPixelDimension) else {
-            return nil
-        }
-
-        return DecodedImage(image: UIImage(cgImage: cgImage))
-    }
-
-    nonisolated private static func downsampledImage(
-        from data: Data,
-        maxPixelDimension: Int
-    ) -> UIImage? {
-        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
-              let cgImage = downsampledCGImage(from: source, maxPixelDimension: maxPixelDimension) else {
-            return nil
-        }
-
-        return UIImage(cgImage: cgImage)
-    }
-
-    nonisolated private static func downsampledCGImage(
-        from source: CGImageSource,
-        maxPixelDimension: Int
-    ) -> CGImage? {
-        let options: [CFString: Any] = [
-            kCGImageSourceCreateThumbnailFromImageAlways: true,
-            kCGImageSourceCreateThumbnailWithTransform: true,
-            kCGImageSourceThumbnailMaxPixelSize: maxPixelDimension,
-            kCGImageSourceShouldCacheImmediately: true
-        ]
-        return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
-    }
-}
-#endif
-
-// MARK: - Preview helpers
-
-private extension ChatMessage {
-    static func previewMessage(user: User, text: String) -> ChatMessage {
-        ChatMessage(
-            id: UUID().uuidString,
-            user: user,
-            status: .sent,
-            createdAt: .now,
-            text: text,
-            attachments: []
-        )
-    }
-}
-
-#if DEBUG
-private let previewConversationID = UUID()
-
-@MainActor
-private func previewChatStore(
-    currentConversationID: UUID = previewConversationID,
-    title: String,
-    messages: [ChatMessage],
-    draftText: String = ""
-) -> ConversationStore {
-    ConversationStore.preview(
-        currentConversationID: currentConversationID,
-        conversations: [
-            ConversationSnapshot(
-                id: currentConversationID,
-                title: title,
-                messages: messages,
-                draftText: draftText,
-                draftAttachments: []
-            )
-        ]
-    )
-}
-
-private extension LLMService {
-    static func previewLoaded() -> LLMService {
-        let service = LLMService()
-        service.isModelLoaded = true
-        return service
-    }
-
-    static func previewWarmShell() -> LLMService {
-        let service = LLMService()
-        service.isModelLoading = true
-        service.modelLoadStage = .loadingModel
-        return service
-    }
-}
-
-#Preview("Chat") {
-    ChatView()
-        .environment(LLMService.previewLoaded())
-        .environment(ModelDownloader())
-        .environment(
-            previewChatStore(
-                title: "Workout split",
-                messages: [
-                    .previewMessage(
-                        user: .user,
-                        text: "Plan me a focused three-day workout split for strength and cardio."
-                    ),
-                    .previewMessage(
-                        user: .yemma,
-                        text: "Here is a simple split: Day 1 push and intervals, Day 2 lower body and incline walking, Day 3 pull and steady-state cardio. Keep each session around 45 minutes."
-                    ),
-                    .previewMessage(
-                        user: .user,
-                        text: "Keep it beginner friendly and make the gym version optional."
-                    )
-                ]
-            )
-        )
-}
-
-#Preview("Warm Shell") {
-    ChatView()
-        .environment(LLMService.previewWarmShell())
-        .environment(ModelDownloader())
-        .environment(
-            previewChatStore(
-                title: "New chat",
-                messages: [],
-                draftText: "Draft a short thank-you note after an interview."
-            )
-        )
-}
-
-#Preview("Chat Dark Compact") {
-    ChatView()
-        .environment(LLMService.previewLoaded())
-        .environment(ModelDownloader())
-        .environment(
-            previewChatStore(
-                title: "Travel plans",
-                messages: [
-                    .previewMessage(
-                        user: .user,
-                        text: "Build me a two-day Honolulu itinerary with food, beach time, and one rainy-day backup."
-                    ),
-                    .previewMessage(
-                        user: .yemma,
-                        text: "Day 1 can stay centered around Kakaako, Ala Moana, and Waikiki. Day 2 can lean east side with Hanauma Bay timing, a casual lunch, and a museum backup if weather turns."
-                    )
-                ],
-                draftText: "Keep the budget moderate and avoid rental-car-only stops."
-            )
-        )
-        .preferredColorScheme(.dark)
-}
-#endif

@@ -9,8 +9,6 @@ public enum UserType: Int, Codable, Sendable {
 public struct User: Codable, Identifiable, Hashable, Sendable {
     public let id: String
     public let name: String
-    public let avatarURL: URL?
-    public let avatarCacheKey: String?
     public let type: UserType
 
     public var isCurrentUser: Bool {
@@ -20,15 +18,11 @@ public struct User: Codable, Identifiable, Hashable, Sendable {
     public init(
         id: String,
         name: String,
-        avatarURL: URL?,
-        avatarCacheKey: String? = nil,
         isCurrentUser: Bool
     ) {
         self.init(
             id: id,
             name: name,
-            avatarURL: avatarURL,
-            avatarCacheKey: avatarCacheKey,
             type: isCurrentUser ? .current : .other
         )
     }
@@ -36,28 +30,22 @@ public struct User: Codable, Identifiable, Hashable, Sendable {
     public init(
         id: String,
         name: String,
-        avatarURL: URL?,
-        avatarCacheKey: String? = nil,
         type: UserType
     ) {
         self.id = id
         self.name = name
-        self.avatarURL = avatarURL
-        self.avatarCacheKey = avatarCacheKey
         self.type = type
     }
 
     public static let user = User(
         id: "user",
         name: "You",
-        avatarURL: nil,
         isCurrentUser: true
     )
 
     public static let yemma = User(
         id: "yemma",
         name: "Yemma",
-        avatarURL: nil,
         isCurrentUser: false
     )
 }
@@ -68,53 +56,35 @@ public enum AttachmentType: String, Codable, Sendable {
 }
 
 public struct Attachment: Codable, Identifiable, Hashable, Sendable {
-    public enum UploadStatus: Codable, Hashable, Sendable {
-        case inProgress(Int?)
-        case complete
-        case cancelled
-        case error
-    }
-
     public let id: String
     public let thumbnail: URL
     public let full: URL
-    public let fullUploadStatus: UploadStatus?
     public let type: AttachmentType
-    public let thumbnailCacheKey: String?
-    public let fullCacheKey: String?
 
     public init(
         id: String,
         thumbnail: URL,
         full: URL,
-        type: AttachmentType,
-        thumbnailCacheKey: String? = nil,
-        fullCacheKey: String? = nil,
-        fullUploadStatus: UploadStatus? = nil
+        type: AttachmentType
     ) {
         self.id = id
         self.thumbnail = thumbnail
         self.full = full
-        self.fullUploadStatus = fullUploadStatus
         self.type = type
-        self.thumbnailCacheKey = thumbnailCacheKey
-        self.fullCacheKey = fullCacheKey
     }
 
-    public init(id: String, url: URL, type: AttachmentType, cacheKey: String? = nil) {
+    public init(id: String, url: URL, type: AttachmentType) {
         self.init(
             id: id,
             thumbnail: url,
             full: url,
-            type: type,
-            thumbnailCacheKey: cacheKey,
-            fullCacheKey: cacheKey
+            type: type
         )
     }
 }
 
 public struct ChatMessage: Identifiable, Hashable, Sendable {
-    public enum Status: Hashable, Sendable {
+    public enum Status: String, Codable, Hashable, Sendable {
         case sending
         case sent
         case delivered
