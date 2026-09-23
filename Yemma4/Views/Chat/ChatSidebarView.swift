@@ -93,12 +93,20 @@ struct ChatSidebarView: View {
             titleVisibility: .visible
         ) {
             Button("Delete History", role: .destructive) {
-                AppDiagnostics.shared.record("Conversation history cleared", category: "ui")
                 conversationStore.deleteAllConversations()
             }
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("This removes saved local chats, drafts, and attached images on this iPhone.")
+        }
+        .alert("History Could Not Be Deleted", isPresented: Binding(
+            get: { conversationStore.historyDeletionError != nil },
+            set: { if !$0 { conversationStore.historyDeletionError = nil } }
+        )) {
+            Button("Try Again") { conversationStore.deleteAllConversations() }
+            Button("Cancel", role: .cancel) { conversationStore.historyDeletionError = nil }
+        } message: {
+            Text(conversationStore.historyDeletionError ?? "Please try deleting again.")
         }
         .confirmationDialog(
             "Delete this chat?",

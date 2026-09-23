@@ -4,6 +4,130 @@ import XCTest
 
 @MainActor
 final class ConversationStoreTests: XCTestCase {
+    func testInitialRestoreMigratesAttachmentsBeforeSidebarLoadsIndex() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanUp() }
+        let legacy = ConversationAttachmentStore.legacyDirectoryURL(baseDirectoryOverride: fixture.storageRoot)
+        try fixture.fileManager.createDirectory(at: legacy, withIntermediateDirectories: true)
+        let original = legacy.appendingPathComponent("photo.jpg")
+        try Data([1, 2, 3]).write(to: original)
+        let attachment = Attachment(id: "photo", url: original, type: .image)
+        let id = try fixture.makeStore().saveConversation(
+            id: nil, messages: [ChatMessage(id: "message", user: .user, attachments: [attachment])],
+            draftText: "Draft", draftAttachments: [attachment]
+        )
+        let store = fixture.makeStore()
+        // Match app startup: restore the selected chat before opening its sidebar.
+        let selectedID = try store.ensureCurrentConversation()
+        XCTAssertEqual(selectedID, id)
+        let loaded = await store.loadConversationAsync(id: selectedID)
+        let snapshot = try XCTUnwrap(loaded)
+        let restoredImage = try XCTUnwrap(snapshot.messages.first?.attachments.first?.full)
+        XCTAssertNotEqual(restoredImage, original)
+        XCTAssertEqual(snapshot.draftAttachments.first?.full, restoredImage)
+        await store.loadIndexIfNeeded()
+        XCTAssertTrue(fixture.fileManager.fileExists(atPath: restoredImage.path))
+        XCTAssertEqual(try Data(contentsOf: restoredImage), Data([1, 2, 3]))
+        XCTAssertEqual(store.loadConversation(id: id)?.draftAttachments.first?.full, restoredImage)
+    }
+
+    func testFailedMigrationDoesNotMoveFilesAfterSnapshotIsLoaded() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanUp() }
+        let legacy = ConversationAttachmentStore.legacyDirectoryURL(baseDirectoryOverride: fixture.storageRoot)
+        try fixture.fileManager.createDirectory(at: legacy, withIntermediateDirectories: true)
+        let original = legacy.appendingPathComponent("photo.jpg")
+        try Data([4]).write(to: original)
+        let id = try fixture.makeStore().saveConversation(
+            id: nil, messages: [], draftText: "Draft",
+            draftAttachments: [Attachment(id: "photo", url: original, type: .image)]
+        )
+        let manager = FailingAttachmentFileManager()
+        manager.blockedMove = original
+        let store = ConversationStore(fileManager: manager, defaults: fixture.defaults, storageRootOverride: fixture.storageRoot)
+        let snapshot = store.loadConversation(id: id)
+        XCTAssertEqual(snapshot?.draftAttachments.first?.full, original)
+        manager.blockedMove = nil
+        await store.loadIndexIfNeeded()
+        XCTAssertTrue(fixture.fileManager.fileExists(atPath: original.path))
+        let reopened = fixture.makeStore().loadConversation(id: id)
+        XCTAssertNotEqual(reopened?.draftAttachments.first?.full, original)
+    }
+
+    func testDeleteHistoryRemovesDurableAndCollidingLegacyImages() throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanUp() }
+        let durable = try ConversationAttachmentStore.prepareDirectory(baseDirectoryOverride: fixture.storageRoot)
+        let legacy = ConversationAttachmentStore.legacyDirectoryURL(baseDirectoryOverride: fixture.storageRoot)
+        try fixture.fileManager.createDirectory(at: legacy, withIntermediateDirectories: true)
+        try Data([1]).write(to: durable.appendingPathComponent("collision.jpg"))
+        try Data([2]).write(to: legacy.appendingPathComponent("collision.jpg"))
+        try ConversationAttachmentStore.migrateLegacyFiles(baseDirectoryOverride: fixture.storageRoot)
+        XCTAssertTrue(fixture.fileManager.fileExists(atPath: legacy.appendingPathComponent("collision.jpg").path))
+        let store = fixture.makeStore()
+        _ = try store.startFreshConversation()
+        XCTAssertTrue(store.deleteAllConversations())
+        XCTAssertFalse(fixture.fileManager.fileExists(atPath: durable.path))
+        XCTAssertFalse(fixture.fileManager.fileExists(atPath: legacy.path))
+        XCTAssertTrue(store.conversations.isEmpty)
+        XCTAssertNil(store.currentConversationID)
+    }
+
+    func testFailedHistoryDeletionKeepsSelectionAndCanRetryLegacyCleanup() throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanUp() }
+        let durable = try ConversationAttachmentStore.prepareDirectory(baseDirectoryOverride: fixture.storageRoot)
+        let legacy = ConversationAttachmentStore.legacyDirectoryURL(baseDirectoryOverride: fixture.storageRoot)
+        try fixture.fileManager.createDirectory(at: legacy, withIntermediateDirectories: true)
+        try Data([1]).write(to: durable.appendingPathComponent("new.jpg"))
+        try Data([2]).write(to: legacy.appendingPathComponent("old.jpg"))
+        let manager = FailingAttachmentFileManager()
+        manager.blockedRemoval = legacy
+        let store = ConversationStore(fileManager: manager, defaults: fixture.defaults, storageRootOverride: fixture.storageRoot)
+        let id = try store.startFreshConversation()
+        XCTAssertFalse(store.deleteAllConversations())
+        XCTAssertNotNil(store.historyDeletionError)
+        XCTAssertEqual(store.currentConversationID, id)
+        XCTAssertEqual(store.conversations.count, 1)
+        XCTAssertFalse(fixture.fileManager.fileExists(atPath: durable.path))
+        XCTAssertTrue(fixture.fileManager.fileExists(atPath: legacy.path))
+        manager.blockedRemoval = nil
+        XCTAssertTrue(store.deleteAllConversations())
+        XCTAssertNil(store.historyDeletionError)
+        XCTAssertNil(store.currentConversationID)
+        XCTAssertFalse(fixture.fileManager.fileExists(atPath: legacy.path))
+    }
+
+    func testFailedFirstSaveRetainsIDAcrossRetriesAndRelaunch() throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanUp() }
+        let index = fixture.storageRoot.appendingPathComponent("index.json")
+        try fixture.fileManager.createDirectory(at: index, withIntermediateDirectories: true)
+        let store = fixture.makeStore()
+        for _ in 0..<2 {
+            XCTAssertThrowsError(try store.saveConversation(
+                id: nil, messages: [makeMessage(text: "Keep this")], draftText: "Draft", draftAttachments: []
+            ))
+        }
+        // A new store simulates a process restart with only UserDefaults and files retained.
+        let restarted = fixture.makeStore()
+        XCTAssertThrowsError(try restarted.saveConversation(
+            id: nil, messages: [makeMessage(text: "Keep this")], draftText: "Latest draft", draftAttachments: []
+        ))
+        let ids = try fixture.fileManager.contentsOfDirectory(at: fixture.storageRoot, includingPropertiesForKeys: nil)
+            .compactMap { UUID(uuidString: $0.lastPathComponent) }
+        XCTAssertEqual(ids.count, 1)
+        XCTAssertNil(restarted.currentConversationID)
+        XCTAssertTrue(restarted.conversations.isEmpty)
+        try fixture.fileManager.removeItem(at: index)
+        let recovered = fixture.makeStore()
+        let id = try recovered.ensureCurrentConversation()
+        XCTAssertEqual(id, ids.first)
+        XCTAssertEqual(recovered.loadConversation(id: id)?.draftText, "Latest draft")
+        XCTAssertEqual(recovered.loadConversation(id: id)?.messages.first?.text, "Keep this")
+        XCTAssertNil(fixture.defaults.string(forKey: "pendingConversationID"))
+    }
+
     func testFailedSaveDoesNotPublishConversationOrSelection() throws {
         let fixture = try makeFixture()
         defer { fixture.cleanUp() }
@@ -357,5 +481,20 @@ final class ConversationStoreTests: XCTestCase {
             defaults.removePersistentDomain(forName: defaultsName)
             try? fileManager.removeItem(at: storageRoot)
         }
+    }
+}
+
+private final class FailingAttachmentFileManager: FileManager, @unchecked Sendable {
+    var blockedMove: URL?
+    var blockedRemoval: URL?
+
+    override func moveItem(at source: URL, to destination: URL) throws {
+        if source == blockedMove { throw CocoaError(.fileWriteNoPermission) }
+        try super.moveItem(at: source, to: destination)
+    }
+
+    override func removeItem(at url: URL) throws {
+        if url == blockedRemoval { throw CocoaError(.fileWriteNoPermission) }
+        try super.removeItem(at: url)
     }
 }
