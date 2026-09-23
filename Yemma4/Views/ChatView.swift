@@ -28,7 +28,7 @@ public struct ChatView: View {
     @State private var toastTask: Task<Void, Never>?
     @State private var isSidebarOpen = false
     @State private var isShowingPhotoPicker = false
-    @State private var showGemmaImageRequirement = false
+    @State private var showQwenImageRequirement = false
     @State private var showArchiveBrowser = false
     @State private var loadedConversationID: UUID?
     @State private var isRestoringConversation = false
@@ -206,16 +206,16 @@ public struct ChatView: View {
                 Text(memoryAlertMessage ?? "Your device ran low on memory. Try a shorter conversation.")
             }
             .confirmationDialog(
-                "Use Gemma 4 for image chat?",
-                isPresented: $showGemmaImageRequirement,
+                "Use Qwen3.5 4B for image chat?",
+                isPresented: $showQwenImageRequirement,
                 titleVisibility: .visible
             ) {
-                Button("Use Gemma 4") {
-                    selectGemmaRuntime()
+                Button("Use Qwen3.5 4B") {
+                    selectQwenRuntime()
                 }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("Gemma 4 adds image understanding through an optional 4.2 GB download. Selecting it does not start the download.")
+                Text("Qwen3.5 4B adds image understanding through an optional 3.05 GB download. Selecting it does not start the download.")
             }
             .sheet(item: $sharePayload) { payload in
                 ActivityShareSheet(activityItems: [payload.text])
@@ -333,12 +333,12 @@ public struct ChatView: View {
             isComposerFocused: $isComposerFocused,
             supportsImageInput: llmService.supportsImageInput || !supportsLocalModelRuntime,
             inputBlockReason: imageInputBlockReason,
-            inputBlockActionTitle: imageInputBlockReason == nil ? nil : "Use Gemma",
-            inputBlockAction: imageInputBlockReason == nil ? nil : selectGemmaRuntime,
+            inputBlockActionTitle: imageInputBlockReason == nil ? nil : "Use Qwen",
+            inputBlockAction: imageInputBlockReason == nil ? nil : selectQwenRuntime,
             primarySetupActionTitle: primarySetupActionTitle,
             primarySetupAction: primarySetupAction,
             onUnavailableImageInput: {
-                showGemmaImageRequirement = true
+                showQwenImageRequirement = true
             },
             onSubmitDraft: submitDraft,
             onStopGeneration: triggerStopGeneration,
@@ -369,19 +369,19 @@ public struct ChatView: View {
         }
 
         if !pendingAttachments.isEmpty {
-            return "This draft contains images. Keep it here and switch to Gemma 4 to send it."
+            return "This draft contains images. Keep it here and switch to Qwen3.5 4B to send it."
         }
 
         if messages.contains(where: { !$0.attachments.isEmpty }) {
-            return "This chat contains images. Start a new text chat or switch to Gemma 4."
+            return "This chat contains images. Start a new text chat or switch to Qwen3.5 4B."
         }
 
         return nil
     }
 
-    private func selectGemmaRuntime() {
+    private func selectQwenRuntime() {
         Task { @MainActor in
-            let didSelect = await llmService.selectRuntime(.gemma4)
+            let didSelect = await llmService.selectRuntime(.qwen35)
             if !didSelect {
                 showToast(llmService.lastError ?? "Try switching again in a moment")
             }
@@ -446,7 +446,7 @@ public struct ChatView: View {
            !llmService.supportsImageInput
         {
             isComposerFocused = false
-            showGemmaImageRequirement = true
+            showQwenImageRequirement = true
             return
         }
 
@@ -624,7 +624,7 @@ public struct ChatView: View {
     private func refineAssistantResponse(_ message: ChatMessage, refinement: AssistantRefinement) async {
         guard !llmService.isGenerating, !message.user.isCurrentUser else { return }
         guard imageInputBlockReason == nil else {
-            showToast("Use Gemma 4 for this image chat")
+            showToast("Use Qwen3.5 4B for this image chat")
             return
         }
         guard let latestAssistantMessageIndex = latestAssistantMessageIndex() else { return }
@@ -805,7 +805,7 @@ public struct ChatView: View {
         guard !items.isEmpty else { return }
         guard llmService.supportsImageInput || !supportsLocalModelRuntime else {
             selectedPhotoItems = []
-            showToast("Image chat requires Gemma 4")
+            showToast("Image chat requires Qwen3.5 4B")
             return
         }
 
@@ -849,7 +849,7 @@ public struct ChatView: View {
             return
         }
         guard imageInputBlockReason == nil else {
-            showToast("Use Gemma 4 for this image chat")
+            showToast("Use Qwen3.5 4B for this image chat")
             return
         }
         guard appSetup.isTextModelReady || !appSetup.supportsLocalModelRuntime else {

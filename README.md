@@ -17,7 +17,7 @@
   <img alt="iOS 17+" src="https://img.shields.io/badge/iOS-17%2B-0A84FF?style=for-the-badge&logo=apple">
   <img alt="Xcode 26+" src="https://img.shields.io/badge/Toolchain-Xcode%2026%2B-147EFB?style=for-the-badge&logo=xcode&logoColor=white">
   <img alt="On-device inference" src="https://img.shields.io/badge/Inference-On--Device-5E4AE3?style=for-the-badge">
-  <img alt="Apple and Gemma 4 runtimes" src="https://img.shields.io/badge/Runtimes-Apple%20%2B%20Gemma%204-2E7D32?style=for-the-badge">
+  <img alt="Apple and Qwen3.5 4B runtimes" src="https://img.shields.io/badge/Runtimes-Apple%20%2B%20Qwen%204-2E7D32?style=for-the-badge">
 </p>
 
 <p align="center">
@@ -30,13 +30,13 @@
   <a href="#screenshots">Screenshots</a> ·
   <a href="#structure">Structure</a> ·
   <a href="#runtime-selection">Runtime Selection</a> ·
-  <a href="#optional-gemma-4-bundle">Optional Gemma Bundle</a> ·
+  <a href="#optional-qwen35-4b-bundle">Optional Qwen Bundle</a> ·
   <a href="#build">Build</a>
 </p>
 
 This repo contains the iOS app, landing page, and brand assets.
 
-On eligible iPhones running iOS 26 or newer with Apple Intelligence available, Yemma uses `SystemLanguageModel.default` for zero-download text chat. Gemma 4 is an explicit optional 4.2 GB download for text and image chat, and the local choice for older or Apple Intelligence-ineligible devices. Yemma never downloads Gemma automatically. There is no cloud inference, no account, and no telemetry.
+On eligible iPhones running iOS 26 or newer with Apple Intelligence available, Yemma uses `SystemLanguageModel.default` for zero-download text chat. Qwen3.5 4B is an explicit optional 3.05 GB download for text and image chat, and the local choice for older or Apple Intelligence-ineligible devices. Yemma never downloads Qwen automatically. There is no cloud inference, no account, and no telemetry.
 
 ## What it's good for
 
@@ -53,8 +53,8 @@ Yemma is not trying to replace frontier cloud models. Where you need deep reason
 
 - Streaming chat with markdown rendering, image attachments, and conversation history
 - Zero-download text chat through Apple Foundation Models on eligible iOS 26+ Apple Intelligence devices
-- Explicit optional Gemma 4 download (~4.2 GB) for text and image inference via `MLXVLM`
-- Resumable background Gemma download and strict local bundle validation
+- Explicit optional Qwen3.5 4B download (~3.05 GB) for text and image inference via `MLXVLM`
+- Resumable background Qwen download and strict local bundle validation
 - Configurable response style, temperature, and response limits
 - Light / Dark / System appearance modes
 - Built-in diagnostics, debug probes, and simulator mock mode
@@ -85,12 +85,12 @@ Yemma is not trying to replace frontier cloud models. Where you need deep reason
 - `ContentView.swift` — root state machine (onboarding vs chat)
 - `LLMService.swift` — runtime selection, generation, streaming, and MLX lifecycle
 - `AppleFoundationModelRuntime.swift` — iOS 26 availability, Apple transcript shaping, and snapshot streaming
-- `MLXModelSupport.swift` — model directory validation and Gemma 4 asset contract checks
-- `ModelDownloader.swift` — optional Gemma download, resume, cleanup, and local validation
+- `MLXModelSupport.swift` — model directory validation and Qwen3.5 4B asset contract checks
+- `ModelDownloader.swift` — optional Qwen download, resume, cleanup, and local validation
 - `ConversationStore.swift` — chat history persistence
 - `ChatMessage.swift` — app-owned message, user, and attachment value types
 - `YemmaPromptPlanner.swift` — prompt shaping for the chat experience
-- `Gemma4SmokeAutomation.swift` — smoke checks for the shipped model path
+- `Qwen35SmokeAutomation.swift` — smoke checks for the shipped model path
 - `ChatSidebarView.swift` / `AdvancedSettingsView.swift` — preferences, runtime tuning, diagnostics, and debug probes
 - `DebugInferenceScenario.swift` — debug prompt and renderer scenarios
 - `Appearance.swift` — theme system
@@ -100,55 +100,34 @@ Yemma is not trying to replace frontier cloud models. Where you need deep reason
 
 - Simulator: deterministic mock replies; neither real runtime is invoked.
 - Eligible iOS 26+ Apple Intelligence device: Apple Foundation Models is the zero-download initial runtime for text chat.
-- iOS 17-25 or Apple Intelligence-ineligible device: Gemma 4 is the initial runtime choice, but its 4.2 GB download begins only when the user starts setup.
-- Images: choose the optional Gemma 4 runtime. Yemma's Apple runtime is text-only.
-- Apple Intelligence off, model not ready, or unsupported language: Yemma explains the unavailable state and lets the user enable Apple Intelligence or explicitly choose Gemma.
+- iOS 17-25 or Apple Intelligence-ineligible device: Qwen3.5 4B is the initial runtime choice, but its 3.05 GB download begins only when the user starts setup.
+- Images: choose the optional Qwen3.5 4B runtime. Yemma's Apple runtime is text-only.
+- Apple Intelligence off, model not ready, or unsupported language: Yemma explains the unavailable state and lets the user enable Apple Intelligence or explicitly choose Qwen.
 
 Both runtimes operate on device. Real inference requires a physical iPhone; Simulator builds keep using mock replies.
 
-## Gemma 4 MLX Port
+## Optional Qwen3.5 4B Bundle
 
-Yemma originally ran Gemma 4 through two separate GGUF assets: a text model plus a standalone `mmproj` vision projector. The current MLX integration replaces that with one Swift-native multimodal bundle and one runtime container.
+Yemma offers one optional download: **Qwen3.5 4B Abliterated**, with text and vision in the same MLX package. Apple remains the default on eligible devices.
 
-The important distinction is that MLX Swift already provided the general model-loading, tokenizer, and VLM infrastructure. The missing work was Gemma 4 support on the Swift side, plus Yemma-specific integration around download, validation, prompt shaping, and runtime lifecycle.
+- Source: [`dream-vault-community/Qwen3.5-4B-4bit-Abliterated`](https://huggingface.co/dream-vault-community/Qwen3.5-4B-4bit-Abliterated)
+- Pinned revision: `a40c9a8d5c6f6f70d678120ccb46a3f6456c727c`
+- Download: approximately **3.05 GB**, including combined language and vision weights, tokenizer, image processor, image-aware chat template, license, and provenance.
+- Lineage: Huihui's abliterated derivative of a Qwen3.5 4B reasoning distillation. The package preserves upstream weights and supplies Swift-compatible vision metadata. Its name is not a claim of Claude capability or affiliation.
+- Runtime: the pinned `mlx-swift-lm` dependency supplies Qwen3.5 and Qwen3VL processing. Yemma uses one `VLMModelFactory` container for text and images.
+- Validation: required metadata, matching image-aware templates, processor parameters, tensor payload boundaries, and all 24 vision blocks are checked before setup becomes ready. A text-only conversion is rejected even if its config claims vision support.
+- Generation: thinking disabled, one system prompt, Qwen stop/reasoning tokens, and a 768-pixel image processing bound. Image replies remain capped at 256 tokens.
 
-Validated upstream baseline:
+Installation and deletion stay explicit. Old Gemma files are never loaded as Qwen or deleted automatically; **Delete downloaded model** also removes any previous Gemma download. A saved Gemma choice falls back to the normal device-based initial selection and does not start a Qwen download.
 
-- `mlx-swift-lm` at `3.31.3` for Gemma 4 model, processor, and parity fixes
-- `mlx-swift-examples` at `31b6cf6` for app-side smoke validation and request-shaping patterns
-
-How the optional Gemma integration works:
-
-- `Yemma4.xcodeproj` declares `MLX`, `MLXLMCommon`, `MLXVLM`, `Hub`, and `Tokenizers`, so the runtime stays inside Swift instead of bridging through `llama.cpp` or Objective-C++ vision code.
-- After the user selects Gemma and starts setup, `ModelDownloader` pulls `mlx-community/gemma-4-e2b-it-4bit` using `*.safetensors`, `*.json`, and `*.jinja` patterns instead of downloading a text GGUF and a second `mmproj` file.
-- `ModelDirectoryValidator` proves the downloaded bundle is structurally usable by checking required metadata files, processor config, tokenizer files, weight shards, and safetensors index references before the app accepts setup as complete.
-- `Gemma4MLXSupport` enforces the Gemma 4 multimodal asset contract in Swift by cross-checking processor and model values like soft-token budgets, patch size, and pooling kernel size. It also normalizes a known compatibility gap when a bundle is missing a top-level `pad_token_id`.
-- `LLMService` converts each conversation turn into structured `Chat.Message` and `UserInput` values with optional image URLs, then calls `context.processor.prepare(input:)` so MLX performs the image and text preprocessing directly inside the same runtime path as inference.
-- The current implementation uses `VLMModelFactory.shared._load(...)` to load the entire Gemma 4 VLM from one local directory, so text generation and image understanding live in one `ModelContainer` instead of separate GGUF and projector runtimes.
-- Yemma still adds app-side stability logic around the MLX runtime, including prompt shaping, smoke checks, and output filtering for noisy hidden-channel and control-token responses.
-
-What that buys us:
-
-- no standalone `mmproj` download
-- no Objective-C++ multimodal bridge
-- one optional model bundle to download, validate, load, unload, and delete
-- one Swift runtime path for both text-only and image-assisted turns
-
-## Optional Gemma 4 Bundle
-
-- Download source: [`mlx-community/gemma-4-e2b-it-4bit`](https://huggingface.co/mlx-community/gemma-4-e2b-it-4bit)
-- Approximate first-download size: `4.2 GB`
-- Downloaded file classes: safetensors weights, tokenizer/config JSON, processor config, and chat template files
-- Runtime contract: `config.json`, `tokenizer.json`, `tokenizer_config.json`, `processor_config.json` or `preprocessor_config.json`, plus one or more readable `.safetensors` weight files and any referenced safetensors index entries
-
-Yemma does not download this bundle automatically. After the user chooses Gemma and completes setup, Yemma can load, unload, and run it entirely on device.
+Model-card vision tests were performed on a Mac, not an iPhone. Download size is not a RAM requirement. Physical-device inference, memory, and thermal behavior must be validated before claiming device compatibility.
 
 ## Build
 
 1. Open `Yemma4.xcodeproj`; it is the sole build graph and owns the pinned SwiftPM dependencies.
 2. Use Xcode 26 or newer with an iOS 26 SDK. The deployment target remains iOS 17 and the app and test targets currently compile in Swift 5 language mode.
 3. Run `./scripts/local_validation.sh` for simulator tests plus an unsigned Release compile for a generic iOS device.
-4. Run on a physical iPhone for real Apple Foundation Models or Gemma inference.
+4. Run on a physical iPhone for real Apple Foundation Models or Qwen inference.
 5. Use `./scripts/sim_run.sh` only when you also want to install and launch the mocked simulator app.
 6. Use `./scripts/device_startup_probe.sh` when you need a clean first-launch timing probe on an already installed device build.
 

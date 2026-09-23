@@ -85,7 +85,7 @@ public struct ContentView: View {
     @State private var didRecordShellVisible = false
     @State private var didRecordTextReady = false
     @State private var didRecordVisionReady = false
-    @State private var smokeAutomation = Gemma4SmokeAutomation()
+    @State private var smokeAutomation = Qwen35SmokeAutomation()
 
     public init() {}
 
@@ -127,7 +127,7 @@ public struct ContentView: View {
             }
         }
         .task(id: "\(llmService.selectedRuntime.rawValue)|\(modelDownloader.modelPath ?? "")") {
-            guard llmService.selectedRuntime == .gemma4 else { return }
+            guard llmService.selectedRuntime == .qwen35 else { return }
             guard let modelPath = modelDownloader.modelPath else { return }
             await Task.yield()
             guard !Task.isCancelled else { return }
@@ -255,7 +255,7 @@ public struct ContentView: View {
             return
         }
 
-        guard llmService.selectedRuntime == .gemma4 else {
+        guard llmService.selectedRuntime == .qwen35 else {
             return
         }
 
@@ -273,7 +273,7 @@ public struct ContentView: View {
             await Task.yield()
             try await llmService.loadModel(from: modelPath)
 
-            guard llmService.selectedRuntime == .gemma4,
+            guard llmService.selectedRuntime == .qwen35,
                   llmService.isModelLoaded else {
                 await MainActor.run {
                     loadedModelSignature = nil

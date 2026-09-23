@@ -2,7 +2,7 @@ import Foundation
 import MLX
 import MLXLMCommon
 
-final class Gemma4HiddenChannelBudgetProcessor: LogitProcessor, @unchecked Sendable {
+final class Qwen35HiddenChannelBudgetProcessor: LogitProcessor, @unchecked Sendable {
     private var baseProcessor: LogitProcessor?
     private let channelStartTokenID: Int?
     private let channelEndTokenID: Int?
@@ -17,8 +17,8 @@ final class Gemma4HiddenChannelBudgetProcessor: LogitProcessor, @unchecked Senda
         baseProcessor: LogitProcessor? = nil
     ) {
         self.baseProcessor = baseProcessor
-        self.channelStartTokenID = tokenizer.convertTokenToId("<|channel>")
-        self.channelEndTokenID = tokenizer.convertTokenToId("<channel|>")
+        self.channelStartTokenID = tokenizer.convertTokenToId("<think>")
+        self.channelEndTokenID = tokenizer.convertTokenToId("</think>")
         self.hiddenChannelTokenBudget = hiddenChannelTokenBudget
     }
 
@@ -140,35 +140,21 @@ private struct SpecialTokenSkippingDetokenizer {
     }
 }
 
-struct Gemma4ResponseTokenParser {
+struct Qwen35ResponseTokenParser {
     private enum State {
         case normal
         case suppressing(untilTokenID: Int)
     }
 
     private static let suppressedBlocks = [
-        ("<|channel>", "<channel|>"),
-        ("<|tool_call>", "<tool_call|>"),
-        ("<|tool>", "<tool|>"),
-        ("<|tool_response>", "<tool_response|>"),
+        ("<think>", "</think>"),
+        ("<tool_call>", "</tool_call>"),
+        ("<tool_response>", "</tool_response>"),
     ]
 
     private static let oneShotControlTokens = [
-        "<bos>",
-        "<|turn>",
-        "<turn|>",
-        "<|image>",
-        "<image|>",
-        "<|audio>",
-        "<audio|>",
-        "<channel|>",
-        "<tool|>",
-        "<tool_call|>",
-        "<tool_response|>",
-        "<|image|>",
-        "<|audio|>",
-        "<|video|>",
-        "<|think|>",
+        "<|im_start|>", "<|im_end|>", "<|endoftext|>",
+        "<|vision_start|>", "<|vision_end|>", "<|image_pad|>", "<|video_pad|>", "</think>"
     ]
 
     private let tokenizer: any MLXLMCommon.Tokenizer

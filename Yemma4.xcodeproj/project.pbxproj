@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		ABCD0011 /* Fixtures in Resources */ = {isa = PBXBuildFile; fileRef = ABCD0012 /* Fixtures */; };
 		A1000001 /* RichMessageText.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000002 /* RichMessageText.swift */; };
 		A1000003 /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = A1000005 /* MarkdownUI */; };
 		2174B7FC2EE2C3471527756A /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E23D9EC68D2134067159DFB /* OnboardingView.swift */; };
@@ -35,7 +36,7 @@
 		D4000021 /* ChatSidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4000020 /* ChatSidebarView.swift */; };
 		CB7B05E97139FE38BFE49578 /* ConversationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60BF02FF587F6CBD41EDD4C6 /* ConversationStore.swift */; };
 		T2000001 /* ConversationStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T2000002 /* ConversationStoreTests.swift */; };
-		T2000003 /* Gemma4AssetContractTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T2000004 /* Gemma4AssetContractTests.swift */; };
+		T2000003 /* Qwen35AssetContractTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T2000004 /* Qwen35AssetContractTests.swift */; };
 		T2000005 /* ModelDownloadIntegrityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T2000006 /* ModelDownloadIntegrityTests.swift */; };
 		T2000007 /* ModelDownloadStorageCheckTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T2000008 /* ModelDownloadStorageCheckTests.swift */; };
 		T2000009 /* PureFunctionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T200000A /* PureFunctionTests.swift */; };
@@ -47,7 +48,7 @@
 		E1000005 /* Tokenizers in Frameworks */ = {isa = PBXBuildFile; productRef = E1000105 /* Tokenizers */; };
 		E1000006 /* MLXModelSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1000007 /* MLXModelSupport.swift */; };
 		E1000010 /* YemmaPromptPlanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1000011 /* YemmaPromptPlanner.swift */; };
-		E1000012 /* Gemma4SmokeAutomation.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1000013 /* Gemma4SmokeAutomation.swift */; };
+		E1000012 /* Qwen35SmokeAutomation.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1000013 /* Qwen35SmokeAutomation.swift */; };
 		F1000001 /* BackgroundModelDownloadCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1000002 /* BackgroundModelDownloadCoordinator.swift */; };
 		F1000005 /* ModelDownloadIntegrity.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1000006 /* ModelDownloadIntegrity.swift */; };
 		F1000003 /* Yemma4AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1000004 /* Yemma4AppDelegate.swift */; };
@@ -55,9 +56,9 @@
 		A99AA232E97D1E6B3675F3D1 /* InferenceTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A38BE3B08F3B50EFFB7042BA /* InferenceTypes.swift */; };
 		A6FDF382786B0404D37A6CDA /* ResponseStylePreset.swift in Sources */ = {isa = PBXBuildFile; fileRef = C16DB7E2130CABADE863ADA9 /* ResponseStylePreset.swift */; };
 		BA365CB7647CA171861E4E2A /* PromptTaskHint.swift in Sources */ = {isa = PBXBuildFile; fileRef = A32300F9A8E5CA293EA0FF7C /* PromptTaskHint.swift */; };
-		CC76BB276B940BFAA8E4C036 /* Gemma4TokenProcessing.swift in Sources */ = {isa = PBXBuildFile; fileRef = FFA0EF6719DEBFEAD0D0A02E /* Gemma4TokenProcessing.swift */; };
-		5FAE20BF03652835D89CAC39 /* Gemma4TokenDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97CAAF37DD55AE78E45211A4 /* Gemma4TokenDiagnostics.swift */; };
-		BFC8E1E3FB5D71C058B5FB8C /* Gemma4ModelLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00D9D1E6901B9C5CD37BE50 /* Gemma4ModelLoader.swift */; };
+		CC76BB276B940BFAA8E4C036 /* Qwen35TokenProcessing.swift in Sources */ = {isa = PBXBuildFile; fileRef = FFA0EF6719DEBFEAD0D0A02E /* Qwen35TokenProcessing.swift */; };
+		5FAE20BF03652835D89CAC39 /* Qwen35TokenDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97CAAF37DD55AE78E45211A4 /* Qwen35TokenDiagnostics.swift */; };
+		BFC8E1E3FB5D71C058B5FB8C /* Qwen35ModelLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00D9D1E6901B9C5CD37BE50 /* Qwen35ModelLoader.swift */; };
 		38C0066CC06C55B493C535BD /* ChatAttachmentImagePipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02F3DB87BA9086E340527903 /* ChatAttachmentImagePipeline.swift */; };
 		B74400F1CD903CB4036D1EAD /* ChatPreviews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 093343F714720EF797FF7B45 /* ChatPreviews.swift */; };
 		9585CA550B85CE1F30C961F2 /* ChatNavigationShell.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1B77AA568F5164C9940ED0A /* ChatNavigationShell.swift */; };
@@ -65,6 +66,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		ABCD0012 /* Fixtures */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Fixtures; sourceTree = "<group>"; };
 		11FB93FF040AF083B453837C /* ModelDownloader.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ModelDownloader.swift; sourceTree = "<group>"; };
 		39C187E5F33C4B9C302E7029 /* Yemma4.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = Yemma4.entitlements; sourceTree = "<group>"; };
 		P1000002 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
@@ -95,12 +97,12 @@
 		60BF02FF587F6CBD41EDD4C6 /* ConversationStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ConversationStore.swift; sourceTree = "<group>"; };
 		E1000007 /* MLXModelSupport.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MLXModelSupport.swift; sourceTree = "<group>"; };
 		E1000011 /* YemmaPromptPlanner.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = YemmaPromptPlanner.swift; sourceTree = "<group>"; };
-		E1000013 /* Gemma4SmokeAutomation.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = Gemma4SmokeAutomation.swift; sourceTree = "<group>"; };
+		E1000013 /* Qwen35SmokeAutomation.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = Qwen35SmokeAutomation.swift; sourceTree = "<group>"; };
 		F1000002 /* BackgroundModelDownloadCoordinator.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BackgroundModelDownloadCoordinator.swift; sourceTree = "<group>"; };
 		F1000006 /* ModelDownloadIntegrity.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ModelDownloadIntegrity.swift; sourceTree = "<group>"; };
 		F1000004 /* Yemma4AppDelegate.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = Yemma4AppDelegate.swift; sourceTree = "<group>"; };
 		T2000002 /* ConversationStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationStoreTests.swift; sourceTree = "<group>"; };
-		T2000004 /* Gemma4AssetContractTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Gemma4AssetContractTests.swift; sourceTree = "<group>"; };
+		T2000004 /* Qwen35AssetContractTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Qwen35AssetContractTests.swift; sourceTree = "<group>"; };
 		T2000006 /* ModelDownloadIntegrityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelDownloadIntegrityTests.swift; sourceTree = "<group>"; };
 		T2000008 /* ModelDownloadStorageCheckTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelDownloadStorageCheckTests.swift; sourceTree = "<group>"; };
 		T200000A /* PureFunctionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PureFunctionTests.swift; sourceTree = "<group>"; };
@@ -110,9 +112,9 @@
 		A38BE3B08F3B50EFFB7042BA /* InferenceTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InferenceTypes.swift; sourceTree = "<group>"; };
 		C16DB7E2130CABADE863ADA9 /* ResponseStylePreset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResponseStylePreset.swift; sourceTree = "<group>"; };
 		A32300F9A8E5CA293EA0FF7C /* PromptTaskHint.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromptTaskHint.swift; sourceTree = "<group>"; };
-		FFA0EF6719DEBFEAD0D0A02E /* Gemma4TokenProcessing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Gemma4TokenProcessing.swift; sourceTree = "<group>"; };
-		97CAAF37DD55AE78E45211A4 /* Gemma4TokenDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Gemma4TokenDiagnostics.swift; sourceTree = "<group>"; };
-		C00D9D1E6901B9C5CD37BE50 /* Gemma4ModelLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Gemma4ModelLoader.swift; sourceTree = "<group>"; };
+		FFA0EF6719DEBFEAD0D0A02E /* Qwen35TokenProcessing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Qwen35TokenProcessing.swift; sourceTree = "<group>"; };
+		97CAAF37DD55AE78E45211A4 /* Qwen35TokenDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Qwen35TokenDiagnostics.swift; sourceTree = "<group>"; };
+		C00D9D1E6901B9C5CD37BE50 /* Qwen35ModelLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Qwen35ModelLoader.swift; sourceTree = "<group>"; };
 		02F3DB87BA9086E340527903 /* ChatAttachmentImagePipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatAttachmentImagePipeline.swift; sourceTree = "<group>"; };
 		093343F714720EF797FF7B45 /* ChatPreviews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatPreviews.swift; sourceTree = "<group>"; };
 		B1B77AA568F5164C9940ED0A /* ChatNavigationShell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatNavigationShell.swift; sourceTree = "<group>"; };
@@ -154,8 +156,9 @@
 		T2000010 /* Yemma4Tests */ = {
 			isa = PBXGroup;
 			children = (
+				ABCD0012 /* Fixtures */,
 				T2000002 /* ConversationStoreTests.swift */,
-				T2000004 /* Gemma4AssetContractTests.swift */,
+				T2000004 /* Qwen35AssetContractTests.swift */,
 				T2000006 /* ModelDownloadIntegrityTests.swift */,
 				T2000008 /* ModelDownloadStorageCheckTests.swift */,
 				T200000A /* PureFunctionTests.swift */,
@@ -245,12 +248,12 @@
 				8AA2B0C22D410A8900E8C001 /* AppDiagnostics.swift */,
 				A3000002 /* AppleFoundationModelRuntime.swift */,
 				F1000002 /* BackgroundModelDownloadCoordinator.swift */,
-				E1000013 /* Gemma4SmokeAutomation.swift */,
+				E1000013 /* Qwen35SmokeAutomation.swift */,
 				70EEE36ABE229B869B690BFB /* LLMService.swift */,
 				02F3DB87BA9086E340527903 /* ChatAttachmentImagePipeline.swift */,
-				C00D9D1E6901B9C5CD37BE50 /* Gemma4ModelLoader.swift */,
-				97CAAF37DD55AE78E45211A4 /* Gemma4TokenDiagnostics.swift */,
-				FFA0EF6719DEBFEAD0D0A02E /* Gemma4TokenProcessing.swift */,
+				C00D9D1E6901B9C5CD37BE50 /* Qwen35ModelLoader.swift */,
+				97CAAF37DD55AE78E45211A4 /* Qwen35TokenDiagnostics.swift */,
+				FFA0EF6719DEBFEAD0D0A02E /* Qwen35TokenProcessing.swift */,
 				A32300F9A8E5CA293EA0FF7C /* PromptTaskHint.swift */,
 				C16DB7E2130CABADE863ADA9 /* ResponseStylePreset.swift */,
 				A38BE3B08F3B50EFFB7042BA /* InferenceTypes.swift */,
@@ -380,6 +383,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				ABCD0011 /* Fixtures in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -398,7 +402,7 @@
 				8AA2B0C32D410A8900E8C001 /* AppDiagnostics.swift in Sources */,
 				A3000001 /* AppleFoundationModelRuntime.swift in Sources */,
 				F1000001 /* BackgroundModelDownloadCoordinator.swift in Sources */,
-				E1000012 /* Gemma4SmokeAutomation.swift in Sources */,
+				E1000012 /* Qwen35SmokeAutomation.swift in Sources */,
 				E1000006 /* MLXModelSupport.swift in Sources */,
 				F1000005 /* ModelDownloadIntegrity.swift in Sources */,
 				8804C30D1CAED09270D51D6D /* LLMService.swift in Sources */,
@@ -406,9 +410,9 @@
 				9585CA550B85CE1F30C961F2 /* ChatNavigationShell.swift in Sources */,
 				B74400F1CD903CB4036D1EAD /* ChatPreviews.swift in Sources */,
 				38C0066CC06C55B493C535BD /* ChatAttachmentImagePipeline.swift in Sources */,
-				BFC8E1E3FB5D71C058B5FB8C /* Gemma4ModelLoader.swift in Sources */,
-				5FAE20BF03652835D89CAC39 /* Gemma4TokenDiagnostics.swift in Sources */,
-				CC76BB276B940BFAA8E4C036 /* Gemma4TokenProcessing.swift in Sources */,
+				BFC8E1E3FB5D71C058B5FB8C /* Qwen35ModelLoader.swift in Sources */,
+				5FAE20BF03652835D89CAC39 /* Qwen35TokenDiagnostics.swift in Sources */,
+				CC76BB276B940BFAA8E4C036 /* Qwen35TokenProcessing.swift in Sources */,
 				BA365CB7647CA171861E4E2A /* PromptTaskHint.swift in Sources */,
 				A6FDF382786B0404D37A6CDA /* ResponseStylePreset.swift in Sources */,
 				A99AA232E97D1E6B3675F3D1 /* InferenceTypes.swift in Sources */,
@@ -437,7 +441,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				T2000001 /* ConversationStoreTests.swift in Sources */,
-				T2000003 /* Gemma4AssetContractTests.swift in Sources */,
+				T2000003 /* Qwen35AssetContractTests.swift in Sources */,
 				T2000005 /* ModelDownloadIntegrityTests.swift in Sources */,
 				T2000007 /* ModelDownloadStorageCheckTests.swift in Sources */,
 				T2000009 /* PureFunctionTests.swift in Sources */,

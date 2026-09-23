@@ -157,7 +157,7 @@ public struct OnboardingView: View {
             SetupStatusRow(
                 systemImage: "exclamationmark.triangle.fill",
                 title: appSetup.appleFoundationModelAvailability.title,
-                trailing: "Use Gemma"
+                trailing: "Use Qwen"
             )
         case .intro:
             VStack(alignment: .leading, spacing: 10) {
@@ -253,7 +253,7 @@ public struct OnboardingView: View {
                 return "Use Apple's built-in on-device model with no Yemma model download."
             }
 
-            return "Apple's built-in model is not ready here. Choose Gemma explicitly if you want to continue."
+            return "Apple's built-in model is not ready here. Choose Qwen explicitly if you want to continue."
         }
 
         return "One-time setup saves the model on this iPhone. After that, Yemma works offline for everyday tasks."
@@ -275,7 +275,7 @@ public struct OnboardingView: View {
                 badgeText: "Ready",
                 title: "Yemma is ready",
                 message: "Apple's on-device model is ready for private text chat. No Yemma model download is needed.",
-                note: "Choose Gemma 4 later if you want image understanding.",
+                note: "Choose Qwen3.5 4B later if you want image understanding.",
                 actionTitle: "Open chat",
                 actionSubtitle: "Built into iOS and ready now"
             )
@@ -285,16 +285,16 @@ public struct OnboardingView: View {
                 title: appSetup.appleFoundationModelAvailability.title,
                 message: appSetup.appleFoundationModelAvailability.detail,
                 note: "Yemma will not switch models or start a download automatically.",
-                actionTitle: "Use Gemma 4",
+                actionTitle: "Use Qwen3.5 4B",
                 actionSubtitle: "Select the optional model without starting its download"
             )
         case .intro:
             return SetupCopy(
-                badgeText: "Gemma 4 setup",
-                title: "Download Gemma 4",
-                message: "Save the optional Gemma 4 model on this iPhone for notes, rewrites, questions, and image help.",
+                badgeText: "Qwen3.5 4B setup",
+                title: "Download Qwen3.5 4B",
+                message: "Save the optional Qwen3.5 4B model on this iPhone for notes, rewrites, questions, and image help.",
                 note: "Best for everyday personal tasks. For hard or very current questions, a cloud model may still do better.",
-                actionTitle: "Download Gemma 4",
+                actionTitle: "Download Qwen3.5 4B",
                 actionSubtitle: "Start the explicit one-time download"
             )
         case .downloading:
@@ -320,7 +320,7 @@ public struct OnboardingView: View {
                 return SetupCopy(
                     badgeText: "Removing model",
                     title: "Removing the downloaded model",
-                    message: "Yemma is removing the optional Gemma files from this iPhone.",
+                    message: "Yemma is removing the optional Qwen files from this iPhone.",
                     note: "Apple's built-in model and your conversations are unaffected.",
                     actionTitle: "Open chat",
                     actionSubtitle: "Available after removal finishes"
@@ -359,7 +359,7 @@ public struct OnboardingView: View {
                     badgeText: "Removal paused",
                     title: "Model removal did not finish",
                     message: "Yemma kept the model unavailable so partially removed files cannot be loaded.",
-                    note: "Retry removal to finish clearing the optional Gemma files.",
+                    note: "Retry removal to finish clearing the optional Qwen files.",
                     actionTitle: "Retry removal",
                     actionSubtitle: "Continue removing the local model"
                 )
@@ -418,8 +418,8 @@ public struct OnboardingView: View {
             return [
                 SetupStat(title: "Status", value: appSetup.appleFoundationModelAvailability.title),
                 SetupStat(title: "Yemma download", value: "0 GB"),
-                SetupStat(title: "Alternative", value: "Gemma 4"),
-                SetupStat(title: "Next step", value: "Choose Gemma")
+                SetupStat(title: "Alternative", value: "Qwen3.5 4B"),
+                SetupStat(title: "Next step", value: "Choose Qwen")
             ]
         case .intro:
             return [
@@ -507,7 +507,7 @@ public struct OnboardingView: View {
             if !appSetup.appleFoundationModelAvailability.isAvailable {
                 return [
                     SetupBenefit(title: "No automatic switch", systemImage: "arrow.triangle.2.circlepath"),
-                    SetupBenefit(title: "Optional Gemma model", systemImage: "cube.transparent"),
+                    SetupBenefit(title: "Optional Qwen model", systemImage: "cube.transparent"),
                     SetupBenefit(title: "Runs on-device", systemImage: "iphone")
                 ]
             }
@@ -578,7 +578,7 @@ public struct OnboardingView: View {
         case .simulator, .appleReady, .preparing, .ready:
             onContinue?()
         case .appleUnavailable:
-            Task { await selectGemmaRuntime() }
+            Task { await selectQwenRuntime() }
         case .failed where appSetup.modelDeletionError != nil:
             Task { _ = await modelDownloader.deleteModel() }
         case .failed where hasModelPreparationError:
@@ -592,7 +592,7 @@ public struct OnboardingView: View {
     private func startDownload() async {
         guard !isStartingDownload else { return }
         guard supportsLocalModelRuntime else { return }
-        guard llmService.selectedRuntime == .gemma4 else { return }
+        guard llmService.selectedRuntime == .qwen35 else { return }
         guard appSetup.modelDeletionError == nil else { return }
         guard !appSetup.hasModelPreparationError else { return }
         guard !modelDownloader.isDownloading else { return }
@@ -603,13 +603,13 @@ public struct OnboardingView: View {
     }
 
     @MainActor
-    private func selectGemmaRuntime() async {
+    private func selectQwenRuntime() async {
         guard !isSelectingRuntime else { return }
-        guard llmService.selectedRuntime != .gemma4 else { return }
+        guard llmService.selectedRuntime != .qwen35 else { return }
 
         isSelectingRuntime = true
         defer { isSelectingRuntime = false }
-        guard await llmService.selectRuntime(.gemma4) else {
+        guard await llmService.selectRuntime(.qwen35) else {
             runtimeSelectionError = llmService.lastError
                 ?? "The current model is still stopping. Try again in a moment."
             return

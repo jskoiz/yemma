@@ -51,7 +51,7 @@ struct GenerationDebugStats: Sendable, Equatable {
 
 enum LLMServiceError: LocalizedError {
     case modelNotLoaded
-    case gemmaRuntimeNotSelected
+    case qwenRuntimeNotSelected
     case modelLoadFailed(path: String)
     case assetValidationFailed(Error)
     case processorFailed(Error)
@@ -60,8 +60,8 @@ enum LLMServiceError: LocalizedError {
         switch self {
         case .modelNotLoaded:
             return "No MLX model bundle is loaded."
-        case .gemmaRuntimeNotSelected:
-            return "Select Gemma 4 before loading its model bundle."
+        case .qwenRuntimeNotSelected:
+            return "Select Qwen3.5 4B before loading its model bundle."
         case let .modelLoadFailed(path):
             return "Failed to load the MLX model bundle at \(path)."
         case let .assetValidationFailed(error):
@@ -115,7 +115,7 @@ struct ModelLoadCoordinator: Sendable {
     }
 }
 
-struct Gemma4ConversationMessage: Sendable {
+struct Qwen35ConversationMessage: Sendable {
     let role: String
     let content: String
     let imageURLs: [URL]

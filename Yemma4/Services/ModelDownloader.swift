@@ -119,14 +119,14 @@ struct AppSetupSnapshot {
         switch selectedRuntime {
         case .appleFoundationModel:
             return isTextModelReady
-        case .gemma4:
+        case .qwen35:
             return isDownloaded || isModelLoading || isTextModelReady
         }
     }
 
     var hasModelPreparationError: Bool {
         supportsLocalModelRuntime
-            && selectedRuntime == .gemma4
+            && selectedRuntime == .qwen35
             && isDownloaded
             && !isTextModelReady
             && !isModelLoading
@@ -242,7 +242,7 @@ struct AppSetupSnapshot {
         }
 
         if isDeletingModel {
-            return "Removing the optional Gemma files from this iPhone."
+            return "Removing the optional Qwen files from this iPhone."
         }
 
         if isDownloading {
@@ -273,7 +273,7 @@ struct AppSetupSnapshot {
     }
 
     var chatStatusProgress: Double? {
-        guard supportsLocalModelRuntime, selectedRuntime == .gemma4, isDownloading else {
+        guard supportsLocalModelRuntime, selectedRuntime == .qwen35, isDownloading else {
             return nil
         }
         return downloadProgress
@@ -291,7 +291,7 @@ struct AppSetupSnapshot {
 
     var chatRecoveryAction: SetupRecoveryAction? {
         guard supportsLocalModelRuntime,
-              selectedRuntime == .gemma4,
+              selectedRuntime == .qwen35,
               !isDownloading,
               !isValidatingDownloadedModel,
               !isDeletingModel else {
@@ -319,7 +319,7 @@ struct AppSetupSnapshot {
 
     var shouldShowStartupOverlay: Bool {
         supportsLocalModelRuntime
-            && selectedRuntime == .gemma4
+            && selectedRuntime == .qwen35
             && !isTextModelReady
             && modelLoadError == nil
             && (isDownloaded || isValidatingDownloadedModel || isDeletingModel)
@@ -371,7 +371,10 @@ public final class ModelDownloader {
     private var lastSpeedSampleDate: Date?
     private var lastSpeedSampleBytes: Int64 = 0
     private var currentDownloadedBytes: Int64 = 0
-    private var currentEstimatedBytes: Int64 = Gemma4MLXSupport.approximateDownloadBytes
+    private var currentEstimatedBytes: Int64 = Qwen35MLXSupport.approximateDownloadBytes
+
+    private static let legacyRepositoryID = "mlx-community/gemma-4-e2b-it-4bit"
+    public private(set) var hasLegacyModelFiles = false
 
     private let fileManager: FileManager
     private let defaults: UserDefaults
@@ -396,6 +399,9 @@ public final class ModelDownloader {
         self.fileManager = fileManager
         self.defaults = defaults
         self.makeHub = hubFactory
+        hasLegacyModelFiles = fileManager.fileExists(atPath: hubClient().localRepoLocation(
+            Hub.Repo(id: Self.legacyRepositoryID)
+        ).path)
         restorePersistedState()
     }
 
@@ -510,14 +516,14 @@ public final class ModelDownloader {
         if let validation {
             await BackgroundModelDownloadCoordinator.shared.clearState(
                 using: hub,
-                repositoryID: Gemma4MLXSupport.repositoryID
+                repositoryID: Qwen35MLXSupport.repositoryID
             )
             guard revision == modelLifecycleRevision else { return }
             finishWithCachedDownload(validation)
         } else {
             let snapshot = await BackgroundModelDownloadCoordinator.shared.snapshot(
                 using: hub,
-                repositoryID: Gemma4MLXSupport.repositoryID
+                repositoryID: Qwen35MLXSupport.repositoryID
             )
             guard revision == modelLifecycleRevision else { return }
             applyMissingValidatedModelState(snapshot)
@@ -527,7 +533,7 @@ public final class ModelDownloader {
             "Validated local MLX model state",
             category: "download",
             metadata: [
-                "repository": Gemma4MLXSupport.repositoryID,
+                "repository": Qwen35MLXSupport.repositoryID,
                 "isDownloaded": isDownloaded,
                 "modelPath": modelPath ?? "nil"
             ]
@@ -565,7 +571,7 @@ public final class ModelDownloader {
                 finishWithCachedDownload(cachedDirectory)
                 await BackgroundModelDownloadCoordinator.shared.clearState(
                     using: hub,
-                    repositoryID: Gemma4MLXSupport.repositoryID
+                    repositoryID: Qwen35MLXSupport.repositoryID
                 )
                 return
             }
@@ -575,14 +581,14 @@ public final class ModelDownloader {
             AppDiagnostics.shared.record(
                 "Starting MLX model bundle download",
                 category: "download",
-                metadata: ["repository": Gemma4MLXSupport.repositoryID]
+                metadata: ["repository": Qwen35MLXSupport.repositoryID]
             )
 
             let snapshot = try await BackgroundModelDownloadCoordinator.shared.startDownload(
                 using: hub,
-                repositoryID: Gemma4MLXSupport.repositoryID,
-                revision: Gemma4MLXSupport.repositoryRevision,
-                matching: Gemma4MLXSupport.downloadPatterns
+                repositoryID: Qwen35MLXSupport.repositoryID,
+                revision: Qwen35MLXSupport.repositoryRevision,
+                matching: Qwen35MLXSupport.downloadPatterns
             )
 
             applyBackgroundSnapshot(snapshot)
@@ -650,21 +656,23 @@ public final class ModelDownloader {
 
         await BackgroundModelDownloadCoordinator.shared.clearState(
             using: hub,
-            repositoryID: Gemma4MLXSupport.repositoryID
+            repositoryID: Qwen35MLXSupport.repositoryID
         )
 
-        let cachedDirectory = hub.localRepoLocation(
-            Hub.Repo(id: Gemma4MLXSupport.repositoryID)
-        )
+        await BackgroundModelDownloadCoordinator.shared.clearState(using: hub, repositoryID: Self.legacyRepositoryID)
+        let cachedDirectories = [Qwen35MLXSupport.repositoryID, Self.legacyRepositoryID].map {
+            hub.localRepoLocation(Hub.Repo(id: $0))
+        }
         let fileManager = self.fileManager
 
         do {
             try await Task.detached(priority: .utility) {
-                if fileManager.fileExists(atPath: cachedDirectory.path) {
-                    try fileManager.removeItem(at: cachedDirectory)
+                for directory in cachedDirectories where fileManager.fileExists(atPath: directory.path) {
+                    try fileManager.removeItem(at: directory)
                 }
             }.value
 
+            hasLegacyModelFiles = false
             clearModelDeletionTombstone()
             AppDiagnostics.shared.record("Deleted local MLX model bundle", category: "download")
             return true
@@ -691,7 +699,7 @@ public final class ModelDownloader {
         canResumeDownload = false
         downloadProgress = 0
         currentDownloadedBytes = 0
-        currentEstimatedBytes = Gemma4MLXSupport.approximateDownloadBytes
+        currentEstimatedBytes = Qwen35MLXSupport.approximateDownloadBytes
         error = nil
         modelDeletionError = nil
         resetETA()
@@ -716,7 +724,7 @@ public final class ModelDownloader {
         canResumeDownload = false
         downloadProgress = 0
         currentDownloadedBytes = 0
-        currentEstimatedBytes = Gemma4MLXSupport.approximateDownloadBytes
+        currentEstimatedBytes = Qwen35MLXSupport.approximateDownloadBytes
         modelDeletionError = message
         error = message
         resetETA()
@@ -741,7 +749,7 @@ public final class ModelDownloader {
         downloadProgress = 0
         modelPath = nil
         currentDownloadedBytes = 0
-        currentEstimatedBytes = Gemma4MLXSupport.approximateDownloadBytes
+        currentEstimatedBytes = Qwen35MLXSupport.approximateDownloadBytes
         estimatedSecondsRemaining = nil
         currentDownloadSpeedBytesPerSecond = nil
         error = Self.unsupportedRuntimeMessage
@@ -758,7 +766,7 @@ public final class ModelDownloader {
         modelDeletionError = nil
         downloadProgress = 0
         currentDownloadedBytes = 0
-        currentEstimatedBytes = Gemma4MLXSupport.approximateDownloadBytes
+        currentEstimatedBytes = Qwen35MLXSupport.approximateDownloadBytes
         startETA()
     }
 
@@ -832,7 +840,7 @@ public final class ModelDownloader {
 
                 let snapshot = await BackgroundModelDownloadCoordinator.shared.snapshot(
                     using: hub,
-                    repositoryID: Gemma4MLXSupport.repositoryID
+                    repositoryID: Qwen35MLXSupport.repositoryID
                 )
                 guard !Task.isCancelled else {
                     return
@@ -851,31 +859,28 @@ public final class ModelDownloader {
 
     private func firstValidModelDirectoryAsync(using hub: HubApi) async -> (ValidatedModelDirectory, Int64)? {
         let validationTask = Task.detached(priority: .utility) { () -> (ValidatedModelDirectory, Int64)? in
-            let location = hub.localRepoLocation(Hub.Repo(id: Gemma4MLXSupport.repositoryID))
+            let location = hub.localRepoLocation(Hub.Repo(id: Qwen35MLXSupport.repositoryID))
             guard let validatedDirectory = try? ModelDirectoryValidator.validatedDirectory(at: location) else {
                 return nil
             }
 
-            // A structurally-present bundle is not enough: the Gemma 4 asset
-            // contract (token ids / soft-token budget / pooling) must also hold
-            // so that "downloaded" implies "loadable". This cheaply reads the
-            // processor/config JSON only — full weights are not loaded here.
+            // Check the processor, image-aware template, and actual vision tensor
+            // headers before publishing readiness. Weight payloads stay on disk.
             do {
-                try Gemma4MLXSupport.normalizeAssetContractIfNeeded(validatedDirectory)
-                try Gemma4MLXSupport.validateAssetContract(validatedDirectory)
+                try Qwen35MLXSupport.validateAssetContract(validatedDirectory)
             } catch {
                 AppDiagnostics.shared.record(
-                    "Rejected downloaded MLX bundle that failed the Gemma 4 asset contract",
+                    "Rejected downloaded MLX bundle that failed the Qwen3.5 4B asset contract",
                     category: "download",
                     metadata: [
-                        "repository": Gemma4MLXSupport.repositoryID,
+                        "repository": Qwen35MLXSupport.repositoryID,
                         "error": (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
                     ]
                 )
                 return nil
             }
 
-            return (validatedDirectory, Gemma4MLXSupport.directorySize(at: location))
+            return (validatedDirectory, Qwen35MLXSupport.directorySize(at: location))
         }
 
         return await validationTask.value
@@ -901,7 +906,7 @@ public final class ModelDownloader {
         isDownloading = snapshot.hasRunningTasks
         canResumeDownload = snapshot.hasPendingWork && !snapshot.hasRunningTasks
         currentDownloadedBytes = snapshot.completedBytes
-        currentEstimatedBytes = max(snapshot.totalBytes, Gemma4MLXSupport.approximateDownloadBytes)
+        currentEstimatedBytes = max(snapshot.totalBytes, Qwen35MLXSupport.approximateDownloadBytes)
         downloadProgress = snapshot.progress
         error = snapshot.hasRunningTasks ? nil : snapshot.lastError
         updateSpeedSample(with: snapshot.completedBytes, running: snapshot.hasRunningTasks)
@@ -958,7 +963,7 @@ public final class ModelDownloader {
     private func describe(_ error: Error) -> String {
         if case Hub.HubClientError.authorizationRequired = error {
             return """
-                Yemma could not download the shipped Hugging Face model (\(Gemma4MLXSupport.repositoryID)) because authentication was required. Check your connection and try again.
+                Yemma could not download the shipped Hugging Face model (\(Qwen35MLXSupport.repositoryID)) because authentication was required. Check your connection and try again.
                 """
         }
 
@@ -972,7 +977,7 @@ public final class ModelDownloader {
     private static let unsupportedRuntimeMessage =
         "Local MLX downloads are disabled in the iOS Simulator. Run Yemma on a physical iPhone for real on-device inference."
     private static let interruptedDeletionMessage =
-        "The previous model removal did not finish. Retry removal to clear the optional Gemma files."
+        "The previous model removal did not finish. Retry removal to clear the optional Qwen files."
 
     private func restorePersistedState() {
         if defaults.bool(forKey: Self.modelDeletionPendingKey) {

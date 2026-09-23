@@ -6,7 +6,7 @@ import FoundationModels
 
 enum InferenceRuntime: String, CaseIterable, Identifiable, Sendable {
     case appleFoundationModel
-    case gemma4
+    case qwen35
 
     var id: String { rawValue }
 
@@ -14,8 +14,8 @@ enum InferenceRuntime: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .appleFoundationModel:
             return "Apple"
-        case .gemma4:
-            return "Gemma 4"
+        case .qwen35:
+            return "Qwen3.5 4B Abliterated"
         }
     }
 
@@ -23,8 +23,8 @@ enum InferenceRuntime: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .appleFoundationModel:
             return "Built into Apple Intelligence. No Yemma model download."
-        case .gemma4:
-            return "Optional 4.2 GB download with image understanding."
+        case .qwen35:
+            return "Optional 3.05 GB download with image understanding."
         }
     }
 
@@ -32,13 +32,13 @@ enum InferenceRuntime: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .appleFoundationModel:
             return "Apple Foundation Models"
-        case .gemma4:
-            return "Gemma 4 MLX"
+        case .qwen35:
+            return "Qwen3.5 4B MLX"
         }
     }
 
     var supportsImageInput: Bool {
-        self == .gemma4
+        self == .qwen35
     }
 
     static func initialSelection(
@@ -51,7 +51,7 @@ enum InferenceRuntime: String, CaseIterable, Identifiable, Sendable {
 
         switch appleAvailability {
         case .requiresIOS26, .deviceNotEligible:
-            return .gemma4
+            return .qwen35
         case .available, .appleIntelligenceNotEnabled, .modelNotReady, .unsupportedLocale:
             return .appleFoundationModel
         }
@@ -92,15 +92,15 @@ enum AppleFoundationModelAvailability: Equatable, Sendable {
         case .available:
             return "The system model is ready on this iPhone."
         case .requiresIOS26:
-            return "The built-in model requires iOS 26 or newer. Gemma remains available as an optional download."
+            return "The built-in model requires iOS 26 or newer. Qwen remains available as an optional download."
         case .deviceNotEligible:
-            return "This iPhone does not support the Apple Intelligence system model. Gemma remains available as an optional download."
+            return "This iPhone does not support the Apple Intelligence system model. Qwen remains available as an optional download."
         case .appleIntelligenceNotEnabled:
-            return "Turn on Apple Intelligence in Settings, or choose Gemma for local chat."
+            return "Turn on Apple Intelligence in Settings, or choose Qwen for local chat."
         case .modelNotReady:
             return "iOS is still preparing the built-in model. Yemma will check again when the app becomes active."
         case .unsupportedLocale:
-            return "The current app language is not supported by the built-in model. Choose a supported language or use Gemma."
+            return "The current app language is not supported by the built-in model. Choose a supported language or use Qwen."
         }
     }
 }
@@ -116,9 +116,9 @@ enum AppleFoundationModelRuntimeError: LocalizedError {
         case let .unavailable(availability):
             return availability.detail
         case .imagesUnsupported:
-            return "Image chat currently requires the optional Gemma 4 model."
+            return "Image chat currently requires the optional Qwen3.5 4B model."
         case .imageHistoryUnsupported:
-            return "This chat contains images. Start a new text chat or switch to Gemma 4."
+            return "This chat contains images. Start a new text chat or switch to Qwen3.5 4B."
         case .nonMonotonicSnapshot:
             return "The Apple model returned an unexpected streaming update. Try the request again."
         }

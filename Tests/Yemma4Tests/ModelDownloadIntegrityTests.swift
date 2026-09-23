@@ -4,8 +4,8 @@ import XCTest
 @testable import Yemma4
 
 final class ModelDownloadIntegrityTests: XCTestCase {
-    func testGemma4RepositoryRevisionIsPinnedToCommitSHA() {
-        let revision = Gemma4MLXSupport.repositoryRevision
+    func testQwen35RepositoryRevisionIsPinnedToCommitSHA() {
+        let revision = Qwen35MLXSupport.repositoryRevision
 
         XCTAssertNotEqual(revision, "main")
         XCTAssertEqual(revision.count, 40)

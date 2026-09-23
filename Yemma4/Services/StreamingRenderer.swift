@@ -9,6 +9,7 @@ struct StreamingRenderer: Sendable {
     // MARK: - Marker Tables
 
     private static let controlMarkers = [
+        "<|im_start|>", "<|im_end|>", "<|endoftext|>", "<think>", "</think>",
         "<start_of_turn>",
         "<end_of_turn>",
         "<|start_of_turn|>",
@@ -29,6 +30,7 @@ struct StreamingRenderer: Sendable {
     ]
 
     private static let responseBoundaryMarkers = [
+        "<|im_end|>", "<|endoftext|>", "<|im_start|>user",
         "<end_of_turn>",
         "<|end_of_turn|>",
         "<turn|>",
@@ -39,6 +41,7 @@ struct StreamingRenderer: Sendable {
     ]
 
     private static let rolePrefixes = [
+        "<|im_start|>assistant\n",
         "model\n",
         "assistant\n",
         "user\n",
@@ -140,18 +143,15 @@ struct StreamingRenderer: Sendable {
     /// no matching close tag the remainder of the string is removed (the block
     /// is still being streamed).
     static func stripThinkingBlocks(from text: String) -> String {
-        guard text.contains("<|channel>") else {
-            return text
-        }
-
         var cleaned = text
-
-        while let startRange = cleaned.range(of: "<|channel>") {
-            if let endRange = cleaned.range(of: "<channel|>", range: startRange.upperBound..<cleaned.endIndex) {
-                cleaned.removeSubrange(startRange.lowerBound..<endRange.upperBound)
-            } else {
-                cleaned.removeSubrange(startRange.lowerBound..<cleaned.endIndex)
-                break
+        for (start, end) in [("<|channel>", "<channel|>"), ("<think>", "</think>")] {
+            while let startRange = cleaned.range(of: start) {
+                if let endRange = cleaned.range(of: end, range: startRange.upperBound..<cleaned.endIndex) {
+                    cleaned.removeSubrange(startRange.lowerBound..<endRange.upperBound)
+                } else {
+                    cleaned.removeSubrange(startRange.lowerBound..<cleaned.endIndex)
+                    break
+                }
             }
         }
 
