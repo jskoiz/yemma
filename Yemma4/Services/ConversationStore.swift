@@ -51,8 +51,14 @@ enum ConversationAttachmentStore {
         return supportDirectory.appendingPathComponent(directoryName, isDirectory: true)
     }
 
-    static func legacyDirectoryURL(fileManager: FileManager = .default) -> URL {
-        fileManager.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+    static func legacyDirectoryURL(
+        fileManager: FileManager = .default,
+        baseDirectoryOverride: URL? = nil
+    ) -> URL {
+        if let baseDirectoryOverride {
+            return baseDirectoryOverride.appendingPathComponent("Caches/chat-attachments", isDirectory: true)
+        }
+        return fileManager.urls(for: .cachesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent(directoryName, isDirectory: true)
     }
 
@@ -64,7 +70,7 @@ enum ConversationAttachmentStore {
         legacyDirectory: URL? = nil,
         baseDirectoryOverride: URL? = nil
     ) throws {
-        let source = legacyDirectory ?? legacyDirectoryURL(fileManager: fileManager)
+        let source = legacyDirectory ?? legacyDirectoryURL(fileManager: fileManager, baseDirectoryOverride: baseDirectoryOverride)
         guard fileManager.fileExists(atPath: source.path) else { return }
         let destination = try prepareDirectory(
             fileManager: fileManager, baseDirectoryOverride: baseDirectoryOverride
@@ -117,12 +123,24 @@ enum ConversationAttachmentStore {
     static func removeAll(
         fileManager: FileManager = .default,
         baseDirectoryOverride: URL? = nil
-    ) -> Int {
-        let directory = directoryURL(fileManager: fileManager, baseDirectoryOverride: baseDirectoryOverride)
-        guard fileManager.fileExists(atPath: directory.path) else { return 0 }
-
-        let removedCount = fileCount(in: directory, fileManager: fileManager)
-        try? fileManager.removeItem(at: directory)
+    ) throws -> Int {
+        let directories = [
+            directoryURL(fileManager: fileManager, baseDirectoryOverride: baseDirectoryOverride),
+            legacyDirectoryURL(fileManager: fileManager, baseDirectoryOverride: baseDirectoryOverride)
+        ]
+        var removedCount = 0
+        var firstError: Error?
+        // Attempt both locations even if one fails; preserve the error for retry.
+        for directory in directories where fileManager.fileExists(atPath: directory.path) {
+            do {
+                let count = fileCount(in: directory, fileManager: fileManager)
+                try fileManager.removeItem(at: directory)
+                removedCount += count
+            } catch {
+                firstError = firstError ?? error
+            }
+        }
+        if let firstError { throw firstError }
         return removedCount
     }
 
@@ -223,18 +241,22 @@ final class ConversationStore {
     var conversations: [ConversationMetadata] = []
     var currentConversationID: UUID?
     var storageError: String?
+    var historyDeletionError: String?
 
     private let fileManager: FileManager
     private let defaults: UserDefaults
     private let storageRootOverride: URL?
     // Protects persisted store mutations so file I/O helpers remain safe if they are ever reused off the main actor.
     private let ioLock = NSLock()
+    @ObservationIgnored private var hasAttemptedAttachmentMigration = false
+    @ObservationIgnored private var pendingNewConversationID: UUID?
     @ObservationIgnored private var hasLoadedConversationIndex = false
     @ObservationIgnored private var isLoadingConversationIndex = false
 
     private static let indexFileName = "index.json"
     private static let conversationFileName = "conversation.json"
     private static let currentConversationDefaultsKey = "currentConversationID"
+    private static let pendingConversationDefaultsKey = "pendingConversationID"
 
     init(
         fileManager: FileManager = .default,
@@ -244,6 +266,8 @@ final class ConversationStore {
         self.fileManager = fileManager
         self.defaults = defaults
         self.storageRootOverride = storageRootOverride
+        pendingNewConversationID = defaults.string(forKey: Self.pendingConversationDefaultsKey)
+            .flatMap(UUID.init(uuidString:))
         if let rawID = defaults.string(forKey: Self.currentConversationDefaultsKey),
            let conversationID = UUID(uuidString: rawID) {
             currentConversationID = conversationID
@@ -255,12 +279,33 @@ final class ConversationStore {
             return currentConversationID
         }
 
+        if let pendingID = pendingNewConversationID,
+           let pending = readConversation(id: pendingID) {
+            try persist(conversation: pending, metadata: Self.recoveredMetadata(from: pending))
+            setCurrentConversation(id: pendingID)
+            finishPendingConversation(id: pendingID)
+            return pendingID
+        }
         return try startFreshConversation()
+    }
+
+    private func pendingConversationID() -> UUID {
+        if let pendingNewConversationID { return pendingNewConversationID }
+        let id = UUID()
+        pendingNewConversationID = id
+        defaults.set(id.uuidString, forKey: Self.pendingConversationDefaultsKey)
+        return id
+    }
+
+    private func finishPendingConversation(id: UUID) {
+        guard pendingNewConversationID == id else { return }
+        pendingNewConversationID = nil
+        defaults.removeObject(forKey: Self.pendingConversationDefaultsKey)
     }
 
     @discardableResult
     func startFreshConversation(title: String? = nil) throws -> UUID {
-        let conversationID = UUID()
+        let conversationID = pendingConversationID()
         let createdAt = Date()
         let resolvedTitle = cleanedTitle(title) ?? "New chat"
         let isCustomTitle = cleanedTitle(title) != nil
@@ -286,6 +331,7 @@ final class ConversationStore {
 
         try persist(conversation: conversation, metadata: metadata)
         setCurrentConversation(id: conversationID)
+        finishPendingConversation(id: conversationID)
         return conversationID
     }
 
@@ -320,6 +366,7 @@ final class ConversationStore {
     }
 
     func loadConversation(id: UUID) -> ConversationSnapshot? {
+        prepareAttachmentsBeforeRestore()
         guard let conversation = readConversation(id: id) else {
             return nil
         }
@@ -334,6 +381,7 @@ final class ConversationStore {
     }
 
     func loadConversationAsync(id: UUID) async -> ConversationSnapshot? {
+        prepareAttachmentsBeforeRestore()
         let conversationURL = conversationURL(for: id)
         let rootOverride = storageRootOverride
         return await Task.detached(priority: .utility) {
@@ -345,14 +393,26 @@ final class ConversationStore {
         guard !hasLoadedConversationIndex else { return }
         guard !isLoadingConversationIndex else { return }
         isLoadingConversationIndex = true
-        if storageRootOverride == nil {
-            do {
-                try ConversationAttachmentStore.migrateLegacyFiles(fileManager: fileManager)
-            } catch {
-                reportStorageError(error)
-            }
-        }
+        prepareAttachmentsBeforeRestore()
         await loadIndexAsync()
+    }
+
+    private func prepareAttachmentsBeforeRestore() {
+        guard !hasAttemptedAttachmentMigration else { return }
+        // Never move files after handing a snapshot to the UI. If a move fails,
+        // existing cache URLs stay usable and migration retries next launch.
+        hasAttemptedAttachmentMigration = true
+        do {
+            try ConversationAttachmentStore.migrateLegacyFiles(
+                fileManager: fileManager, baseDirectoryOverride: storageRootOverride
+            )
+        } catch {
+            AppDiagnostics.shared.record(
+                "Attachment migration deferred until next launch",
+                category: "storage",
+                metadata: ["error": error.localizedDescription]
+            )
+        }
     }
 
     @discardableResult
@@ -362,7 +422,7 @@ final class ConversationStore {
         draftText: String,
         draftAttachments: [Attachment]
     ) throws -> UUID {
-        let conversationID = id ?? currentConversationID ?? UUID()
+        let conversationID = id ?? currentConversationID ?? pendingConversationID()
         let existingMetadata = conversations.first(where: { $0.id == conversationID })
         let existingConversation = readConversation(id: conversationID)
         let createdAt = existingMetadata?.createdAt ?? existingConversation?.createdAt ?? Date()
@@ -397,6 +457,7 @@ final class ConversationStore {
         if currentConversationID == nil {
             setCurrentConversation(id: conversationID)
         }
+        finishPendingConversation(id: conversationID)
         return conversationID
     }
 
@@ -490,29 +551,36 @@ final class ConversationStore {
         return ids.count
     }
 
-    func deleteAllConversations() {
+    @discardableResult
+    func deleteAllConversations() -> Bool {
         ioLock.lock()
         defer { ioLock.unlock() }
 
-        if fileManager.fileExists(atPath: rootDirectory.path) {
-            try? fileManager.removeItem(at: rootDirectory)
-        }
-
-        let removedAttachmentFiles = ConversationAttachmentStore.removeAll(
-            fileManager: fileManager,
-            baseDirectoryOverride: storageRootOverride
-        )
-
-        conversations = []
-        currentConversationID = nil
-        defaults.removeObject(forKey: Self.currentConversationDefaultsKey)
-
-        if removedAttachmentFiles > 0 {
-            AppDiagnostics.shared.record(
-                "Conversation attachments cleared",
-                category: "storage",
-                metadata: ["files": removedAttachmentFiles]
+        do {
+            let removedAttachmentFiles = try ConversationAttachmentStore.removeAll(
+                fileManager: fileManager,
+                baseDirectoryOverride: storageRootOverride
             )
+            if fileManager.fileExists(atPath: rootDirectory.path) {
+                try fileManager.removeItem(at: rootDirectory)
+            }
+
+            conversations = []
+            currentConversationID = nil
+            pendingNewConversationID = nil
+            defaults.removeObject(forKey: Self.currentConversationDefaultsKey)
+            defaults.removeObject(forKey: Self.pendingConversationDefaultsKey)
+            historyDeletionError = nil
+            AppDiagnostics.shared.record(
+                "Conversation history cleared",
+                category: "storage",
+                metadata: ["attachmentFiles": removedAttachmentFiles]
+            )
+            return true
+        } catch {
+            historyDeletionError = "Some history or attached images could not be removed. Try deleting again. "
+                + error.localizedDescription
+            return false
         }
     }
 
